@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
@@ -87,13 +88,15 @@ func createSession(s SessionConfig, windows []Window) {
 	}
 
 	firstWindow := windows[0]
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "-c", absRoot, "-n", firstWindow.Name)
+	// Create session WITH first window to ensure window 0 exists
+	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "-n", firstWindow.Name, "-c", absRoot)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		log.Fatalf("Failed to create session: %v\nOutput: %s", err, output)
 	}
 
-	// Create panes in first window
-	createPanes(sessionName, 0, firstWindow)
+	// Create panes in first window (window 1 in tmux numbering)
+	fmt.Printf("Creating window 1: %s\n", firstWindow.Name)
+	createPanes(sessionName, 1, firstWindow)
 
 	// Create additional windows
 	for i := 1; i < len(windows); i++ {
@@ -102,7 +105,9 @@ func createSession(s SessionConfig, windows []Window) {
 		if output, err := cmd.CombinedOutput(); err != nil {
 			log.Fatalf("Failed to create window '%s': %v\nOutput: %s", window.Name, err, output)
 		}
-		createPanes(sessionName, i, window)
+		tmuxIndex := i + 1 // tmux windows are numbered 1+
+		fmt.Printf("Creating window %d: %s\n", tmuxIndex, window.Name)
+		createPanes(sessionName, tmuxIndex, window)
 	}
 
 	// Attach to session
@@ -121,10 +126,17 @@ func createPanes(sessionName string, windowIndex int, window Window) {
 
 	windowID := fmt.Sprintf("%s:%d", sessionName, windowIndex)
 
+	// Wait for tmux to process window creation
+	time.Sleep(50 * time.Millisecond)
+
 	// First pane already exists, run its command
-	if len(window.Panes) > 0 && window.Panes[0].Command != "" {
+	if len(window.Panes) > 0 && window.Panes[0].Command != "" && window.Panes[0].Command != "" && !strings.HasPrefix(window.Panes[0].Command, "#") {
 		cmd := exec.Command("tmux", "send-keys", "-t", windowID, window.Panes[0].Command, "Enter")
-		cmd.Run()
+		if output, err := cmd.CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to run command '%s' in %s: %v\nOutput: %s\n", window.Panes[0].Command, windowID, err, output)
+		} else {
+			fmt.Printf("  Running: %s\n", window.Panes[0].Command)
+		}
 	}
 
 	// Create additional panes with splits
