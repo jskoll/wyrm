@@ -150,50 +150,53 @@ func createPanes(sessionName string, windowIndex int, window Window) {
 
 func createPanesFromSplits(sessionName string, windowIndex int, splits []Split) {
 	windowID := fmt.Sprintf("%s:%d", sessionName, windowIndex)
-	paneCounter := 0
-	processSplits(windowID, splits, &paneCounter)
+	paneIdx := 0
+
+	for _, split := range splits {
+		targetPane := windowID
+		if paneIdx > 0 {
+			targetPane = fmt.Sprintf("%s.%d", windowID, paneIdx)
+		}
+
+		processSplitTree(targetPane, split)
+		paneIdx++
+	}
 }
 
-func processSplits(windowID string, splits []Split, paneCounter *int) {
-	for i, split := range splits {
-		if i > 0 && split.Type != "" {
-			splitType := normalizeSplitType(split.Type)
-			tmuxArg := "-v"
-			if splitType == "h" {
-				tmuxArg = "-h"
-			}
-
-			var cmdArgs []string
-			cmdArgs = append(cmdArgs, "split-window", "-t", windowID, tmuxArg)
-			if split.Size > 0 {
-				cmdArgs = append(cmdArgs, "-p", fmt.Sprintf("%d", split.Size))
-			}
-
-			cmd := exec.Command("tmux", cmdArgs...)
-			if err := cmd.Run(); err != nil {
-				log.Printf("Warning: failed to split pane: %v", err)
-				continue
-			}
+func processSplitTree(targetID string, split Split) {
+	if split.Type != "" {
+		splitType := normalizeSplitType(split.Type)
+		tmuxArg := "-v"
+		if splitType == "h" {
+			tmuxArg = "-h"
 		}
 
-		if split.Command != "" && !strings.HasPrefix(split.Command, "#") {
-			paneID := windowID
-			if *paneCounter > 0 {
-				paneID = fmt.Sprintf("%s.%d", windowID, *paneCounter)
-			}
-
-			execCmd := exec.Command("tmux", "send-keys", "-t", paneID, split.Command, "Enter")
-			if output, err := execCmd.CombinedOutput(); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to run command '%s' in %s: %v\nOutput: %s\n", split.Command, paneID, err, output)
-			} else {
-				fmt.Printf("  Running: %s\n", split.Command)
-			}
+		var cmdArgs []string
+		cmdArgs = append(cmdArgs, "split-window", "-t", targetID, tmuxArg)
+		if split.Size > 0 {
+			cmdArgs = append(cmdArgs, "-p", fmt.Sprintf("%d", split.Size))
 		}
 
-		*paneCounter++
+		cmd := exec.Command("tmux", cmdArgs...)
+		if err := cmd.Run(); err != nil {
+			log.Printf("Warning: failed to split pane: %v", err)
+			return
+		}
+	}
 
-		if len(split.Children) > 0 {
-			processSplits(windowID, split.Children, paneCounter)
+	if split.Command != "" && !strings.HasPrefix(split.Command, "#") {
+		execCmd := exec.Command("tmux", "send-keys", "-t", targetID, split.Command, "Enter")
+		if output, err := execCmd.CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to run command '%s' in %s: %v\nOutput: %s\n", split.Command, targetID, err, output)
+		} else {
+			fmt.Printf("  Running: %s\n", split.Command)
+		}
+	}
+
+	if len(split.Children) > 0 {
+		for i, child := range split.Children {
+			childTarget := fmt.Sprintf("%s.%d", targetID, i)
+			processSplitTree(childTarget, child)
 		}
 	}
 }
