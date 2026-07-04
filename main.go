@@ -58,13 +58,23 @@ func validateConfigPath(path string) error {
 		return fmt.Errorf("invalid path: %s", path)
 	}
 	// Ensure the absolute path is under common safe directories
-	homeDir, _ := os.UserHomeDir()
-	if !strings.HasPrefix(absPath, homeDir) && !strings.HasPrefix(absPath, "/tmp") && !strings.HasPrefix(absPath, "/var/tmp") {
-		// Allow paths in current working directory or common project locations
-		cwd, _ := os.Getwd()
-		if !strings.HasPrefix(absPath, cwd) {
-			return fmt.Errorf("config path outside safe directories: %s", path)
-		}
+	isInSafeDir := false
+
+	// Check home directory
+	if homeDir, err := os.UserHomeDir(); err == nil && homeDir != "" && strings.HasPrefix(absPath, homeDir) {
+		isInSafeDir = true
+	}
+	// Check common temp directories
+	if strings.HasPrefix(absPath, "/tmp") || strings.HasPrefix(absPath, "/var/tmp") {
+		isInSafeDir = true
+	}
+	// Check current working directory
+	if cwd, err := os.Getwd(); err == nil && cwd != "" && strings.HasPrefix(absPath, cwd) {
+		isInSafeDir = true
+	}
+
+	if !isInSafeDir {
+		return fmt.Errorf("config path must be in home directory, /tmp, /var/tmp, or current working directory: %s", path)
 	}
 	return nil
 }
@@ -286,7 +296,7 @@ func createPanesFromList(sessionName string, windowIndex int, panes []Pane, layo
 	if panes[0].Command != "" && !strings.HasPrefix(panes[0].Command, "#") {
 		cmd := exec.Command("tmux", "send-keys", "-t", windowID, panes[0].Command, "Enter")
 		if output, err := cmd.CombinedOutput(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to run command '%s' in %s: %v\nOutput: %s\n", panes[0].Command, windowID, err, output)
+			fmt.Fprintf(os.Stderr, "Warning: failed to run command '%s' in pane 0: %v\nOutput: %s\n", panes[0].Command, err, output)
 		} else {
 			fmt.Printf("  Running: %s\n", panes[0].Command)
 		}
@@ -312,8 +322,10 @@ func createPanesFromList(sessionName string, windowIndex int, panes []Pane, layo
 		// Run command in newly created pane
 		if pane.Command != "" && !strings.HasPrefix(pane.Command, "#") {
 			cmd := exec.Command("tmux", "send-keys", "-t", windowID, pane.Command, "Enter")
-			if err := cmd.Run(); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to run command in pane %d: %v\n", i, err)
+			if output, err := cmd.CombinedOutput(); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to run command '%s' in pane %d: %v\nOutput: %s\n", pane.Command, i, err, output)
+			} else {
+				fmt.Printf("  Running: %s\n", pane.Command)
 			}
 		}
 	}
