@@ -3,70 +3,73 @@
 # Export current tmux session to .tmuxconfig (TOML format)
 # Usage: export-session.sh [output-file] [session-name]
 
-set -euo pipefail
-
 OUTPUT_FILE="${1:-.tmuxconfig}"
-SESSION="${2:=$(tmux display-message -p '#{session_name}')}"
+SESSION="${2:-$(tmux display-message -p '#{session_name}' 2>/dev/null)}"
+
+if [[ -z "$SESSION" ]]; then
+  echo "Error: No session name provided and could not determine current session" >&2
+  exit 1
+fi
 
 if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   echo "Error: Session '$SESSION' not found" >&2
   exit 1
 fi
 
-# Get session root (use current pane's directory as proxy for session root)
-SESSION_ROOT="$(tmux display-message -t "$SESSION" -p '#{pane_current_path}')"
+# Get session root (use first window's first pane's directory as proxy)
+SESSION_ROOT="$(tmux list-panes -t "$SESSION" -F "#{pane_current_path}" | head -1)"
 
-# Helper function to get pane command
-get_pane_command() {
-  local session=$1 window=$2 pane=$3
-  local pane_id="$session:$window.$pane"
+if [[ -z "$SESSION_ROOT" ]]; then
+  SESSION_ROOT="."
+fi
 
-  # Try to get the command from pane's process
-  # Fall back to shell prompt indicator
-  tmux send-keys -t "$pane_id" "echo '# pane content'" C-c 2>/dev/null || true
+# Temporary file for building TOML
+TMPFILE=$(mktemp)
+trap "rm -f '$TMPFILE'" EXIT
 
-  # For now, return empty — user will fill in commands they want
-  # (we can't reliably extract running commands without side effects)
-  echo ""
-}
-
-# Get window layout
-get_window_layout() {
-  local session=$1 window=$2
-  tmux list-windows -t "$session" -F "#{window_index} #{window_layout}" | grep "^$window " | cut -d' ' -f2-
-}
-
-# Build TOML
 {
   echo "[session]"
   echo "name = \"${SESSION}\""
   echo "root = \"${SESSION_ROOT}\""
   echo ""
 
-  # Iterate windows
-  WINDOW_COUNT=$(tmux list-windows -t "$SESSION" -F "#{window_index}" | wc -l)
-  for ((w = 0; w < WINDOW_COUNT; w++)); do
-    WINDOW_NAME=$(tmux list-windows -t "$SESSION" -F "#{window_index} #{window_name}" | awk -v w="$w" '$1==w {print $2}')
-    LAYOUT=$(get_window_layout "$SESSION" "$w")
+  # Get list of windows
+  while IFS= read -r window_line; do
+    [[ -z "$window_line" ]] && continue
+
+    WINDOW_INDEX=$(echo "$window_line" | cut -d' ' -f1)
+    WINDOW_NAME=$(echo "$window_line" | cut -d' ' -f2)
+    WINDOW_LAYOUT=$(echo "$window_line" | cut -d' ' -f3-)
 
     echo "[[windows]]"
     echo "name = \"${WINDOW_NAME}\""
-    if [[ -n "$LAYOUT" ]]; then
-      echo "layout = \"${LAYOUT}\""
+
+    if [[ -n "$WINDOW_LAYOUT" && "$WINDOW_LAYOUT" != "#{window_layout}" ]]; then
+      echo "layout = \"${WINDOW_LAYOUT}\""
     fi
     echo ""
 
-    # Get pane count for this window
-    PANE_COUNT=$(tmux list-panes -t "$SESSION:$w" -F "#{pane_index}" | wc -l)
-    for ((p = 0; p < PANE_COUNT; p++)); do
+    # Get panes in this window
+    while IFS= read -r pane_line; do
+      [[ -z "$pane_line" ]] && continue
       echo "[[windows.panes]]"
-      echo "command = \"# pane $p - fill in command\""
+      echo "command = \"# pane - add command\""
       echo ""
-    done
-  done
-} > "$OUTPUT_FILE"
+    done < <(tmux list-panes -t "$SESSION:$WINDOW_INDEX" -F "#{pane_index}" 2>/dev/null)
 
-echo "Exported session '$SESSION' to $OUTPUT_FILE"
+  done < <(tmux list-windows -t "$SESSION" -F "#{window_index} #{window_name} #{window_layout}" 2>/dev/null)
+
+} > "$TMPFILE"
+
+if [[ ! -s "$TMPFILE" ]]; then
+  echo "Error: Failed to generate config (empty output)" >&2
+  exit 1
+fi
+
+cp "$TMPFILE" "$OUTPUT_FILE"
+echo "✓ Exported session '$SESSION' to $OUTPUT_FILE"
 echo ""
-echo "Review and fill in command fields:"
-grep -n "# pane" "$OUTPUT_FILE" || true
+echo "Next steps:"
+echo "  1. Review the file: cat $OUTPUT_FILE"
+echo "  2. Fill in the 'command' fields for each pane"
+echo "  3. Test with: tmux-session -config $OUTPUT_FILE"
