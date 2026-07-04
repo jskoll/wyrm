@@ -19,15 +19,20 @@ type Config struct {
 }
 
 type SessionConfig struct {
-	Name string `toml:"name"`
-	Root string `toml:"root"`
+	Name           string `toml:"name"`
+	Root           string `toml:"root"`
+	OnProjectStart string `toml:"on_project_start"`
+	OnProjectExit  string `toml:"on_project_exit"`
+	StartupWindow  string `toml:"startup_window"`
+	StartupPane    int    `toml:"startup_pane"`
 }
 
 type Window struct {
-	Name   string `toml:"name"`
-	Layout string `toml:"layout"`
-	Splits []Split `toml:"splits"`
-	Panes  []Pane `toml:"panes"`
+	Name      string `toml:"name"`
+	Layout    string `toml:"layout"`
+	Splits    []Split `toml:"splits"`
+	Panes     []Pane `toml:"panes"`
+	PreWindow string `toml:"pre_window"`
 }
 
 type Split struct {
@@ -66,7 +71,7 @@ func main() {
 	}
 
 	if *kill {
-		killSession(config.Session.Name)
+		killSession(config.Session.Name, config)
 		return
 	}
 
@@ -84,6 +89,16 @@ func createSession(s SessionConfig, windows []Window) {
 	sessionName := s.Name
 	if sessionName == "" {
 		sessionName = filepath.Base(absRoot)
+	}
+
+	// Run on_project_start hook before creating session
+	if s.OnProjectStart != "" {
+		fmt.Println("Running on_project_start hook...")
+		cmd := exec.Command("bash", "-c", s.OnProjectStart)
+		cmd.Dir = absRoot
+		if output, err := cmd.CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: on_project_start failed: %v\nOutput: %s\n", err, output)
+		}
 	}
 
 	// Kill existing session if it exists (wait a moment to ensure cleanup)
@@ -118,6 +133,11 @@ func createSession(s SessionConfig, windows []Window) {
 		createPanes(sessionName, tmuxIndex, window)
 	}
 
+	// Select startup window if specified
+	if s.StartupWindow != "" {
+		selectStartupWindow(sessionName, s.StartupWindow, s.StartupPane)
+	}
+
 	// Attach to session
 	fmt.Printf("Created session: %s\n", sessionName)
 	attachCmd := exec.Command("tmux", "attach-session", "-t", sessionName)
@@ -140,6 +160,18 @@ func normalizeSplitType(t string) string {
 
 func createPanes(sessionName string, windowIndex int, window Window) {
 	time.Sleep(50 * time.Millisecond)
+
+	// Run pre_window command if specified
+	if window.PreWindow != "" {
+		windowID := fmt.Sprintf("%s:%d", sessionName, windowIndex)
+		cmd := exec.Command("tmux", "send-keys", "-t", windowID, window.PreWindow, "Enter")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: pre_window command failed: %v\nOutput: %s\n", err, output)
+		} else {
+			fmt.Printf("  Pre-window: %s\n", window.PreWindow)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 
 	if len(window.Splits) > 0 {
 		createPanesFromSplits(sessionName, windowIndex, window.Splits)
@@ -248,10 +280,38 @@ func createPanesFromList(sessionName string, windowIndex int, panes []Pane, layo
 	}
 }
 
-func killSession(name string) {
-	cmd := exec.Command("tmux", "kill-session", "-t", name)
+func selectStartupWindow(sessionName string, startupWindow string, startupPane int) {
+	// Try to select by window name first
+	selectCmd := exec.Command("tmux", "select-window", "-t", sessionName+":"+startupWindow)
+	if err := selectCmd.Run(); err != nil {
+		// If that fails, try as a number
+		selectCmd = exec.Command("tmux", "select-window", "-t", sessionName+":"+startupWindow)
+		selectCmd.Run()
+	}
+
+	// Select pane within the window if specified
+	if startupPane > 0 {
+		paneCmd := exec.Command("tmux", "select-pane", "-t", sessionName+":"+startupWindow+"."+fmt.Sprintf("%d", startupPane))
+		paneCmd.Run()
+	}
+}
+
+func killSession(sessionName string, config Config) {
+	// Run on_project_exit hook before killing session
+	if config.Session.OnProjectExit != "" {
+		fmt.Println("Running on_project_exit hook...")
+		root := os.ExpandEnv(config.Session.Root)
+		absRoot, _ := filepath.Abs(root)
+		cmd := exec.Command("bash", "-c", config.Session.OnProjectExit)
+		cmd.Dir = absRoot
+		if output, err := cmd.CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: on_project_exit failed: %v\nOutput: %s\n", err, output)
+		}
+	}
+
+	cmd := exec.Command("tmux", "kill-session", "-t", sessionName)
 	if err := cmd.Run(); err != nil {
 		log.Fatalf("Failed to kill session: %v", err)
 	}
-	fmt.Printf("Killed session: %s\n", name)
+	fmt.Printf("Killed session: %s\n", sessionName)
 }

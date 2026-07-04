@@ -1,12 +1,22 @@
 # Example .tmuxconfig with nested splits layout
+# Demonstrates pre_window (interpreter setup), hooks, and startup window
 # Place this in your project root and run: tmux-session -config example-splits.tmuxconfig
 
 [session]
 name = "myproject"
 root = "."
+# Run setup before session creation (pull code, install deps, etc)
+on_project_start = "git pull && npm install"
+# Run cleanup when session is killed
+on_project_exit = "npm run cleanup"
+# Focus the "editor" window when session starts
+startup_window = "editor"
+startup_pane = 0
 
 [[windows]]
 name = "editor"
+# Run nvm setup in all panes before their commands (useful with Node, Python, Ruby, etc)
+pre_window = "nvm use 18"
 
   [[windows.splits]]
   type = "h"
@@ -24,6 +34,7 @@ name = "editor"
 
 [[windows]]
 name = "server"
+pre_window = "nvm use 18"
 
   [[windows.splits]]
   type = "h"

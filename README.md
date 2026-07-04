@@ -34,11 +34,16 @@ tmux-session -kill -config .tmuxconfig
 
 ```toml
 [session]
-name = "myproject"      # session name (defaults to directory name)
-root = "."              # working directory (expanded via $HOME, etc.)
+name = "myproject"               # session name (defaults to directory name)
+root = "."                       # working directory (expanded via $HOME, etc.)
+on_project_start = "git pull"    # optional: runs before session creation
+on_project_exit = "npm run cleanup"  # optional: runs when session is killed
+startup_window = "editor"        # optional: focus this window on startup (name or index)
+startup_pane = 0                 # optional: focus this pane within startup_window (0-indexed)
 
 [[windows]]
 name = "editor"
+pre_window = "nvm use 16"        # optional: runs before any pane commands
 ```
 
 ### Nested Splits (Recommended)
@@ -81,6 +86,46 @@ command = "# logs"
 ```
 
 Common layouts: `even-horizontal`, `even-vertical`, `main-horizontal`, `main-vertical`, `tiled`
+
+### Hooks & Lifecycle
+
+Define actions that run at session lifecycle events:
+
+```toml
+[session]
+name = "myproject"
+on_project_start = "git pull && npm install"  # runs before session created
+on_project_exit = "npm run cleanup"            # runs when session killed with -kill flag
+```
+
+### pre_window Command
+
+Run a setup command in all panes before their individual commands. Useful for interpreter setup (nvm, rbenv, docker-compose):
+
+```toml
+[[windows]]
+name = "backend"
+pre_window = "nvm use 18"  # runs in each pane before pane-specific commands
+
+  [[windows.splits]]
+  type = "h"
+  command = "npm start"    # this runs AFTER pre_window
+
+    [[windows.splits.children]]
+    type = "v"
+    command = "npm test"   # this also runs AFTER pre_window
+```
+
+### Startup Window & Pane
+
+Specify which window and pane should be active when the session starts:
+
+```toml
+[session]
+name = "myproject"
+startup_window = "editor"  # can be window name or 1-based index
+startup_pane = 0           # 0-indexed pane number within that window
+```
 
 ## Examples
 

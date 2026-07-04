@@ -4,10 +4,17 @@
 [session]
 name = "myproject"
 root = "."
+# Hooks: run commands before session creation and after session kill
+on_project_start = "echo 'Setting up project...'"
+on_project_exit = "echo 'Cleaning up...'"
+# Which window to focus when session starts
+startup_window = "editor"
 
 [[windows]]
 name = "editor"
 layout = "even-horizontal"
+# Run this setup command in all panes before their commands (useful for nvm use, rbenv shell, etc)
+pre_window = "echo 'Editor pane ready'"
 
 [[windows.panes]]
 command = "nvim"
@@ -18,6 +25,7 @@ command = "# sidebar terminal"
 [[windows]]
 name = "tests"
 layout = "tiled"
+pre_window = "npm run test:setup"
 
 [[windows.panes]]
 command = "npm test -- --watch"
