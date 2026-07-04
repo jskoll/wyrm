@@ -107,7 +107,11 @@ func createSession(s SessionConfig, windows []Window) {
 
 	// Attach to session
 	fmt.Printf("Created session: %s\n", sessionName)
-	fmt.Printf("Attach with: tmux attach-session -t %s\n", sessionName)
+	attachCmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+	attachCmd.Stdin = os.Stdin
+	attachCmd.Stdout = os.Stdout
+	attachCmd.Stderr = os.Stderr
+	attachCmd.Run()
 }
 
 func createPanes(sessionName string, windowIndex int, window Window) {
