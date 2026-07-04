@@ -1,0 +1,30 @@
+# Python project layout
+[session]
+name = "python"
+root = "."
+
+[[windows]]
+name = "editor"
+layout = "main-vertical"
+
+[[windows.panes]]
+command = "nvim"
+
+[[windows.panes]]
+command = "# venv: source venv/bin/activate"
+
+[[windows]]
+name = "test"
+layout = "tiled"
+
+[[windows.panes]]
+command = "pytest -v --tb=short"
+
+[[windows.panes]]
+command = "# coverage or lint"
+
+[[windows]]
+name = "repl"
+
+[[windows.panes]]
+command = "python"

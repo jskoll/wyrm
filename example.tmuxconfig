@@ -1,0 +1,36 @@
+# Example .tmuxconfig file for tmux-session
+# Place this in your project root and run: tmux-session -config .tmuxconfig
+
+[session]
+name = "myproject"
+root = "."
+
+[[windows]]
+name = "editor"
+layout = "even-horizontal"
+
+[[windows.panes]]
+command = "nvim"
+
+[[windows.panes]]
+command = "# sidebar terminal"
+
+[[windows]]
+name = "tests"
+layout = "tiled"
+
+[[windows.panes]]
+command = "npm test -- --watch"
+
+[[windows.panes]]
+command = "# test logs"
+
+[[windows]]
+name = "server"
+layout = "main-horizontal"
+
+[[windows.panes]]
+command = "npm run dev"
+
+[[windows.panes]]
+command = "# monitoring"

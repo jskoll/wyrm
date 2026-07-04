@@ -1,0 +1,30 @@
+# Node.js project layout
+[session]
+name = "node"
+root = "."
+
+[[windows]]
+name = "dev"
+layout = "main-vertical"
+
+[[windows.panes]]
+command = "nvim"
+
+[[windows.panes]]
+command = "# watch: npm run build -- --watch"
+
+[[windows]]
+name = "server"
+
+[[windows.panes]]
+command = "npm run dev"
+
+[[windows]]
+name = "tests"
+layout = "even-horizontal"
+
+[[windows.panes]]
+command = "npm test -- --watch"
+
+[[windows.panes]]
+command = "# lint check"

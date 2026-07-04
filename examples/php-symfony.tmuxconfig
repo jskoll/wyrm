@@ -1,0 +1,30 @@
+# PHP/Symfony project layout
+[session]
+name = "symfony"
+root = "."
+
+[[windows]]
+name = "editor"
+layout = "main-vertical"
+
+[[windows.panes]]
+command = "nvim"
+
+[[windows.panes]]
+command = "# logs: tail -f var/log/dev.log"
+
+[[windows]]
+name = "server"
+layout = "even-horizontal"
+
+[[windows.panes]]
+command = "symfony serve"
+
+[[windows.panes]]
+command = "# test runner"
+
+[[windows]]
+name = "db"
+
+[[windows.panes]]
+command = "# docker-compose up -d postgres"
