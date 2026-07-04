@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,7 +25,7 @@ type SessionConfig struct {
 	OnProjectStart string `toml:"on_project_start"`
 	OnProjectExit  string `toml:"on_project_exit"`
 	StartupWindow  string `toml:"startup_window"`
-	StartupPane    int    `toml:"startup_pane"`
+	StartupPane    *int   `toml:"startup_pane"` // Pointer allows nil (unset) vs 0 (select pane 0)
 }
 
 type Window struct {
@@ -46,18 +47,47 @@ type Pane struct {
 	Command string `toml:"command"`
 }
 
+func validateConfigPath(path string) error {
+	// Prevent path traversal
+	cleanPath := filepath.Clean(path)
+	if strings.Contains(cleanPath, "..") {
+		return fmt.Errorf("path traversal detected: %s", path)
+	}
+	return nil
+}
+
+func runTmuxCommand(args ...string) (string, error) {
+	cmd := exec.Command("tmux", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(output), fmt.Errorf("tmux command failed: %v", err)
+	}
+	return string(output), nil
+}
+
+func runShellHook(hook string, workDir string) error {
+	if hook == "" {
+		return nil
+	}
+	cmd := exec.Command("bash", "-c", hook)
+	cmd.Dir = workDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("hook failed: %v\nOutput: %s", err, output)
+	}
+	return nil
+}
+
 func main() {
 	configFile := flag.String("config", "", "Path to .tmuxconfig file")
 	kill := flag.Bool("kill", false, "Kill the session instead of creating it")
 	flag.Parse()
 
 	if *configFile == "" {
-		// Look for .tmuxconfig in current directory
-		if _, err := os.Stat(".tmuxconfig"); err == nil {
-			*configFile = ".tmuxconfig"
-		} else {
-			log.Fatal("No config file specified and .tmuxconfig not found in current directory")
-		}
+		log.Fatal("Error: -config flag is required (implicit .tmuxconfig discovery disabled for security)")
+	}
+
+	if err := validateConfigPath(*configFile); err != nil {
+		log.Fatalf("Invalid config path: %v", err)
 	}
 
 	data, err := os.ReadFile(*configFile)
@@ -68,6 +98,14 @@ func main() {
 	var config Config
 	if err := toml.Unmarshal(data, &config); err != nil {
 		log.Fatalf("Failed to parse config: %v", err)
+	}
+
+	// Validate critical config fields
+	if config.Session.Name == "" && config.Session.Root == "" {
+		log.Fatal("Config must specify either session.name or session.root")
+	}
+	if err := validateConfigPath(config.Session.Root); err != nil {
+		log.Fatalf("Invalid root path in config: %v", err)
 	}
 
 	if *kill {
@@ -92,18 +130,13 @@ func createSession(s SessionConfig, windows []Window) {
 	}
 
 	// Run on_project_start hook before creating session
-	if s.OnProjectStart != "" {
-		fmt.Println("Running on_project_start hook...")
-		cmd := exec.Command("bash", "-c", s.OnProjectStart)
-		cmd.Dir = absRoot
-		if output, err := cmd.CombinedOutput(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: on_project_start failed: %v\nOutput: %s\n", err, output)
-		}
+	if err := runShellHook(s.OnProjectStart, absRoot); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: on_project_start failed: %v\n", err)
 	}
 
 	// Kill existing session if it exists (wait a moment to ensure cleanup)
 	exec.Command("tmux", "kill-session", "-t", sessionName).Run()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	// Create new session with first window
 	if len(windows) == 0 {
@@ -144,7 +177,9 @@ func createSession(s SessionConfig, windows []Window) {
 	attachCmd.Stdin = os.Stdin
 	attachCmd.Stdout = os.Stdout
 	attachCmd.Stderr = os.Stderr
-	attachCmd.Run()
+	if err := attachCmd.Run(); err != nil {
+		log.Fatalf("Failed to attach to session: %v", err)
+	}
 }
 
 func normalizeSplitType(t string) string {
@@ -159,6 +194,7 @@ func normalizeSplitType(t string) string {
 }
 
 func createPanes(sessionName string, windowIndex int, window Window) {
+	// Allow tmux time to initialize window before sending commands
 	time.Sleep(50 * time.Millisecond)
 
 	// Run pre_window command if specified
@@ -170,6 +206,7 @@ func createPanes(sessionName string, windowIndex int, window Window) {
 		} else {
 			fmt.Printf("  Pre-window: %s\n", window.PreWindow)
 		}
+		// Allow time for pre_window command to complete before creating panes
 		time.Sleep(50 * time.Millisecond)
 	}
 
@@ -203,7 +240,7 @@ func processSplitTree(targetID string, split Split) {
 			tmuxArg = "-h"
 		}
 
-		var cmdArgs []string
+		cmdArgs := make([]string, 0, 6)
 		cmdArgs = append(cmdArgs, "split-window", "-t", targetID, tmuxArg)
 		if split.Size > 0 {
 			cmdArgs = append(cmdArgs, "-p", fmt.Sprintf("%d", split.Size))
@@ -225,6 +262,7 @@ func processSplitTree(targetID string, split Split) {
 		}
 	}
 
+	// Process children in order; tmux assigns pane numbers sequentially after each split
 	if len(split.Children) > 0 {
 		for i, child := range split.Children {
 			childTarget := fmt.Sprintf("%s.%d", targetID, i)
@@ -240,7 +278,8 @@ func createPanesFromList(sessionName string, windowIndex int, panes []Pane, layo
 
 	windowID := fmt.Sprintf("%s:%d", sessionName, windowIndex)
 
-	if len(panes) > 0 && panes[0].Command != "" && !strings.HasPrefix(panes[0].Command, "#") {
+	// Run command in first pane
+	if panes[0].Command != "" && !strings.HasPrefix(panes[0].Command, "#") {
 		cmd := exec.Command("tmux", "send-keys", "-t", windowID, panes[0].Command, "Enter")
 		if output, err := cmd.CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to run command '%s' in %s: %v\nOutput: %s\n", panes[0].Command, windowID, err, output)
@@ -249,6 +288,7 @@ func createPanesFromList(sessionName string, windowIndex int, panes []Pane, layo
 		}
 	}
 
+	// Create additional panes and run their commands
 	for i := 1; i < len(panes); i++ {
 		pane := panes[i]
 
@@ -265,48 +305,62 @@ func createPanesFromList(sessionName string, windowIndex int, panes []Pane, layo
 			continue
 		}
 
-		if pane.Command != "" {
+		// Run command in newly created pane
+		if pane.Command != "" && !strings.HasPrefix(pane.Command, "#") {
 			cmd := exec.Command("tmux", "send-keys", "-t", windowID, pane.Command, "Enter")
-			cmd.Run()
+			if err := cmd.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to run command in pane %d: %v\n", i, err)
+			}
 		}
 	}
 
+	// Apply layout
 	if layout != "" {
 		cmd := exec.Command("tmux", "select-layout", "-t", windowID, layout)
-		cmd.Run()
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to apply layout '%s': %v\n", layout, err)
+		}
 	} else if len(panes) > 1 {
 		cmd := exec.Command("tmux", "select-layout", "-t", windowID, "tiled")
 		cmd.Run()
 	}
 }
 
-func selectStartupWindow(sessionName string, startupWindow string, startupPane int) {
+func selectStartupWindow(sessionName string, startupWindow string, startupPane *int) {
+	// Validate startup_window value
+	if !regexp.MustCompile(`^[a-zA-Z0-9_:-]+$`).MatchString(startupWindow) {
+		fmt.Fprintf(os.Stderr, "Warning: invalid startup_window value: %s\n", startupWindow)
+		return
+	}
+
 	// Try to select by window name first
 	selectCmd := exec.Command("tmux", "select-window", "-t", sessionName+":"+startupWindow)
 	if err := selectCmd.Run(); err != nil {
-		// If that fails, try as a number
-		selectCmd = exec.Command("tmux", "select-window", "-t", sessionName+":"+startupWindow)
-		selectCmd.Run()
+		fmt.Fprintf(os.Stderr, "Warning: failed to select window '%s': %v\n", startupWindow, err)
+		return
 	}
 
-	// Select pane within the window if specified
-	if startupPane > 0 {
-		paneCmd := exec.Command("tmux", "select-pane", "-t", sessionName+":"+startupWindow+"."+fmt.Sprintf("%d", startupPane))
-		paneCmd.Run()
+	// Select pane within the window if specified (startupPane != nil)
+	if startupPane != nil {
+		paneTarget := fmt.Sprintf("%s:%s.%d", sessionName, startupWindow, *startupPane)
+		paneCmd := exec.Command("tmux", "select-pane", "-t", paneTarget)
+		if err := paneCmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to select pane %d in window '%s': %v\n", *startupPane, startupWindow, err)
+		}
 	}
 }
 
 func killSession(sessionName string, config Config) {
 	// Run on_project_exit hook before killing session
-	if config.Session.OnProjectExit != "" {
-		fmt.Println("Running on_project_exit hook...")
-		root := os.ExpandEnv(config.Session.Root)
-		absRoot, _ := filepath.Abs(root)
-		cmd := exec.Command("bash", "-c", config.Session.OnProjectExit)
-		cmd.Dir = absRoot
-		if output, err := cmd.CombinedOutput(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: on_project_exit failed: %v\nOutput: %s\n", err, output)
-		}
+	root := os.ExpandEnv(config.Session.Root)
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to resolve root path: %v\n", err)
+		absRoot = root // fall back to unexpanded path
+	}
+
+	if err := runShellHook(config.Session.OnProjectExit, absRoot); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: on_project_exit failed: %v\n", err)
 	}
 
 	cmd := exec.Command("tmux", "kill-session", "-t", sessionName)
