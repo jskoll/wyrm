@@ -26,59 +26,51 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
 fi
 
 # Get session root (use first window's first pane's directory as proxy)
-SESSION_ROOT="$(tmux list-panes -t "$SESSION" -F "#{pane_current_path}" | head -1)"
+SESSION_ROOT="$(tmux list-panes -t "$SESSION" -F "#{pane_current_path}" 2>/dev/null | head -1)"
 
 if [[ -z "$SESSION_ROOT" ]]; then
   SESSION_ROOT="."
 fi
 
-# Temporary file for building TOML
-TMPFILE=$(mktemp)
-trap "rm -f '$TMPFILE'" EXIT
-
+# Build TOML directly (avoid subshell issues)
 {
   echo "[session]"
   echo "name = \"${SESSION}\""
   echo "root = \"${SESSION_ROOT}\""
   echo ""
 
-  # Get list of windows
-  while IFS= read -r window_line; do
-    [[ -z "$window_line" ]] && continue
-
-    WINDOW_INDEX=$(echo "$window_line" | cut -d' ' -f1)
-    WINDOW_NAME=$(echo "$window_line" | cut -d' ' -f2)
-    WINDOW_LAYOUT=$(echo "$window_line" | cut -d' ' -f3-)
+  # Get windows
+  tmux list-windows -t "$SESSION" -F "#{window_index}|#{window_name}|#{window_layout}" 2>/dev/null | while IFS='|' read -r w_idx w_name w_layout; do
+    [[ -z "$w_idx" ]] && continue
 
     echo "[[windows]]"
-    echo "name = \"${WINDOW_NAME}\""
+    echo "name = \"${w_name}\""
 
-    if [[ -n "$WINDOW_LAYOUT" && "$WINDOW_LAYOUT" != "#{window_layout}" ]]; then
-      echo "layout = \"${WINDOW_LAYOUT}\""
+    # Only include layout if it looks valid (not the format string)
+    if [[ -n "$w_layout" && "$w_layout" != "#{window_layout}" ]]; then
+      echo "layout = \"${w_layout}\""
     fi
     echo ""
 
     # Get panes in this window
-    while IFS= read -r pane_line; do
-      [[ -z "$pane_line" ]] && continue
+    tmux list-panes -t "$SESSION:$w_idx" -F "#{pane_index}" 2>/dev/null | while IFS= read -r p_idx; do
+      [[ -z "$p_idx" ]] && continue
       echo "[[windows.panes]]"
-      echo "command = \"# pane - add command\""
+      echo "command = \"# pane - fill in command\""
       echo ""
-    done < <(tmux list-panes -t "$SESSION:$WINDOW_INDEX" -F "#{pane_index}" 2>/dev/null)
+    done
+  done
 
-  done < <(tmux list-windows -t "$SESSION" -F "#{window_index} #{window_name} #{window_layout}" 2>/dev/null)
+} > "$OUTPUT_FILE"
 
-} > "$TMPFILE"
-
-if [[ ! -s "$TMPFILE" ]]; then
+if [[ ! -s "$OUTPUT_FILE" ]]; then
   echo "Error: Failed to generate config (empty output)" >&2
+  rm -f "$OUTPUT_FILE"
   exit 1
 fi
 
-if cp "$TMPFILE" "$OUTPUT_FILE" 2>/dev/null; then
-  echo "✓ Exported session '$SESSION' to $(basename "$OUTPUT_FILE")"
-  echo "  Full path: $OUTPUT_FILE"
-else
-  echo "Error: Failed to write to $OUTPUT_FILE" >&2
-  exit 1
-fi
+echo "✓ Exported session '$SESSION' to .tmuxconfig"
+echo "  Full path: $OUTPUT_FILE"
+echo ""
+echo "Next: Edit the file and fill in command fields"
+echo "  cat $OUTPUT_FILE"
