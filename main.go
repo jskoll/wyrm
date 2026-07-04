@@ -48,21 +48,25 @@ type Pane struct {
 }
 
 func validateConfigPath(path string) error {
-	// Prevent path traversal
-	cleanPath := filepath.Clean(path)
-	if strings.Contains(cleanPath, "..") {
+	// Prevent path traversal by checking before and after cleaning
+	if strings.Contains(path, "..") {
 		return fmt.Errorf("path traversal detected: %s", path)
 	}
-	return nil
-}
-
-func runTmuxCommand(args ...string) (string, error) {
-	cmd := exec.Command("tmux", args...)
-	output, err := cmd.CombinedOutput()
+	// Also check if absolute path goes outside expected boundaries
+	absPath, err := filepath.Abs(path)
 	if err != nil {
-		return string(output), fmt.Errorf("tmux command failed: %v", err)
+		return fmt.Errorf("invalid path: %s", path)
 	}
-	return string(output), nil
+	// Ensure the absolute path is under common safe directories
+	homeDir, _ := os.UserHomeDir()
+	if !strings.HasPrefix(absPath, homeDir) && !strings.HasPrefix(absPath, "/tmp") && !strings.HasPrefix(absPath, "/var/tmp") {
+		// Allow paths in current working directory or common project locations
+		cwd, _ := os.Getwd()
+		if !strings.HasPrefix(absPath, cwd) {
+			return fmt.Errorf("config path outside safe directories: %s", path)
+		}
+	}
+	return nil
 }
 
 func runShellHook(hook string, workDir string) error {
@@ -322,7 +326,9 @@ func createPanesFromList(sessionName string, windowIndex int, panes []Pane, layo
 		}
 	} else if len(panes) > 1 {
 		cmd := exec.Command("tmux", "select-layout", "-t", windowID, "tiled")
-		cmd.Run()
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to apply tiled layout: %v\n", err)
+		}
 	}
 }
 
