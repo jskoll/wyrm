@@ -7,18 +7,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
 
 type Config struct {
-	Session SessionConfig `toml:"session"`
+	Session SessionConfig   `toml:"session"`
+	Windows []Window        `toml:"windows"`
 }
 
 type SessionConfig struct {
-	Name    string    `toml:"name"`
-	Root    string    `toml:"root"`
-	Windows []Window  `toml:"windows"`
+	Name string `toml:"name"`
+	Root string `toml:"root"`
 }
 
 type Window struct {
@@ -60,10 +61,10 @@ func main() {
 		return
 	}
 
-	createSession(config.Session)
+	createSession(config.Session, config.Windows)
 }
 
-func createSession(s SessionConfig) {
+func createSession(s SessionConfig, windows []Window) {
 	// Expand root path
 	root := os.ExpandEnv(s.Root)
 	absRoot, err := filepath.Abs(root)
@@ -76,29 +77,30 @@ func createSession(s SessionConfig) {
 		sessionName = filepath.Base(absRoot)
 	}
 
-	// Kill existing session if it exists
+	// Kill existing session if it exists (wait a moment to ensure cleanup)
 	exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	time.Sleep(100 * time.Millisecond)
 
 	// Create new session with first window
-	if len(s.Windows) == 0 {
+	if len(windows) == 0 {
 		log.Fatal("No windows defined in config")
 	}
 
-	firstWindow := s.Windows[0]
+	firstWindow := windows[0]
 	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "-c", absRoot, "-n", firstWindow.Name)
-	if err := cmd.Run(); err != nil {
-		log.Fatalf("Failed to create session: %v", err)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		log.Fatalf("Failed to create session: %v\nOutput: %s", err, output)
 	}
 
 	// Create panes in first window
 	createPanes(sessionName, 0, firstWindow)
 
 	// Create additional windows
-	for i := 1; i < len(s.Windows); i++ {
-		window := s.Windows[i]
+	for i := 1; i < len(windows); i++ {
+		window := windows[i]
 		cmd := exec.Command("tmux", "new-window", "-t", sessionName, "-n", window.Name, "-c", absRoot)
-		if err := cmd.Run(); err != nil {
-			log.Fatalf("Failed to create window: %v", err)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			log.Fatalf("Failed to create window '%s': %v\nOutput: %s", window.Name, err, output)
 		}
 		createPanes(sessionName, i, window)
 	}
