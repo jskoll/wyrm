@@ -26,7 +26,15 @@ type SessionConfig struct {
 type Window struct {
 	Name   string `toml:"name"`
 	Layout string `toml:"layout"`
+	Splits []Split `toml:"splits"`
 	Panes  []Pane `toml:"panes"`
+}
+
+type Split struct {
+	Type     string  `toml:"type"`
+	Size     int     `toml:"size"`
+	Command  string  `toml:"command"`
+	Children []Split `toml:"children"`
 }
 
 type Pane struct {
@@ -119,36 +127,101 @@ func createSession(s SessionConfig, windows []Window) {
 	attachCmd.Run()
 }
 
+func normalizeSplitType(t string) string {
+	switch strings.ToLower(t) {
+	case "h", "horizontal":
+		return "h"
+	case "v", "vertical":
+		return "v"
+	default:
+		return "v"
+	}
+}
+
 func createPanes(sessionName string, windowIndex int, window Window) {
-	if len(window.Panes) == 0 {
+	time.Sleep(50 * time.Millisecond)
+
+	if len(window.Splits) > 0 {
+		createPanesFromSplits(sessionName, windowIndex, window.Splits)
+	} else if len(window.Panes) > 0 {
+		createPanesFromList(sessionName, windowIndex, window.Panes, window.Layout)
+	}
+}
+
+func createPanesFromSplits(sessionName string, windowIndex int, splits []Split) {
+	windowID := fmt.Sprintf("%s:%d", sessionName, windowIndex)
+	paneCounter := 0
+	processSplits(windowID, splits, &paneCounter)
+}
+
+func processSplits(windowID string, splits []Split, paneCounter *int) {
+	for i, split := range splits {
+		if i > 0 && split.Type != "" {
+			splitType := normalizeSplitType(split.Type)
+			tmuxArg := "-v"
+			if splitType == "h" {
+				tmuxArg = "-h"
+			}
+
+			var cmdArgs []string
+			cmdArgs = append(cmdArgs, "split-window", "-t", windowID, tmuxArg)
+			if split.Size > 0 {
+				cmdArgs = append(cmdArgs, "-p", fmt.Sprintf("%d", split.Size))
+			}
+
+			cmd := exec.Command("tmux", cmdArgs...)
+			if err := cmd.Run(); err != nil {
+				log.Printf("Warning: failed to split pane: %v", err)
+				continue
+			}
+		}
+
+		if split.Command != "" && !strings.HasPrefix(split.Command, "#") {
+			paneID := windowID
+			if *paneCounter > 0 {
+				paneID = fmt.Sprintf("%s.%d", windowID, *paneCounter)
+			}
+
+			execCmd := exec.Command("tmux", "send-keys", "-t", paneID, split.Command, "Enter")
+			if output, err := execCmd.CombinedOutput(); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to run command '%s' in %s: %v\nOutput: %s\n", split.Command, paneID, err, output)
+			} else {
+				fmt.Printf("  Running: %s\n", split.Command)
+			}
+		}
+
+		*paneCounter++
+
+		if len(split.Children) > 0 {
+			processSplits(windowID, split.Children, paneCounter)
+		}
+	}
+}
+
+func createPanesFromList(sessionName string, windowIndex int, panes []Pane, layout string) {
+	if len(panes) == 0 {
 		return
 	}
 
 	windowID := fmt.Sprintf("%s:%d", sessionName, windowIndex)
 
-	// Wait for tmux to process window creation
-	time.Sleep(50 * time.Millisecond)
-
-	// First pane already exists, run its command
-	if len(window.Panes) > 0 && window.Panes[0].Command != "" && window.Panes[0].Command != "" && !strings.HasPrefix(window.Panes[0].Command, "#") {
-		cmd := exec.Command("tmux", "send-keys", "-t", windowID, window.Panes[0].Command, "Enter")
+	if len(panes) > 0 && panes[0].Command != "" && !strings.HasPrefix(panes[0].Command, "#") {
+		cmd := exec.Command("tmux", "send-keys", "-t", windowID, panes[0].Command, "Enter")
 		if output, err := cmd.CombinedOutput(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to run command '%s' in %s: %v\nOutput: %s\n", window.Panes[0].Command, windowID, err, output)
+			fmt.Fprintf(os.Stderr, "Warning: failed to run command '%s' in %s: %v\nOutput: %s\n", panes[0].Command, windowID, err, output)
 		} else {
-			fmt.Printf("  Running: %s\n", window.Panes[0].Command)
+			fmt.Printf("  Running: %s\n", panes[0].Command)
 		}
 	}
 
-	// Create additional panes with splits
-	for i := 1; i < len(window.Panes); i++ {
-		pane := window.Panes[i]
+	for i := 1; i < len(panes); i++ {
+		pane := panes[i]
 
-		// Split window (alternate between vertical/horizontal)
 		var splitType string
 		if i%2 == 1 {
-			splitType = "-h" // horizontal split
+			splitType = "-h"
 		} else {
-			splitType = "-v" // vertical split
+			splitType = "-v"
 		}
 
 		cmd := exec.Command("tmux", "split-window", "-t", windowID, splitType)
@@ -157,19 +230,16 @@ func createPanes(sessionName string, windowIndex int, window Window) {
 			continue
 		}
 
-		// Run command in new pane
 		if pane.Command != "" {
 			cmd := exec.Command("tmux", "send-keys", "-t", windowID, pane.Command, "Enter")
 			cmd.Run()
 		}
 	}
 
-	// Apply layout if specified
-	if window.Layout != "" {
-		cmd := exec.Command("tmux", "select-layout", "-t", windowID, window.Layout)
+	if layout != "" {
+		cmd := exec.Command("tmux", "select-layout", "-t", windowID, layout)
 		cmd.Run()
-	} else if len(window.Panes) > 1 {
-		// Default to tiled layout for multiple panes
+	} else if len(panes) > 1 {
 		cmd := exec.Command("tmux", "select-layout", "-t", windowID, "tiled")
 		cmd.Run()
 	}

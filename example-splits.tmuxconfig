@@ -1,0 +1,47 @@
+# Example .tmuxconfig with nested splits layout
+# Place this in your project root and run: tmux-session -config example-splits.tmuxconfig
+
+[session]
+name = "myproject"
+root = "."
+
+[[windows]]
+name = "editor"
+
+  [[windows.splits]]
+  type = "h"
+  size = 70
+  command = "nvim"
+
+    [[windows.splits.children]]
+    type = "v"
+    size = 50
+    command = "npm test -- --watch"
+
+    [[windows.splits.children]]
+    type = "v"
+    command = "# logs"
+
+[[windows]]
+name = "server"
+
+  [[windows.splits]]
+  type = "h"
+  size = 60
+  command = "npm run dev"
+
+    [[windows.splits.children]]
+    type = "v"
+    command = "# monitoring"
+
+[[windows]]
+name = "git"
+
+  [[windows.splits]]
+  type = "v"
+  size = 40
+  command = "lazygit"
+
+    [[windows.splits.children]]
+    type = "h"
+    command = "git log --oneline"
