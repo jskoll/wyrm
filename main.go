@@ -47,6 +47,15 @@ type Pane struct {
 	Command string `toml:"command"`
 }
 
+func isPathInDirectory(path, dir string) bool {
+	// Ensure directory has trailing separator to prevent /tmp-evil matching /tmp
+	if !strings.HasSuffix(dir, "/") {
+		dir = dir + "/"
+	}
+	// Check both with and without trailing separator for root directories
+	return strings.HasPrefix(path, dir) || path == strings.TrimSuffix(dir, "/")
+}
+
 func validateConfigPath(path string) error {
 	// Prevent path traversal by checking before and after cleaning
 	if strings.Contains(path, "..") {
@@ -60,16 +69,16 @@ func validateConfigPath(path string) error {
 	// Ensure the absolute path is under common safe directories
 	isInSafeDir := false
 
-	// Check home directory
-	if homeDir, err := os.UserHomeDir(); err == nil && homeDir != "" && strings.HasPrefix(absPath, homeDir) {
+	// Check home directory (with boundary verification)
+	if homeDir, err := os.UserHomeDir(); err == nil && homeDir != "" && isPathInDirectory(absPath, homeDir) {
 		isInSafeDir = true
 	}
-	// Check common temp directories
-	if strings.HasPrefix(absPath, "/tmp") || strings.HasPrefix(absPath, "/var/tmp") {
+	// Check common temp directories (with boundary verification)
+	if isPathInDirectory(absPath, "/tmp") || isPathInDirectory(absPath, "/var/tmp") {
 		isInSafeDir = true
 	}
-	// Check current working directory
-	if cwd, err := os.Getwd(); err == nil && cwd != "" && strings.HasPrefix(absPath, cwd) {
+	// Check current working directory (with boundary verification)
+	if cwd, err := os.Getwd(); err == nil && cwd != "" && isPathInDirectory(absPath, cwd) {
 		isInSafeDir = true
 	}
 
@@ -261,8 +270,8 @@ func processSplitTree(targetID string, split Split) {
 		}
 
 		cmd := exec.Command("tmux", cmdArgs...)
-		if err := cmd.Run(); err != nil {
-			log.Printf("Warning: failed to split pane: %v", err)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			log.Printf("Warning: failed to split pane: %v\nOutput: %s", err, output)
 			return
 		}
 	}
@@ -314,8 +323,8 @@ func createPanesFromList(sessionName string, windowIndex int, panes []Pane, layo
 		}
 
 		cmd := exec.Command("tmux", "split-window", "-t", windowID, splitType)
-		if err := cmd.Run(); err != nil {
-			log.Printf("Warning: failed to split pane: %v", err)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			log.Printf("Warning: failed to split pane: %v\nOutput: %s", err, output)
 			continue
 		}
 
@@ -345,8 +354,9 @@ func createPanesFromList(sessionName string, windowIndex int, panes []Pane, layo
 }
 
 func selectStartupWindow(sessionName string, startupWindow string, startupPane *int) {
-	// Validate startup_window value
-	if !regexp.MustCompile(`^[a-zA-Z0-9_:-]+$`).MatchString(startupWindow) {
+	// Validate startup_window value - allow most printable chars except control chars
+	// Accept alphanumerics, spaces, underscores, hyphens, colons, dots, parens, brackets
+	if !regexp.MustCompile(`^[a-zA-Z0-9_:\-.\s()[\]{}]+$`).MatchString(startupWindow) {
 		fmt.Fprintf(os.Stderr, "Warning: invalid startup_window value: %s\n", startupWindow)
 		return
 	}
