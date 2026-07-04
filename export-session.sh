@@ -3,7 +3,16 @@
 # Export current tmux session to .tmuxconfig (TOML format)
 # Usage: export-session.sh [output-file] [session-name]
 
-OUTPUT_FILE="${1:-.tmuxconfig}"
+# Get current pane's working directory (safer than relying on script's cwd)
+PANE_DIR="$(tmux display-message -p '#{pane_current_path}' 2>/dev/null)" || PANE_DIR="."
+
+# Use pane directory if output file is relative path
+if [[ "${1:-.tmuxconfig}" != /* ]]; then
+  OUTPUT_FILE="$PANE_DIR/${1:-.tmuxconfig}"
+else
+  OUTPUT_FILE="${1:-.tmuxconfig}"
+fi
+
 SESSION="${2:-$(tmux display-message -p '#{session_name}' 2>/dev/null)}"
 
 if [[ -z "$SESSION" ]]; then
@@ -66,10 +75,10 @@ if [[ ! -s "$TMPFILE" ]]; then
   exit 1
 fi
 
-cp "$TMPFILE" "$OUTPUT_FILE"
-echo "✓ Exported session '$SESSION' to $OUTPUT_FILE"
-echo ""
-echo "Next steps:"
-echo "  1. Review the file: cat $OUTPUT_FILE"
-echo "  2. Fill in the 'command' fields for each pane"
-echo "  3. Test with: tmux-session -config $OUTPUT_FILE"
+if cp "$TMPFILE" "$OUTPUT_FILE" 2>/dev/null; then
+  echo "✓ Exported session '$SESSION' to $(basename "$OUTPUT_FILE")"
+  echo "  Full path: $OUTPUT_FILE"
+else
+  echo "Error: Failed to write to $OUTPUT_FILE" >&2
+  exit 1
+fi
