@@ -1,6 +1,6 @@
 # Example .tmuxconfig with nested splits layout
 # Demonstrates pre_window (interpreter setup), hooks, and startup window
-# Place this in your project root and run: tmux-session -config example-splits.tmuxconfig
+# Place this in your project root and run: wyrm -config example-splits.tmuxconfig
 
 [session]
 name = "myproject"

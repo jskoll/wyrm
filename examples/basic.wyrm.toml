@@ -1,5 +1,5 @@
-# Example .tmuxconfig file for tmux-session
-# Place this in your project root and run: tmux-session -config .tmuxconfig
+# Example .tmuxconfig file for wyrm
+# Place this in your project root and run: wyrm -config .tmuxconfig
 
 [session]
 name = "myproject"

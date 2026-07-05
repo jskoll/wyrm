@@ -1,0 +1,35 @@
+# Release automation: runs on version tags once the repo is public.
+#   git tag v0.1.0 && git push --tags
+# Requires a GitHub Actions release workflow or a local `goreleaser release`.
+version: 2
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+
+# Uncomment once jskoll/homebrew-tap exists and the repo is public:
+# brews:
+#   - repository:
+#       owner: jskoll
+#       name: homebrew-tap
+#     homepage: https://github.com/jskoll/wyrm
+#     description: "Repeatable tmux session layouts from a TOML config"
+#     license: MIT

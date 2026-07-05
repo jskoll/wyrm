@@ -1,0 +1,13 @@
+# The smallest useful wyrm config: one window, editor left, shell right.
+[session]
+root = "."          # session name defaults to this directory's name
+
+[[windows]]
+name = "main"
+
+  [[windows.splits]]
+  command = "nvim"
+
+  [[windows.splits]]
+  type = "h"        # split horizontally: new pane to the right
+  size = 30         # new pane gets 30% of the width

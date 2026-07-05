@@ -1,4 +1,4 @@
-module tmux-session
+module github.com/jskoll/wyrm
 
 go 1.21
 
