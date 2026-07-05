@@ -5,7 +5,7 @@ A minimal Go CLI for managing repeatable tmux session layouts without Ruby depen
 ## Installation
 
 ```bash
-go build -o ~/bin/tmux-session
+go build -o ~/.local/bin/tmux-session
 ```
 
 Or via `dragon-cli` install script (wires into Homebrew).
@@ -39,7 +39,7 @@ root = "."                       # working directory (expanded via $HOME, etc.)
 on_project_start = "git pull"    # optional: runs before session creation
 on_project_exit = "npm run cleanup"  # optional: runs when session is killed
 startup_window = "editor"        # optional: focus this window on startup (name or index)
-startup_pane = 0                 # optional: focus this pane within startup_window (0-indexed)
+startup_pane = 0                 # optional: focus this pane within startup_window (uses your pane-base-index)
 
 [[windows]]
 name = "editor"
@@ -123,8 +123,8 @@ Specify which window and pane should be active when the session starts:
 ```toml
 [session]
 name = "myproject"
-startup_window = "editor"  # can be window name or 1-based index
-startup_pane = 0           # 0-indexed pane number within that window
+startup_window = "editor"  # can be window name or index
+startup_pane = 0           # pane number within that window (uses your pane-base-index)
 ```
 
 ## Examples

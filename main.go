@@ -15,8 +15,8 @@ import (
 )
 
 type Config struct {
-	Session SessionConfig   `toml:"session"`
-	Windows []Window        `toml:"windows"`
+	Session SessionConfig `toml:"session"`
+	Windows []Window      `toml:"windows"`
 }
 
 type SessionConfig struct {
@@ -29,11 +29,11 @@ type SessionConfig struct {
 }
 
 type Window struct {
-	Name      string `toml:"name"`
-	Layout    string `toml:"layout"`
+	Name      string  `toml:"name"`
+	Layout    string  `toml:"layout"`
 	Splits    []Split `toml:"splits"`
-	Panes     []Pane `toml:"panes"`
-	PreWindow string `toml:"pre_window"`
+	Panes     []Pane  `toml:"panes"`
+	PreWindow string  `toml:"pre_window"`
 }
 
 type Split struct {
@@ -47,45 +47,38 @@ type Pane struct {
 	Command string `toml:"command"`
 }
 
-func isPathInDirectory(path, dir string) bool {
-	// Ensure directory has trailing separator to prevent /tmp-evil matching /tmp
-	if !strings.HasSuffix(dir, "/") {
-		dir = dir + "/"
-	}
-	// Check both with and without trailing separator for root directories
-	return strings.HasPrefix(path, dir) || path == strings.TrimSuffix(dir, "/")
+// tmux runs a tmux command and returns its combined output, trimmed.
+func tmux(args ...string) (string, error) {
+	out, err := exec.Command("tmux", args...).CombinedOutput()
+	return strings.TrimSpace(string(out)), err
 }
 
-func validateConfigPath(path string) error {
-	// Prevent path traversal by checking before and after cleaning
-	if strings.Contains(path, "..") {
-		return fmt.Errorf("path traversal detected: %s", path)
+// sendKeys types a command into the target pane. Commands starting with "#"
+// are treated as comments and skipped.
+func sendKeys(target, command string) {
+	if command == "" || strings.HasPrefix(command, "#") {
+		return
 	}
-	// Also check if absolute path goes outside expected boundaries
-	absPath, err := filepath.Abs(path)
+	if out, err := tmux("send-keys", "-t", target, command, "Enter"); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to run command '%s' in %s: %v\nOutput: %s\n", command, target, err, out)
+	} else {
+		fmt.Printf("  Running: %s\n", command)
+	}
+}
+
+// resolveSession returns the session name and absolute root directory,
+// deriving the name from the root's basename when name is unset.
+func resolveSession(s SessionConfig) (string, string) {
+	root := os.ExpandEnv(s.Root)
+	absRoot, err := filepath.Abs(root)
 	if err != nil {
-		return fmt.Errorf("invalid path: %s", path)
+		log.Fatalf("Invalid root path: %v", err)
 	}
-	// Ensure the absolute path is under common safe directories
-	isInSafeDir := false
-
-	// Check home directory (with boundary verification)
-	if homeDir, err := os.UserHomeDir(); err == nil && homeDir != "" && isPathInDirectory(absPath, homeDir) {
-		isInSafeDir = true
+	name := s.Name
+	if name == "" {
+		name = filepath.Base(absRoot)
 	}
-	// Check common temp directories (with boundary verification)
-	if isPathInDirectory(absPath, "/tmp") || isPathInDirectory(absPath, "/var/tmp") {
-		isInSafeDir = true
-	}
-	// Check current working directory (with boundary verification)
-	if cwd, err := os.Getwd(); err == nil && cwd != "" && isPathInDirectory(absPath, cwd) {
-		isInSafeDir = true
-	}
-
-	if !isInSafeDir {
-		return fmt.Errorf("config path must be in home directory, /tmp, /var/tmp, or current working directory: %s", path)
-	}
-	return nil
+	return name, absRoot
 }
 
 func runShellHook(hook string, workDir string) error {
@@ -101,17 +94,9 @@ func runShellHook(hook string, workDir string) error {
 }
 
 func main() {
-	configFile := flag.String("config", "", "Path to .tmuxconfig file")
+	configFile := flag.String("config", ".tmuxconfig", "Path to .tmuxconfig file")
 	kill := flag.Bool("kill", false, "Kill the session instead of creating it")
 	flag.Parse()
-
-	if *configFile == "" {
-		log.Fatal("Error: -config flag is required (implicit .tmuxconfig discovery disabled for security)")
-	}
-
-	if err := validateConfigPath(*configFile); err != nil {
-		log.Fatalf("Invalid config path: %v", err)
-	}
 
 	data, err := os.ReadFile(*configFile)
 	if err != nil {
@@ -123,16 +108,12 @@ func main() {
 		log.Fatalf("Failed to parse config: %v", err)
 	}
 
-	// Validate critical config fields
 	if config.Session.Name == "" && config.Session.Root == "" {
 		log.Fatal("Config must specify either session.name or session.root")
 	}
-	if err := validateConfigPath(config.Session.Root); err != nil {
-		log.Fatalf("Invalid root path in config: %v", err)
-	}
 
 	if *kill {
-		killSession(config.Session.Name, config)
+		killSession(config.Session)
 		return
 	}
 
@@ -140,16 +121,10 @@ func main() {
 }
 
 func createSession(s SessionConfig, windows []Window) {
-	// Expand root path
-	root := os.ExpandEnv(s.Root)
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		log.Fatalf("Invalid root path: %v", err)
-	}
+	sessionName, absRoot := resolveSession(s)
 
-	sessionName := s.Name
-	if sessionName == "" {
-		sessionName = filepath.Base(absRoot)
+	if len(windows) == 0 {
+		log.Fatal("No windows defined in config")
 	}
 
 	// Run on_project_start hook before creating session
@@ -158,35 +133,30 @@ func createSession(s SessionConfig, windows []Window) {
 	}
 
 	// Kill existing session if it exists (wait a moment to ensure cleanup)
-	exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	tmux("kill-session", "-t", sessionName)
 	time.Sleep(50 * time.Millisecond)
 
-	// Create new session with first window
-	if len(windows) == 0 {
-		log.Fatal("No windows defined in config")
-	}
-
+	// Create session with its first window; -P -F reports the window index
+	// tmux actually assigned, so this works with any base-index setting.
 	firstWindow := windows[0]
-	// Create session WITH first window to ensure window 0 exists
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "-n", firstWindow.Name, "-c", absRoot)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		log.Fatalf("Failed to create session: %v\nOutput: %s", err, output)
+	windowIndex, err := tmux("new-session", "-d", "-P", "-F", "#{window_index}",
+		"-s", sessionName, "-n", firstWindow.Name, "-c", absRoot)
+	if err != nil {
+		log.Fatalf("Failed to create session: %v\nOutput: %s", err, windowIndex)
 	}
 
-	// Create panes in first window (window 1 in tmux numbering)
-	fmt.Printf("Creating window 1: %s\n", firstWindow.Name)
-	createPanes(sessionName, 1, firstWindow)
+	fmt.Printf("Creating window %s: %s\n", windowIndex, firstWindow.Name)
+	createPanes(sessionName+":"+windowIndex, firstWindow)
 
 	// Create additional windows
-	for i := 1; i < len(windows); i++ {
-		window := windows[i]
-		cmd := exec.Command("tmux", "new-window", "-t", sessionName, "-n", window.Name, "-c", absRoot)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			log.Fatalf("Failed to create window '%s': %v\nOutput: %s", window.Name, err, output)
+	for _, window := range windows[1:] {
+		windowIndex, err := tmux("new-window", "-P", "-F", "#{window_index}",
+			"-t", sessionName, "-n", window.Name, "-c", absRoot)
+		if err != nil {
+			log.Fatalf("Failed to create window '%s': %v\nOutput: %s", window.Name, err, windowIndex)
 		}
-		tmuxIndex := i + 1 // tmux windows are numbered 1+
-		fmt.Printf("Creating window %d: %s\n", tmuxIndex, window.Name)
-		createPanes(sessionName, tmuxIndex, window)
+		fmt.Printf("Creating window %s: %s\n", windowIndex, window.Name)
+		createPanes(sessionName+":"+windowIndex, window)
 	}
 
 	// Select startup window if specified
@@ -194,8 +164,16 @@ func createSession(s SessionConfig, windows []Window) {
 		selectStartupWindow(sessionName, s.StartupWindow, s.StartupPane)
 	}
 
-	// Attach to session
 	fmt.Printf("Created session: %s\n", sessionName)
+
+	// Inside an existing tmux client, attach-session would nest — switch instead.
+	if os.Getenv("TMUX") != "" {
+		if out, err := tmux("switch-client", "-t", sessionName); err != nil {
+			log.Fatalf("Failed to switch to session: %v\nOutput: %s", err, out)
+		}
+		return
+	}
+
 	attachCmd := exec.Command("tmux", "attach-session", "-t", sessionName)
 	attachCmd.Stdin = os.Stdin
 	attachCmd.Stdout = os.Stdout
@@ -209,161 +187,107 @@ func normalizeSplitType(t string) string {
 	switch strings.ToLower(t) {
 	case "h", "horizontal":
 		return "h"
-	case "v", "vertical":
-		return "v"
 	default:
 		return "v"
 	}
 }
 
-func createPanes(sessionName string, windowIndex int, window Window) {
+func createPanes(windowID string, window Window) {
 	// Allow tmux time to initialize window before sending commands
 	time.Sleep(50 * time.Millisecond)
 
-	// Run pre_window command if specified
-	if window.PreWindow != "" {
-		windowID := fmt.Sprintf("%s:%d", sessionName, windowIndex)
-		cmd := exec.Command("tmux", "send-keys", "-t", windowID, window.PreWindow, "Enter")
-		if output, err := cmd.CombinedOutput(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: pre_window command failed: %v\nOutput: %s\n", err, output)
-		} else {
-			fmt.Printf("  Pre-window: %s\n", window.PreWindow)
-		}
-		// Allow time for pre_window command to complete before creating panes
-		time.Sleep(50 * time.Millisecond)
-	}
-
 	if len(window.Splits) > 0 {
-		createPanesFromSplits(sessionName, windowIndex, window.Splits)
+		createPanesFromSplits(windowID, window.Splits, window.PreWindow)
 	} else if len(window.Panes) > 0 {
-		createPanesFromList(sessionName, windowIndex, window.Panes, window.Layout)
+		createPanesFromList(windowID, window.Panes, window.Layout, window.PreWindow)
+	} else if window.PreWindow != "" {
+		sendKeys(windowID, window.PreWindow)
 	}
 }
 
-func createPanesFromSplits(sessionName string, windowIndex int, splits []Split) {
-	windowID := fmt.Sprintf("%s:%d", sessionName, windowIndex)
-	paneIdx := 0
-
-	for _, split := range splits {
+func createPanesFromSplits(windowID string, splits []Split, preWindow string) {
+	for paneIdx, split := range splits {
 		targetPane := windowID
 		if paneIdx > 0 {
 			targetPane = fmt.Sprintf("%s.%d", windowID, paneIdx)
 		}
-
-		processSplitTree(targetPane, split)
-		paneIdx++
+		processSplitTree(targetPane, split, preWindow)
 	}
 }
 
-func processSplitTree(targetID string, split Split) {
+func processSplitTree(targetID string, split Split, preWindow string) {
 	if split.Type != "" {
-		splitType := normalizeSplitType(split.Type)
-		tmuxArg := "-v"
-		if splitType == "h" {
-			tmuxArg = "-h"
-		}
+		tmuxArg := "-" + normalizeSplitType(split.Type)
 
-		cmdArgs := make([]string, 0, 6)
-		cmdArgs = append(cmdArgs, "split-window", "-t", targetID, tmuxArg)
+		cmdArgs := []string{"split-window", "-t", targetID, tmuxArg}
 		if split.Size > 0 {
 			cmdArgs = append(cmdArgs, "-p", fmt.Sprintf("%d", split.Size))
 		}
 
-		cmd := exec.Command("tmux", cmdArgs...)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			log.Printf("Warning: failed to split pane: %v\nOutput: %s", err, output)
+		if out, err := tmux(cmdArgs...); err != nil {
+			log.Printf("Warning: failed to split pane: %v\nOutput: %s", err, out)
 			return
 		}
 	}
 
-	if split.Command != "" && !strings.HasPrefix(split.Command, "#") {
-		execCmd := exec.Command("tmux", "send-keys", "-t", targetID, split.Command, "Enter")
-		if output, err := execCmd.CombinedOutput(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to run command '%s' in %s: %v\nOutput: %s\n", split.Command, targetID, err, output)
-		} else {
-			fmt.Printf("  Running: %s\n", split.Command)
-		}
-	}
+	sendKeys(targetID, preWindow)
+	sendKeys(targetID, split.Command)
 
 	// Process children in order; tmux assigns pane numbers sequentially after each split
-	if len(split.Children) > 0 {
-		for i, child := range split.Children {
-			childTarget := fmt.Sprintf("%s.%d", targetID, i)
-			processSplitTree(childTarget, child)
-		}
+	for i, child := range split.Children {
+		childTarget := fmt.Sprintf("%s.%d", targetID, i)
+		processSplitTree(childTarget, child, preWindow)
 	}
 }
 
-func createPanesFromList(sessionName string, windowIndex int, panes []Pane, layout string) {
+func createPanesFromList(windowID string, panes []Pane, layout string, preWindow string) {
 	if len(panes) == 0 {
 		return
 	}
 
-	windowID := fmt.Sprintf("%s:%d", sessionName, windowIndex)
-
-	// Run command in first pane
-	if panes[0].Command != "" && !strings.HasPrefix(panes[0].Command, "#") {
-		cmd := exec.Command("tmux", "send-keys", "-t", windowID, panes[0].Command, "Enter")
-		if output, err := cmd.CombinedOutput(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to run command '%s' in pane 0: %v\nOutput: %s\n", panes[0].Command, err, output)
-		} else {
-			fmt.Printf("  Running: %s\n", panes[0].Command)
-		}
-	}
+	// Run setup + command in first pane
+	sendKeys(windowID, preWindow)
+	sendKeys(windowID, panes[0].Command)
 
 	// Create additional panes and run their commands
-	for i := 1; i < len(panes); i++ {
-		pane := panes[i]
-
-		var splitType string
+	for i, pane := range panes[1:] {
+		splitType := "-h"
 		if i%2 == 1 {
-			splitType = "-h"
-		} else {
 			splitType = "-v"
 		}
 
-		cmd := exec.Command("tmux", "split-window", "-t", windowID, splitType)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			log.Printf("Warning: failed to split pane: %v\nOutput: %s", err, output)
+		if out, err := tmux("split-window", "-t", windowID, splitType); err != nil {
+			log.Printf("Warning: failed to split pane: %v\nOutput: %s", err, out)
 			continue
 		}
 
-		// Run command in newly created pane
-		if pane.Command != "" && !strings.HasPrefix(pane.Command, "#") {
-			cmd := exec.Command("tmux", "send-keys", "-t", windowID, pane.Command, "Enter")
-			if output, err := cmd.CombinedOutput(); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to run command '%s' in pane %d: %v\nOutput: %s\n", pane.Command, i, err, output)
-			} else {
-				fmt.Printf("  Running: %s\n", pane.Command)
-			}
-		}
+		// Run setup + command in newly created (now active) pane
+		sendKeys(windowID, preWindow)
+		sendKeys(windowID, pane.Command)
 	}
 
 	// Apply layout
+	if layout == "" && len(panes) > 1 {
+		layout = "tiled"
+	}
 	if layout != "" {
-		cmd := exec.Command("tmux", "select-layout", "-t", windowID, layout)
-		if err := cmd.Run(); err != nil {
+		if _, err := tmux("select-layout", "-t", windowID, layout); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to apply layout '%s': %v\n", layout, err)
-		}
-	} else if len(panes) > 1 {
-		cmd := exec.Command("tmux", "select-layout", "-t", windowID, "tiled")
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to apply tiled layout: %v\n", err)
 		}
 	}
 }
 
+var startupWindowPattern = regexp.MustCompile(`^[a-zA-Z0-9_:\-.\s()[\]{}]+$`)
+
 func selectStartupWindow(sessionName string, startupWindow string, startupPane *int) {
-	// Validate startup_window value - allow most printable chars except control chars
-	// Accept alphanumerics, spaces, underscores, hyphens, colons, dots, parens, brackets
-	if !regexp.MustCompile(`^[a-zA-Z0-9_:\-.\s()[\]{}]+$`).MatchString(startupWindow) {
+	// Reject control characters and other unexpected input in startup_window
+	if !startupWindowPattern.MatchString(startupWindow) {
 		fmt.Fprintf(os.Stderr, "Warning: invalid startup_window value: %s\n", startupWindow)
 		return
 	}
 
 	// Try to select by window name first
-	selectCmd := exec.Command("tmux", "select-window", "-t", sessionName+":"+startupWindow)
-	if err := selectCmd.Run(); err != nil {
+	if _, err := tmux("select-window", "-t", sessionName+":"+startupWindow); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to select window '%s': %v\n", startupWindow, err)
 		return
 	}
@@ -371,29 +295,22 @@ func selectStartupWindow(sessionName string, startupWindow string, startupPane *
 	// Select pane within the window if specified (startupPane != nil)
 	if startupPane != nil {
 		paneTarget := fmt.Sprintf("%s:%s.%d", sessionName, startupWindow, *startupPane)
-		paneCmd := exec.Command("tmux", "select-pane", "-t", paneTarget)
-		if err := paneCmd.Run(); err != nil {
+		if _, err := tmux("select-pane", "-t", paneTarget); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to select pane %d in window '%s': %v\n", *startupPane, startupWindow, err)
 		}
 	}
 }
 
-func killSession(sessionName string, config Config) {
-	// Run on_project_exit hook before killing session
-	root := os.ExpandEnv(config.Session.Root)
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to resolve root path: %v\n", err)
-		absRoot = root // fall back to unexpanded path
-	}
+func killSession(s SessionConfig) {
+	sessionName, absRoot := resolveSession(s)
 
-	if err := runShellHook(config.Session.OnProjectExit, absRoot); err != nil {
+	// Run on_project_exit hook before killing session
+	if err := runShellHook(s.OnProjectExit, absRoot); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: on_project_exit failed: %v\n", err)
 	}
 
-	cmd := exec.Command("tmux", "kill-session", "-t", sessionName)
-	if err := cmd.Run(); err != nil {
-		log.Fatalf("Failed to kill session: %v", err)
+	if out, err := tmux("kill-session", "-t", sessionName); err != nil {
+		log.Fatalf("Failed to kill session: %v\nOutput: %s", err, out)
 	}
 	fmt.Printf("Killed session: %s\n", sessionName)
 }
