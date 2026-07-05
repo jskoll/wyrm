@@ -125,7 +125,9 @@ func splitPane(r tmux.Runner, target string, s config.Split) (string, error) {
 	}
 	args := []string{"split-window", "-t", target, dir, "-P", "-F", "#{pane_id}"}
 	if s.Size > 0 {
-		args = append(args, "-p", fmt.Sprintf("%d", s.Size))
+		// -l N% rather than -p N: -p was deprecated in tmux 3.1 and removed
+		// from newer builds; -l with a percentage works on 3.1+.
+		args = append(args, "-l", fmt.Sprintf("%d%%", s.Size))
 	}
 	out, err := r.Run(args...)
 	if err != nil {

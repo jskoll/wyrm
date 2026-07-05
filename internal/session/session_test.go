@@ -78,7 +78,7 @@ func TestCreateSplitTree(t *testing.T) {
 		"send-keys -t %1 nvm use 18 Enter",
 		"send-keys -t %1 nvim Enter",
 		// second entry splits %1 -> %2, gets pre_window + command
-		"split-window -t %1 -h -P -F #{pane_id} -p 30",
+		"split-window -t %1 -h -P -F #{pane_id} -l 30%",
 		"send-keys -t %2 nvm use 18 Enter",
 		"send-keys -t %2 npm run dev Enter",
 		// child splits its parent %2 -> %3
