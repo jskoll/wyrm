@@ -17,22 +17,25 @@ import (
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
-// Create builds the session described by cfg and returns its name. Any
-// existing session with the same name is replaced.
-func Create(r tmux.Runner, cfg *config.Config) (string, error) {
+// Create builds the session described by cfg and returns its name. If a
+// session with that name is already running, it's left untouched and
+// reattached is true, so the caller can reattach to it instead of rebuilding.
+func Create(r tmux.Runner, cfg *config.Config) (name string, reattached bool, err error) {
 	name, root, err := cfg.Session.Resolve()
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if len(cfg.Windows) == 0 {
-		return "", fmt.Errorf("no windows defined in config")
+		return "", false, fmt.Errorf("no windows defined in config")
+	}
+
+	if _, err := r.Run("has-session", "-t", name); err == nil {
+		return name, true, nil
 	}
 
 	if err := runHook(cfg.Session.OnProjectStart, root); err != nil {
 		warnf("on_project_start failed: %v", err)
 	}
-
-	r.Run("kill-session", "-t", name) //nolint:errcheck // absent session is fine
 
 	for i, w := range cfg.Windows {
 		var out string
@@ -41,18 +44,18 @@ func Create(r tmux.Runner, cfg *config.Config) (string, error) {
 			out, err = r.Run("new-session", "-d", "-P", "-F", "#{window_id}|#{pane_id}",
 				"-s", name, "-n", w.Name, "-c", root)
 			if err != nil {
-				return "", fmt.Errorf("creating session: %v (%s)", err, out)
+				return "", false, fmt.Errorf("creating session: %v (%s)", err, out)
 			}
 		} else {
 			out, err = r.Run("new-window", "-P", "-F", "#{window_id}|#{pane_id}",
 				"-t", name, "-n", w.Name, "-c", root)
 			if err != nil {
-				return "", fmt.Errorf("creating window %q: %v (%s)", w.Name, err, out)
+				return "", false, fmt.Errorf("creating window %q: %v (%s)", w.Name, err, out)
 			}
 		}
 		windowID, paneID, ok := strings.Cut(out, "|")
 		if !ok {
-			return "", fmt.Errorf("unexpected tmux output %q", out)
+			return "", false, fmt.Errorf("unexpected tmux output %q", out)
 		}
 		fmt.Printf("window %s: %s\n", windowID, w.Name)
 		buildWindow(r, windowID, paneID, w)
@@ -61,7 +64,7 @@ func Create(r tmux.Runner, cfg *config.Config) (string, error) {
 	if cfg.Session.StartupWindow != "" {
 		selectStartup(r, name, cfg.Session.StartupWindow, cfg.Session.StartupPane)
 	}
-	return name, nil
+	return name, false, nil
 }
 
 // Kill runs the on_project_exit hook and destroys the session. The hook is

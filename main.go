@@ -28,16 +28,29 @@ func main() {
 		return
 	}
 
+	// Attaching from inside an existing tmux client would nest sessions,
+	// which tmux handles poorly. -kill doesn't attach, so it's exempt.
+	if !*kill && tmux.InsideTmux() {
+		log.Fatal("cannot be run inside tmux; detach first (or use -kill, which works from inside tmux)")
+	}
+
 	path := *configPath
+	var cfg *config.Config
 	if path == "" {
-		var err error
-		if path, err = config.Discover(); err != nil {
-			log.Fatal(err)
+		discovered, err := config.Discover()
+		if err != nil {
+			if cfg, err = config.LoadDefault(); err != nil {
+				log.Fatal(err)
+			}
+		} else {
+			path = discovered
 		}
 	}
-	cfg, err := config.Load(path)
-	if err != nil {
-		log.Fatal(err)
+	if cfg == nil {
+		var err error
+		if cfg, err = config.Load(path); err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	runner := tmux.Exec{}
@@ -51,19 +64,16 @@ func main() {
 		return
 	}
 
-	name, err := session.Create(runner, cfg)
+	name, reattached, err := session.Create(runner, cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("created session %s\n", name)
-
-	// Inside an existing tmux client, attaching would nest — switch instead.
-	if tmux.InsideTmux() {
-		if out, err := runner.Run("switch-client", "-t", name); err != nil {
-			log.Fatalf("switching to session: %v (%s)", err, out)
-		}
-		return
+	if reattached {
+		fmt.Printf("reattaching to existing session %s\n", name)
+	} else {
+		fmt.Printf("created session %s\n", name)
 	}
+
 	if err := tmux.Attach(name); err != nil {
 		log.Fatalf("attaching to session: %v", err)
 	}

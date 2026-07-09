@@ -63,16 +63,19 @@ func TestCreateSplitTree(t *testing.T) {
 	}
 
 	r := &fakeRunner{}
-	name, err := Create(r, cfg)
+	name, reattached, err := Create(r, cfg)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if name != "proj" {
 		t.Errorf("name = %q, want proj", name)
 	}
+	if reattached {
+		t.Error("reattached = true, want false for a fresh session")
+	}
 
 	want := []string{
-		"kill-session -t proj",
+		"has-session -t proj",
 		"new-session -d -P -F #{window_id}|#{pane_id} -s proj -n editor -c /tmp/proj",
 		// first split entry: no type, reuses initial pane %1
 		"send-keys -t %1 nvm use 18 Enter",
@@ -111,7 +114,7 @@ func TestCreateLegacyPanes(t *testing.T) {
 	}
 
 	r := &fakeRunner{}
-	if _, err := Create(r, cfg); err != nil {
+	if _, _, err := Create(r, cfg); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -144,7 +147,7 @@ func TestCreateMultipleWindowsAndStartup(t *testing.T) {
 	}
 
 	r := &fakeRunner{}
-	if _, err := Create(r, cfg); err != nil {
+	if _, _, err := Create(r, cfg); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -167,7 +170,7 @@ func TestCreateDerivesNameFromRoot(t *testing.T) {
 		Windows: []config.Window{{Name: "w"}},
 	}
 	r := &fakeRunner{}
-	name, err := Create(r, cfg)
+	name, _, err := Create(r, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,8 +181,36 @@ func TestCreateDerivesNameFromRoot(t *testing.T) {
 
 func TestCreateRequiresWindows(t *testing.T) {
 	cfg := &config.Config{Session: config.Session{Name: "x"}}
-	if _, err := Create(&fakeRunner{}, cfg); err == nil {
+	if _, _, err := Create(&fakeRunner{}, cfg); err == nil {
 		t.Error("Create with no windows: want error, got nil")
+	}
+}
+
+func TestCreateReattachesExistingSession(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{{Name: "editor", Splits: []config.Split{{Command: "nvim"}}}},
+	}
+
+	r := &fakeRunner{hasSession: true}
+	name, reattached, err := Create(r, cfg)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if name != "proj" {
+		t.Errorf("name = %q, want proj", name)
+	}
+	if !reattached {
+		t.Error("reattached = false, want true for an already-running session")
+	}
+
+	want := []string{"has-session -t proj"}
+	got := r.joined()
+	if len(got) != len(want) {
+		t.Fatalf("got %d calls, want %d (no rebuild):\n%s", len(got), len(want), strings.Join(got, "\n"))
+	}
+	if got[0] != want[0] {
+		t.Errorf("call 0 = %q, want %q", got[0], want[0])
 	}
 }
 

@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - CI (GitHub Actions, macOS + Linux), golangci-lint, goreleaser config.
 
 ### Changed
+- `wyrm` now refuses to run from inside an existing tmux client, printing a
+  warning and exiting instead of nesting sessions (`-kill` is exempt, since
+  it doesn't attach).
+- Creating a session now **reattaches** to an existing session with the same
+  name instead of killing and rebuilding it.
+- When no `.wyrm.toml` or `.tmuxconfig` is found, wyrm falls back to a
+  built-in default config instead of erroring out.
 - Panes are targeted by tmux pane ID (`%N`) instead of index, so layouts no
   longer depend on the user's `base-index` / `pane-base-index` settings.
 - `pre_window` runs in every pane before its command (as documented), not
