@@ -25,11 +25,11 @@ changelog:
       - "^docs:"
       - "^chore:"
 
-# Uncomment once jskoll/homebrew-tap exists and the repo is public:
-# brews:
-#   - repository:
-#       owner: jskoll
-#       name: homebrew-tap
-#     homepage: https://github.com/jskoll/wyrm
-#     description: "Repeatable tmux session layouts from a TOML config"
-#     license: MIT
+brews:
+  - repository:
+      owner: jskoll
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/jskoll/wyrm
+    description: "Repeatable tmux session layouts from a TOML config"
+    license: MIT
