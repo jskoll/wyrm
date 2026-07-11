@@ -63,16 +63,19 @@ func TestCreateSplitTree(t *testing.T) {
 	}
 
 	r := &fakeRunner{}
-	name, err := Create(r, cfg)
+	name, created, err := Create(r, cfg)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if name != "proj" {
 		t.Errorf("name = %q, want proj", name)
 	}
+	if !created {
+		t.Error("created = false, want true")
+	}
 
 	want := []string{
-		"kill-session -t proj",
+		"has-session -t =proj",
 		"new-session -d -P -F #{window_id}|#{pane_id} -s proj -n editor -c /tmp/proj",
 		// first split entry: no type, reuses initial pane %1
 		"send-keys -t %1 nvm use 18 Enter",
@@ -111,7 +114,7 @@ func TestCreateLegacyPanes(t *testing.T) {
 	}
 
 	r := &fakeRunner{}
-	if _, err := Create(r, cfg); err != nil {
+	if _, _, err := Create(r, cfg); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -144,7 +147,7 @@ func TestCreateMultipleWindowsAndStartup(t *testing.T) {
 	}
 
 	r := &fakeRunner{}
-	if _, err := Create(r, cfg); err != nil {
+	if _, _, err := Create(r, cfg); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -167,7 +170,7 @@ func TestCreateDerivesNameFromRoot(t *testing.T) {
 		Windows: []config.Window{{Name: "w"}},
 	}
 	r := &fakeRunner{}
-	name, err := Create(r, cfg)
+	name, _, err := Create(r, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,8 +181,31 @@ func TestCreateDerivesNameFromRoot(t *testing.T) {
 
 func TestCreateRequiresWindows(t *testing.T) {
 	cfg := &config.Config{Session: config.Session{Name: "x"}}
-	if _, err := Create(&fakeRunner{}, cfg); err == nil {
+	if _, _, err := Create(&fakeRunner{}, cfg); err == nil {
 		t.Error("Create with no windows: want error, got nil")
+	}
+}
+
+func TestCreateLeavesRunningSessionUntouched(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{{Name: "w", Splits: []config.Split{{Command: "nvim"}}}},
+	}
+
+	r := &fakeRunner{hasSession: true}
+	name, created, err := Create(r, cfg)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if name != "proj" {
+		t.Errorf("name = %q, want proj", name)
+	}
+	if created {
+		t.Error("created = true, want false for a running session")
+	}
+	got := r.joined()
+	if len(got) != 1 || got[0] != "has-session -t =proj" {
+		t.Errorf("running session must only be probed, got calls:\n%s", strings.Join(got, "\n"))
 	}
 }
 

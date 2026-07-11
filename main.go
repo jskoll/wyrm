@@ -51,11 +51,15 @@ func main() {
 		return
 	}
 
-	name, err := session.Create(runner, cfg)
+	name, created, err := session.Create(runner, cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("created session %s\n", name)
+	if created {
+		fmt.Printf("created session %s\n", name)
+	} else {
+		fmt.Printf("session %s already running, attaching\n", name)
+	}
 
 	// Inside an existing tmux client, attaching would nest — switch instead.
 	if tmux.InsideTmux() {
