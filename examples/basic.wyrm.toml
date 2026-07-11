@@ -1,5 +1,5 @@
-# Example .tmuxconfig file for wyrm
-# Place this in your project root and run: wyrm -config .tmuxconfig
+# Example .wyrm.toml file
+# Place this in your project root as .wyrm.toml and run: wyrm
 
 [session]
 name = "myproject"

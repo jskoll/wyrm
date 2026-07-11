@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
+  <!-- 
+    Theme: Dracula 
+    Purple: #bd93f9
+    Comment/Subtext: #6272a4
+    Background: Transparent
+  -->
+  
+  <g fill="#bd93f9">
+    <!-- Top Left Pane -->
+    <rect x="80" y="60" width="75" height="110" rx="8"/>
+    
+    <!-- Top Middle Nested Panes -->
+    <rect x="165" y="60" width="55" height="50" rx="6"/>
+    <rect x="165" y="120" width="55" height="50" rx="6"/>
+    
+    <!-- Dragon Head & Neck (Top Right) -->
+    <path d="M 230 170 
+             C 230 120, 250 60, 280 70 
+             C 290 73, 305 60, 310 65 
+             C 315 70, 335 80, 330 100 
+             C 325 120, 295 120, 290 140 
+             C 285 160, 280 170, 230 170 Z" />
+             
+    <!-- Dragon Eye -->
+    <circle cx="295" cy="85" r="4" fill="#282a36"/>
+
+    <!-- Bottom Left Pane (Tail Curve) -->
+    <path d="M 80 180 L 155 180 L 155 260 C 110 260, 80 230, 80 180 Z" />
+    
+    <!-- Bottom Middle & Right Panes -->
+    <rect x="165" y="180" width="75" height="80" rx="8"/>
+    <rect x="250" y="180" width="70" height="80" rx="8"/>
+  </g>
+
+  <!-- Title Text -->
+  <text x="200" y="320" font-family="monospace, sans-serif" font-weight="bold" font-size="52" fill="#bd93f9" text-anchor="middle" letter-spacing="2">wyrm</text>
+  
+  <!-- Subtitle Text -->
+  <text x="200" y="350" font-family="monospace, sans-serif" font-size="16" fill="#6272a4" text-anchor="middle">repeatable tmux layouts</text>
+</svg>
