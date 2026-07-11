@@ -2,6 +2,7 @@
 package config
 
 import (
+	_ "embed"
 	"errors"
 	"fmt"
 	"os"
@@ -16,6 +17,12 @@ const DefaultFileName = ".wyrm.toml"
 
 // LegacyFileName is the original tmux-session config name, still supported.
 const LegacyFileName = ".tmuxconfig"
+
+// defaultConfigData is the built-in config used when neither DefaultFileName
+// nor LegacyFileName is found in the current directory.
+//
+//go:embed default.wyrm.toml
+var defaultConfigData []byte
 
 // Config is the root of a wyrm config file.
 type Config struct {
@@ -79,6 +86,19 @@ func Load(path string) (*Config, error) {
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return &cfg, nil
+}
+
+// LoadDefault parses and validates the built-in fallback config, used when no
+// config file is found in the current directory (see Discover).
+func LoadDefault() (*Config, error) {
+	var cfg Config
+	if err := toml.Unmarshal(defaultConfigData, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing default config: %w", err)
+	}
+	if err := cfg.validate(); err != nil {
+		return nil, fmt.Errorf("default config: %w", err)
 	}
 	return &cfg, nil
 }

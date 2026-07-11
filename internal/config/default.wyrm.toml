@@ -1,0 +1,7 @@
+# Built-in fallback used when no .wyrm.toml or .tmuxconfig is found in the
+# current directory. Session name is derived from the directory itself.
+[session]
+root = "."
+
+[[windows]]
+name = "main"

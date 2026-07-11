@@ -29,15 +29,22 @@ func main() {
 	}
 
 	path := *configPath
+	var cfg *config.Config
 	if path == "" {
-		var err error
-		if path, err = config.Discover(); err != nil {
-			log.Fatal(err)
+		discovered, err := config.Discover()
+		if err != nil {
+			if cfg, err = config.LoadDefault(); err != nil {
+				log.Fatal(err)
+			}
+		} else {
+			path = discovered
 		}
 	}
-	cfg, err := config.Load(path)
-	if err != nil {
-		log.Fatal(err)
+	if cfg == nil {
+		var err error
+		if cfg, err = config.Load(path); err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	runner := tmux.Exec{}
@@ -68,6 +75,7 @@ func main() {
 		}
 		return
 	}
+
 	if err := tmux.Attach(name); err != nil {
 		log.Fatalf("attaching to session: %v", err)
 	}

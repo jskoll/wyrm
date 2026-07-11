@@ -129,6 +129,19 @@ name = "w"
 	}
 }
 
+func TestLoadDefault(t *testing.T) {
+	cfg, err := LoadDefault()
+	if err != nil {
+		t.Fatalf("LoadDefault: %v", err)
+	}
+	if len(cfg.Windows) == 0 {
+		t.Fatal("default config defines no windows")
+	}
+	if cfg.Session.Root == "" {
+		t.Error("default config session.root is empty")
+	}
+}
+
 func TestResolve(t *testing.T) {
 	t.Setenv("WYRM_TEST_DIR", "/tmp/envproject")
 

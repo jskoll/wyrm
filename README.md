@@ -56,8 +56,15 @@ wyrm -kill                 # destroy the session (runs on_project_exit first)
 wyrm -version
 ```
 
-Creating a session **replaces** any existing session with the same name, then
-attaches — or switches your current client if you're already inside tmux.
+If neither `.wyrm.toml` nor `.tmuxconfig` is found, wyrm falls back to a
+built-in default: a single unnamed window rooted at the current directory.
+
+If a session with the same name is already running, wyrm **reattaches** to
+it instead of rebuilding it. Otherwise it builds the session fresh, then
+attaches.
+
+Run from inside an existing tmux client, wyrm switches the client to the
+session instead of nesting one tmux inside another.
 
 ## Config reference
 
