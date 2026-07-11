@@ -2,3 +2,5 @@
 dist/
 coverage.out
 .DS_Store
+site/
+.venv-docs/

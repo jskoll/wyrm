@@ -1,6 +1,6 @@
-# Release automation: runs on version tags once the repo is public.
+# Release automation: .github/workflows/release.yml runs this on version tags
+# once the repo is public.
 #   git tag v0.1.0 && git push --tags
-# Requires a GitHub Actions release workflow or a local `goreleaser release`.
 version: 2
 
 builds:

@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Extracted from [dragon-cli](https://github.com/jskoll/dragon-cli) as a
-  standalone project named **wyrm** (history preserved).
 - `.wyrm.toml` as the default config name; the original `.tmuxconfig` still
   works as a fallback.
 - `-version` flag.

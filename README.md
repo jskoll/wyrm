@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.svg" alt="wyrm" width="240">
+</p>
+
 # wyrm 🐉
 
 Repeatable tmux session layouts from a TOML config — nested split trees,
@@ -138,8 +142,8 @@ command = "# scratch"          # comment: pane is created, nothing runs
 
 Panes split alternately h/v, then `layout` (default `tiled`) evens them out.
 
-More in [`examples/`](examples/): minimal, Node.js, PHP/Symfony, Python,
-nested splits.
+More in [`examples/`](https://github.com/jskoll/wyrm/tree/main/examples):
+minimal, Node.js, PHP/Symfony, Python, nested splits.
 
 ## Security
 
@@ -157,8 +161,8 @@ make test-unit   # -short: unit tests only
 make lint        # golangci-lint + gofmt
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the layout and error-handling
-conventions.
+See [CONTRIBUTING.md](https://github.com/jskoll/wyrm/blob/main/CONTRIBUTING.md)
+for the layout and error-handling conventions.
 
 ## License
 
