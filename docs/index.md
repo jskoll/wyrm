@@ -42,6 +42,12 @@ name = "code"
 ## Install
 
 ```sh
+brew install jskoll/tap/wyrm
+```
+
+Or via Go:
+
+```sh
 go install github.com/jskoll/wyrm@latest
 ```
 
