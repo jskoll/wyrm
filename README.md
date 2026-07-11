@@ -63,9 +63,8 @@ If a session with the same name is already running, wyrm **reattaches** to
 it instead of rebuilding it. Otherwise it builds the session fresh, then
 attaches.
 
-wyrm refuses to run from inside an existing tmux client — nesting sessions
-is confusing and tmux handles it poorly, so detach first. `-kill` is exempt,
-since it doesn't attach.
+Run from inside an existing tmux client, wyrm switches the client to the
+session instead of nesting one tmux inside another.
 
 ## Config reference
 

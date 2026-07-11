@@ -63,19 +63,19 @@ func TestCreateSplitTree(t *testing.T) {
 	}
 
 	r := &fakeRunner{}
-	name, reattached, err := Create(r, cfg)
+	name, created, err := Create(r, cfg)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if name != "proj" {
 		t.Errorf("name = %q, want proj", name)
 	}
-	if reattached {
-		t.Error("reattached = true, want false for a fresh session")
+	if !created {
+		t.Error("created = false, want true")
 	}
 
 	want := []string{
-		"has-session -t proj",
+		"has-session -t =proj",
 		"new-session -d -P -F #{window_id}|#{pane_id} -s proj -n editor -c /tmp/proj",
 		// first split entry: no type, reuses initial pane %1
 		"send-keys -t %1 nvm use 18 Enter",
@@ -186,31 +186,26 @@ func TestCreateRequiresWindows(t *testing.T) {
 	}
 }
 
-func TestCreateReattachesExistingSession(t *testing.T) {
+func TestCreateLeavesRunningSessionUntouched(t *testing.T) {
 	cfg := &config.Config{
 		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
-		Windows: []config.Window{{Name: "editor", Splits: []config.Split{{Command: "nvim"}}}},
+		Windows: []config.Window{{Name: "w", Splits: []config.Split{{Command: "nvim"}}}},
 	}
 
 	r := &fakeRunner{hasSession: true}
-	name, reattached, err := Create(r, cfg)
+	name, created, err := Create(r, cfg)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if name != "proj" {
 		t.Errorf("name = %q, want proj", name)
 	}
-	if !reattached {
-		t.Error("reattached = false, want true for an already-running session")
+	if created {
+		t.Error("created = true, want false for a running session")
 	}
-
-	want := []string{"has-session -t proj"}
 	got := r.joined()
-	if len(got) != len(want) {
-		t.Fatalf("got %d calls, want %d (no rebuild):\n%s", len(got), len(want), strings.Join(got, "\n"))
-	}
-	if got[0] != want[0] {
-		t.Errorf("call 0 = %q, want %q", got[0], want[0])
+	if len(got) != 1 || got[0] != "has-session -t =proj" {
+		t.Errorf("running session must only be probed, got calls:\n%s", strings.Join(got, "\n"))
 	}
 }
 

@@ -19,9 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - CI (GitHub Actions, macOS + Linux), golangci-lint, goreleaser config.
 
 ### Changed
-- `wyrm` now refuses to run from inside an existing tmux client, printing a
-  warning and exiting instead of nesting sessions (`-kill` is exempt, since
-  it doesn't attach).
+- Run from inside an existing tmux client, `wyrm` now switches the client to
+  the target session instead of nesting one tmux inside another.
 - Creating a session now **reattaches** to an existing session with the same
   name instead of killing and rebuilding it.
 - When no `.wyrm.toml` or `.tmuxconfig` is found, wyrm falls back to a

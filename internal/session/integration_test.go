@@ -47,15 +47,15 @@ func TestIntegration(t *testing.T) {
 		},
 	}
 
-	name, reattached, err := session.Create(r, cfg)
+	name, created, err := session.Create(r, cfg)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if name != "wyrm-it" {
 		t.Fatalf("name = %q, want wyrm-it", name)
 	}
-	if reattached {
-		t.Error("reattached = true, want false for a fresh session")
+	if !created {
+		t.Error("created = false, want true for a fresh session")
 	}
 
 	if _, err := os.Stat(filepath.Join(root, "started")); err != nil {
@@ -88,10 +88,10 @@ func TestIntegration(t *testing.T) {
 		t.Errorf("active window = %q, want startup_window code", activeWindow)
 	}
 
-	if _, reattached, err := session.Create(r, cfg); err != nil {
+	if _, created, err := session.Create(r, cfg); err != nil {
 		t.Fatalf("Create (second call): %v", err)
-	} else if !reattached {
-		t.Error("reattached = false on second Create, want true for an already-running session")
+	} else if created {
+		t.Error("created = true on second Create, want false for an already-running session")
 	}
 	out, err = r.Run("list-windows", "-t", name, "-F", "#{window_name}")
 	if err != nil {

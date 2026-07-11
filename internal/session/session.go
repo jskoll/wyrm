@@ -18,9 +18,9 @@ import (
 )
 
 // Create builds the session described by cfg and returns its name. If a
-// session with that name is already running, it's left untouched and
-// reattached is true, so the caller can reattach to it instead of rebuilding.
-func Create(r tmux.Runner, cfg *config.Config) (name string, reattached bool, err error) {
+// session with that name is already running it is left untouched — running
+// panes keep running — and created is false so the caller can attach to it.
+func Create(r tmux.Runner, cfg *config.Config) (name string, created bool, err error) {
 	name, root, err := cfg.Session.Resolve()
 	if err != nil {
 		return "", false, err
@@ -29,8 +29,9 @@ func Create(r tmux.Runner, cfg *config.Config) (name string, reattached bool, er
 		return "", false, fmt.Errorf("no windows defined in config")
 	}
 
-	if _, err := r.Run("has-session", "-t", name); err == nil {
-		return name, true, nil
+	// "=" forces an exact name match; bare -t would prefix-match.
+	if _, err := r.Run("has-session", "-t", "="+name); err == nil {
+		return name, false, nil
 	}
 
 	if err := runHook(cfg.Session.OnProjectStart, root); err != nil {
@@ -64,7 +65,7 @@ func Create(r tmux.Runner, cfg *config.Config) (name string, reattached bool, er
 	if cfg.Session.StartupWindow != "" {
 		selectStartup(r, name, cfg.Session.StartupWindow, cfg.Session.StartupPane)
 	}
-	return name, false, nil
+	return name, true, nil
 }
 
 // Kill runs the on_project_exit hook and destroys the session. The hook is
