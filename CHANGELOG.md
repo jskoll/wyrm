@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-07-11
+
+### Fixed
+- Release pipeline: the Homebrew formula publish to `jskoll/homebrew-tap`
+  was failing (invalid tap token, and CI actions pinned to the deprecated
+  Node 20 runtime). Both are fixed; this release is otherwise identical to
+  0.1.1.
+
 ## [0.1.1] - 2026-07-11
 
 ### Added
@@ -49,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/jskoll/wyrm/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/jskoll/wyrm/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/jskoll/wyrm/releases/tag/v0.1.0
