@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-07-11
+
 ### Added
 - `.wyrm.toml` as the default config name; the original `.tmuxconfig` still
   works as a fallback.
@@ -40,3 +42,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
+
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/jskoll/wyrm/releases/tag/v0.1.0
