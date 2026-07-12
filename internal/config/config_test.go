@@ -142,6 +142,34 @@ func TestLoadDefault(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultErrors(t *testing.T) {
+	orig := defaultConfigData
+	t.Cleanup(func() { defaultConfigData = orig })
+
+	t.Run("invalid toml", func(t *testing.T) {
+		defaultConfigData = []byte("[session")
+		_, err := LoadDefault()
+		if err == nil || !strings.Contains(err.Error(), "parsing default config") {
+			t.Errorf("LoadDefault error = %v, want containing %q", err, "parsing default config")
+		}
+	})
+
+	t.Run("fails validation", func(t *testing.T) {
+		defaultConfigData = []byte("")
+		_, err := LoadDefault()
+		if err == nil || !strings.Contains(err.Error(), "default config:") {
+			t.Errorf("LoadDefault error = %v, want containing %q", err, "default config:")
+		}
+	})
+}
+
+func TestLoadReadError(t *testing.T) {
+	_, err := Load(filepath.Join(t.TempDir(), "does-not-exist.toml"))
+	if err == nil {
+		t.Fatal("Load of missing file: want error, got nil")
+	}
+}
+
 func TestResolve(t *testing.T) {
 	t.Setenv("WYRM_TEST_DIR", "/tmp/envproject")
 

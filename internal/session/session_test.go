@@ -17,14 +17,26 @@ type fakeRunner struct {
 	winSeq     int
 	paneSeq    int
 	hasSession bool
+
+	// fail forces the named command (args[0]) to return an error.
+	fail map[string]bool
+	// badNewSessionOutput makes new-session/new-window return output with
+	// no "|" separator, exercising the "unexpected tmux output" path.
+	badNewSessionOutput bool
 }
 
 func (f *fakeRunner) Run(args ...string) (string, error) {
 	f.calls = append(f.calls, args)
+	if f.fail[args[0]] {
+		return "boom", errors.New("exit status 1")
+	}
 	switch args[0] {
 	case "new-session", "new-window":
 		f.winSeq++
 		f.paneSeq++
+		if f.badNewSessionOutput {
+			return "malformed", nil
+		}
 		return fmt.Sprintf("@%d|%%%d", f.winSeq, f.paneSeq), nil
 	case "split-window":
 		f.paneSeq++
@@ -241,4 +253,213 @@ func TestKill(t *testing.T) {
 			t.Errorf("missing kill-session call:\n%s", got)
 		}
 	})
+
+	t.Run("on_project_exit failure still kills session", func(t *testing.T) {
+		exitCfg := &config.Config{
+			Session: config.Session{Name: "proj", Root: "/tmp/proj", OnProjectExit: "exit 1"},
+			Windows: []config.Window{{Name: "w"}},
+		}
+		r := &fakeRunner{hasSession: true}
+		name, err := Kill(r, exitCfg)
+		if err != nil {
+			t.Fatalf("Kill: %v", err)
+		}
+		if name != "proj" {
+			t.Errorf("name = %q, want proj", name)
+		}
+	})
+
+	t.Run("kill-session error", func(t *testing.T) {
+		r := &fakeRunner{hasSession: true, fail: map[string]bool{"kill-session": true}}
+		if _, err := Kill(r, cfg); err == nil || !strings.Contains(err.Error(), "killing session") {
+			t.Errorf("Kill error = %v, want containing %q", err, "killing session")
+		}
+	})
+}
+
+func TestCreateOnProjectStartFailureStillCreates(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj", OnProjectStart: "exit 1"},
+		Windows: []config.Window{{Name: "w"}},
+	}
+	r := &fakeRunner{}
+	name, created, err := Create(r, cfg)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if name != "proj" || !created {
+		t.Errorf("name, created = %q, %v; want proj, true", name, created)
+	}
+}
+
+func TestCreateNewSessionError(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{{Name: "w"}},
+	}
+	r := &fakeRunner{fail: map[string]bool{"new-session": true}}
+	if _, _, err := Create(r, cfg); err == nil || !strings.Contains(err.Error(), "creating session") {
+		t.Errorf("Create error = %v, want containing %q", err, "creating session")
+	}
+}
+
+func TestCreateNewWindowError(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{{Name: "first"}, {Name: "second"}},
+	}
+	r := &fakeRunner{fail: map[string]bool{"new-window": true}}
+	_, _, err := Create(r, cfg)
+	if err == nil || !strings.Contains(err.Error(), `creating window "second"`) {
+		t.Errorf("Create error = %v, want containing %q", err, `creating window "second"`)
+	}
+}
+
+func TestCreateUnexpectedOutput(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{{Name: "w"}},
+	}
+	r := &fakeRunner{badNewSessionOutput: true}
+	if _, _, err := Create(r, cfg); err == nil || !strings.Contains(err.Error(), "unexpected tmux output") {
+		t.Errorf("Create error = %v, want containing %q", err, "unexpected tmux output")
+	}
+}
+
+func TestCreatePreWindowOnly(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{{Name: "w", PreWindow: "echo hi"}},
+	}
+	r := &fakeRunner{}
+	if _, _, err := Create(r, cfg); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got := r.joined()
+	want := "send-keys -t %1 echo hi Enter"
+	count := 0
+	for _, c := range got {
+		if c == want {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("send-keys %q called %d times in:\n%s", want, count, strings.Join(got, "\n"))
+	}
+}
+
+func TestApplySplitsSplitError(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{{
+			Name: "w",
+			Splits: []config.Split{
+				{Type: "h", Command: "should-not-run"},
+				{Command: "second-entry"},
+			},
+		}},
+	}
+	r := &fakeRunner{fail: map[string]bool{"split-window": true}}
+	if _, _, err := Create(r, cfg); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got := strings.Join(r.joined(), "\n")
+	if strings.Contains(got, "should-not-run") {
+		t.Errorf("command sent to a pane that failed to split:\n%s", got)
+	}
+	// The second, typeless entry reuses the base pane and must still run.
+	if !strings.Contains(got, "second-entry") {
+		t.Errorf("missing command for sibling entry after split failure:\n%s", got)
+	}
+}
+
+func TestApplyPanesSplitError(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{{
+			Name: "w",
+			Panes: []config.Pane{
+				{Command: "first"},
+				{Command: "should-not-run"},
+			},
+		}},
+	}
+	r := &fakeRunner{fail: map[string]bool{"split-window": true}}
+	if _, _, err := Create(r, cfg); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got := strings.Join(r.joined(), "\n")
+	if !strings.Contains(got, "send-keys -t %1 first Enter") {
+		t.Errorf("missing first pane command:\n%s", got)
+	}
+	if strings.Contains(got, "should-not-run") {
+		t.Errorf("command sent to a pane that failed to split:\n%s", got)
+	}
+}
+
+func TestApplyPanesSelectLayoutError(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{{
+			Name:  "w",
+			Panes: []config.Pane{{Command: "a"}, {Command: "b"}},
+		}},
+	}
+	r := &fakeRunner{fail: map[string]bool{"select-layout": true}}
+	if _, _, err := Create(r, cfg); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+}
+
+func TestSendKeysError(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{{Name: "w", Splits: []config.Split{{Command: "nvim"}}}},
+	}
+	r := &fakeRunner{fail: map[string]bool{"send-keys": true}}
+	if _, _, err := Create(r, cfg); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+}
+
+func TestSelectStartupInvalidWindowName(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj", StartupWindow: "bad;window"},
+		Windows: []config.Window{{Name: "w"}},
+	}
+	r := &fakeRunner{}
+	if _, _, err := Create(r, cfg); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got := strings.Join(r.joined(), "\n")
+	if strings.Contains(got, "select-window") {
+		t.Errorf("select-window called for invalid startup_window:\n%s", got)
+	}
+}
+
+func TestSelectStartupSelectWindowError(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj", StartupWindow: "w"},
+		Windows: []config.Window{{Name: "w"}},
+	}
+	r := &fakeRunner{fail: map[string]bool{"select-window": true}}
+	if _, _, err := Create(r, cfg); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got := strings.Join(r.joined(), "\n")
+	if strings.Contains(got, "select-pane") {
+		t.Errorf("select-pane called after select-window failure:\n%s", got)
+	}
+}
+
+func TestSelectStartupSelectPaneError(t *testing.T) {
+	pane := 0
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj", StartupWindow: "w", StartupPane: &pane},
+		Windows: []config.Window{{Name: "w"}},
+	}
+	r := &fakeRunner{fail: map[string]bool{"select-pane": true}}
+	if _, _, err := Create(r, cfg); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
 }

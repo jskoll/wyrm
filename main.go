@@ -4,7 +4,8 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
+	"io"
+	"os"
 
 	"github.com/jskoll/wyrm/internal/config"
 	"github.com/jskoll/wyrm/internal/session"
@@ -15,17 +16,25 @@ import (
 var version = "dev"
 
 func main() {
-	log.SetFlags(0)
-	log.SetPrefix("wyrm: ")
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, tmux.Exec{}, tmux.InsideTmux, tmux.Attach))
+}
 
-	configPath := flag.String("config", "", "path to config file (default: .wyrm.toml, then .tmuxconfig)")
-	kill := flag.Bool("kill", false, "kill the session (runs on_project_exit) instead of creating it")
-	showVersion := flag.Bool("version", false, "print version and exit")
-	flag.Parse()
+// run implements the CLI. It takes its dependencies as parameters (rather
+// than reaching for globals like os.Stdout or the default flag.CommandLine)
+// so tests can drive it without touching real stdio or a real tmux server.
+func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux func() bool, attach func(string) error) int {
+	fs := flag.NewFlagSet("wyrm", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", "", "path to config file (default: .wyrm.toml, then .tmuxconfig)")
+	kill := fs.Bool("kill", false, "kill the session (runs on_project_exit) instead of creating it")
+	showVersion := fs.Bool("version", false, "print version and exit")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
 
 	if *showVersion {
-		fmt.Println("wyrm " + version)
-		return
+		fmt.Fprintln(stdout, "wyrm "+version)
+		return 0
 	}
 
 	path := *configPath
@@ -34,7 +43,8 @@ func main() {
 		discovered, err := config.Discover()
 		if err != nil {
 			if cfg, err = config.LoadDefault(); err != nil {
-				log.Fatal(err)
+				fmt.Fprintln(stderr, "wyrm: "+err.Error())
+				return 1
 			}
 		} else {
 			path = discovered
@@ -43,40 +53,44 @@ func main() {
 	if cfg == nil {
 		var err error
 		if cfg, err = config.Load(path); err != nil {
-			log.Fatal(err)
+			fmt.Fprintln(stderr, "wyrm: "+err.Error())
+			return 1
 		}
 	}
-
-	runner := tmux.Exec{}
 
 	if *kill {
 		name, err := session.Kill(runner, cfg)
 		if err != nil {
-			log.Fatal(err)
+			fmt.Fprintln(stderr, "wyrm: "+err.Error())
+			return 1
 		}
-		fmt.Printf("killed session %s\n", name)
-		return
+		fmt.Fprintf(stdout, "killed session %s\n", name)
+		return 0
 	}
 
 	name, created, err := session.Create(runner, cfg)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Fprintln(stderr, "wyrm: "+err.Error())
+		return 1
 	}
 	if created {
-		fmt.Printf("created session %s\n", name)
+		fmt.Fprintf(stdout, "created session %s\n", name)
 	} else {
-		fmt.Printf("session %s already running, attaching\n", name)
+		fmt.Fprintf(stdout, "session %s already running, attaching\n", name)
 	}
 
 	// Inside an existing tmux client, attaching would nest — switch instead.
-	if tmux.InsideTmux() {
+	if insideTmux() {
 		if out, err := runner.Run("switch-client", "-t", name); err != nil {
-			log.Fatalf("switching to session: %v (%s)", err, out)
+			fmt.Fprintf(stderr, "wyrm: switching to session: %v (%s)\n", err, out)
+			return 1
 		}
-		return
+		return 0
 	}
 
-	if err := tmux.Attach(name); err != nil {
-		log.Fatalf("attaching to session: %v", err)
+	if err := attach(name); err != nil {
+		fmt.Fprintf(stderr, "wyrm: attaching to session: %v\n", err)
+		return 1
 	}
+	return 0
 }
