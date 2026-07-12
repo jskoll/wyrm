@@ -59,11 +59,14 @@ Or build from a clone: `make install` (uses `go install` with a stamped version)
 wyrm                       # use .wyrm.toml (or legacy .tmuxconfig) in the cwd
 wyrm -config path/to/file  # explicit config
 wyrm -kill                 # destroy the session (runs on_project_exit first)
+wyrm -pick                 # fuzzy-pick a running session and attach to it
 wyrm -version
 ```
 
 If neither `.wyrm.toml` nor `.tmuxconfig` is found, wyrm falls back to a
-built-in default: a single unnamed window rooted at the current directory.
+built-in default: a single unnamed window rooted at the current directory —
+unless tmux sessions are already running, in which case `wyrm` opens the
+session picker instead.
 
 If a session with the same name is already running, wyrm **reattaches** to
 it instead of rebuilding it. Otherwise it builds the session fresh, then
@@ -71,6 +74,24 @@ attaches.
 
 Run from inside an existing tmux client, wyrm switches the client to the
 session instead of nesting one tmux inside another.
+
+### Picking a running session
+
+`wyrm -pick` opens an interactive, fuzzy list of the running tmux sessions
+(most-recently-active first) and attaches to the one you choose — handy from a
+plain shell, where tmux's own `choose-tree` isn't available because you aren't
+attached to a client yet.
+
+| Key | Action |
+|---|---|
+| type | fuzzy-filter by session name |
+| ↑ / ↓, `Ctrl-P` / `Ctrl-N` | move the selection |
+| `Enter` | attach (or `switch-client` if you're already in tmux) |
+| `Ctrl-X` | kill the selected session (a plain tmux kill, no `on_project_exit`) |
+| `Esc` / `Ctrl-C` | cancel |
+
+The picker is built into the binary — no dependency on `fzf` or any other
+external tool.
 
 See the [configuration reference](configuration.md) for the full `.wyrm.toml`
 format, or the [examples](examples.md) for ready-to-use configs.
