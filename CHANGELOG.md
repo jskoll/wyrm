@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `wyrm -pick`: an interactive fuzzy picker for running tmux sessions. Type to
+  filter, arrow keys (or Ctrl-N/Ctrl-P) to move, Enter to attach (or
+  `switch-client` when already inside tmux), Ctrl-X to kill the highlighted
+  session, Esc/Ctrl-C to cancel. Running bare `wyrm` in a directory with no
+  config also opens the picker when sessions are already running. The picker is
+  built in — no fzf or other runtime dependency.
+
 ## [0.1.2] - 2026-07-11
 
 ### Fixed
