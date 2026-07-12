@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   directory (default `~/.config/wyrm/settings`) instead of `.wyrm.toml` next
   to each project, named `<folderName>.wyrm.toml`. `wyrm -migrate-config`
   moves an existing local config there.
+- Custom default config: drop a `default.wyrm.toml` next to the global
+  settings file (`~/.config/wyrm/default.wyrm.toml`) to replace wyrm's
+  built-in fallback used when no project config is found.
 
 ## [0.1.3] - 2026-07-12
 

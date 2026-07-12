@@ -68,7 +68,8 @@ wyrm -migrate-config       # move the local config into the shared config direct
 wyrm -version
 ```
 
-If neither `.wyrm.toml` nor `.tmuxconfig` is found, wyrm falls back to a
+If neither `.wyrm.toml` nor `.tmuxconfig` is found, wyrm falls back to
+`~/.config/wyrm/default.wyrm.toml` if you've created one, otherwise a
 built-in default: a single unnamed window rooted at the current directory —
 unless tmux sessions are already running, in which case `wyrm` opens the
 session picker (below) instead.
@@ -91,6 +92,15 @@ In shared mode, running `wyrm` in a directory named `myproject` looks for
 usual local search if it isn't there. `wyrm -migrate-config` moves the
 current directory's local config into the shared directory under the right
 name for you.
+
+## A custom default config
+
+If no config is found for a project at all (see above), wyrm normally falls
+back to a minimal built-in default. To use your own fallback instead, drop a
+`default.wyrm.toml` next to the global settings file, at
+`~/.config/wyrm/default.wyrm.toml` (`$XDG_CONFIG_HOME/wyrm/default.wyrm.toml`
+if set). It's a normal wyrm config — same `[session]` / `[[windows]]` format
+as any project config.
 
 ## Picking a running session
 

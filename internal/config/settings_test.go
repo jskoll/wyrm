@@ -118,6 +118,57 @@ func TestDiscoverGlobalSharedMode(t *testing.T) {
 	}
 }
 
+func TestLoadUserDefaultMissingReturnsNil(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	cfg, err := LoadUserDefault()
+	if err != nil {
+		t.Fatalf("LoadUserDefault: %v", err)
+	}
+	if cfg != nil {
+		t.Errorf("LoadUserDefault = %+v, want nil when no override file exists", cfg)
+	}
+}
+
+func TestLoadUserDefaultPresent(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	dir := filepath.Join(xdg, "wyrm")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "[session]\nname = \"my-default\"\nroot = \".\"\n"
+	if err := os.WriteFile(filepath.Join(dir, UserDefaultFileName), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadUserDefault()
+	if err != nil {
+		t.Fatalf("LoadUserDefault: %v", err)
+	}
+	if cfg == nil || cfg.Session.Name != "my-default" {
+		t.Errorf("LoadUserDefault = %+v, want session.name = my-default", cfg)
+	}
+}
+
+func TestLoadUserDefaultInvalid(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	dir := filepath.Join(xdg, "wyrm")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, UserDefaultFileName), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadUserDefault(); err == nil {
+		t.Error("LoadUserDefault with invalid override: want error, got nil")
+	}
+}
+
 func TestDiscoverGlobalLocalMode(t *testing.T) {
 	chdir(t, t.TempDir())
 	if err := os.WriteFile(DefaultFileName, []byte(""), 0o644); err != nil {

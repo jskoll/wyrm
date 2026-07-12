@@ -17,6 +17,13 @@ directory's basename) inside `shared_dir` first, falling back to the normal
 local search if it's missing. Run `wyrm -migrate-config` to move an existing
 local config into the shared directory under the right name.
 
+## Custom default config
+
+When no project config is found at all, wyrm falls back to
+`default.wyrm.toml` next to the global settings file (`~/.config/wyrm/`, or
+`$XDG_CONFIG_HOME/wyrm/`) if present, otherwise its built-in default. This
+file uses the same `[session]` / `[[windows]]` format documented below.
+
 ## `[session]`
 
 | Key | Type | Default | Description |

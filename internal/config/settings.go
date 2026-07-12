@@ -13,6 +13,10 @@ import (
 // SettingsFileName is wyrm's global, cross-project preferences file.
 const SettingsFileName = "config.toml"
 
+// UserDefaultFileName is a user-supplied replacement for the built-in
+// default config, stored alongside SettingsFileName.
+const UserDefaultFileName = "default.wyrm.toml"
+
 // DefaultSharedDir is used as the shared config directory when Settings.SharedDir
 // is unset.
 const DefaultSharedDir = "~/.config/wyrm/settings"
@@ -43,6 +47,31 @@ func SettingsPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "wyrm", SettingsFileName), nil
+}
+
+// UserDefaultPath returns the path to the user's default config override,
+// honoring $XDG_CONFIG_HOME and falling back to ~/.config.
+func UserDefaultPath() (string, error) {
+	dir, err := configDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "wyrm", UserDefaultFileName), nil
+}
+
+// LoadUserDefault reads, parses, and validates the user's default config
+// override (see UserDefaultPath). It returns a nil Config, with no error,
+// when no override file exists — callers should then fall back to
+// LoadDefault.
+func LoadUserDefault() (*Config, error) {
+	path, err := UserDefaultPath()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	return Load(path)
 }
 
 func configDir() (string, error) {

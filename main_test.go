@@ -135,6 +135,32 @@ func TestRunDiscoverFallsBackToDefault(t *testing.T) {
 	}
 }
 
+func TestRunDiscoverFallsBackToUserDefault(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	chdir(t, t.TempDir())
+
+	dir := filepath.Join(home, ".config", "wyrm")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "[session]\nname = \"user-default\"\nroot = \".\"\n[[windows]]\nname = \"w\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "default.wyrm.toml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{}
+	code := run(nil, &stdout, &stderr, r, func() bool { return false }, func(string) error { return nil })
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "created session user-default") {
+		t.Errorf("stdout = %q, want the user default config's session name", stdout.String())
+	}
+}
+
 func TestRunCreateAndAttach(t *testing.T) {
 	path := writeConfig(t, validConfig)
 

@@ -69,9 +69,15 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 					return runPicker(runner, stderr, insideTmux, attach)
 				}
 			}
-			if cfg, err = config.LoadDefault(); err != nil {
+			if cfg, err = config.LoadUserDefault(); err != nil {
 				_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
 				return 1
+			}
+			if cfg == nil {
+				if cfg, err = config.LoadDefault(); err != nil {
+					_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+					return 1
+				}
 			}
 		} else {
 			path = discovered
