@@ -54,7 +54,7 @@ func TestListAndKillIntegration(t *testing.T) {
 		t.Errorf("beta wrong: %+v", s)
 	}
 
-	if err := KillSession(r, "alpha"); err != nil {
+	if err := KillSession(r, seen["alpha"].ID); err != nil {
 		t.Fatalf("KillSession: %v", err)
 	}
 	after, err := ListSessions(r)
@@ -63,5 +63,46 @@ func TestListAndKillIntegration(t *testing.T) {
 	}
 	if len(after) != 1 || after[0].Name != "beta" {
 		t.Fatalf("after kill got %v, want just beta", names(after))
+	}
+}
+
+// TestDottedSessionNameIntegration guards against the bug where a session
+// named like "wyrm.vim" couldn't be targeted by name: tmux's -t target
+// syntax treats "." as the window.pane separator and misparses such names,
+// even with an "=" exact-match prefix. ListSessions + KillSession must work
+// end-to-end against a real tmux server for a session named this way, since
+// they operate on the session's tmux ID rather than its name.
+func TestDottedSessionNameIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+
+	r := tmux.Exec{SocketName: fmt.Sprintf("wyrm-pick-dot-it-%d", os.Getpid())}
+	t.Cleanup(func() { r.Run("kill-server") }) //nolint:errcheck
+
+	if out, err := r.Run("new-session", "-d", "-s", "wyrm.vim"); err != nil {
+		t.Fatalf("new-session: %v (%s)", err, out)
+	}
+
+	got, err := ListSessions(r)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "wyrm.vim" || got[0].ID == "" {
+		t.Fatalf("ListSessions = %+v, want one wyrm.vim session with a non-empty ID", got)
+	}
+
+	if err := KillSession(r, got[0].ID); err != nil {
+		t.Fatalf("KillSession: %v", err)
+	}
+	after, err := ListSessions(r)
+	if err != nil {
+		t.Fatalf("ListSessions after kill: %v", err)
+	}
+	if len(after) != 0 {
+		t.Fatalf("after kill got %v, want none", names(after))
 	}
 }

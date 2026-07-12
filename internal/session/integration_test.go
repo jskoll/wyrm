@@ -47,7 +47,7 @@ func TestIntegration(t *testing.T) {
 		},
 	}
 
-	name, created, err := session.Create(r, cfg)
+	name, _, created, err := session.Create(r, cfg)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestIntegration(t *testing.T) {
 		t.Errorf("active window = %q, want startup_window code", activeWindow)
 	}
 
-	if _, created, err := session.Create(r, cfg); err != nil {
+	if _, _, created, err := session.Create(r, cfg); err != nil {
 		t.Fatalf("Create (second call): %v", err)
 	} else if created {
 		t.Error("created = true on second Create, want false for an already-running session")
@@ -109,5 +109,57 @@ func TestIntegration(t *testing.T) {
 	}
 	if _, err := r.Run("has-session", "-t", name); err == nil {
 		t.Error("session still exists after Kill")
+	}
+}
+
+// TestIntegrationDottedSessionName guards against the bug where a session
+// named like "wyrm.vim" broke has-session, new-window, kill-session, and
+// friends: tmux's -t target syntax treats "." as the window.pane separator
+// and misparses such names. Create and Kill must work end-to-end against a
+// real tmux server for a session named this way, since they target it by
+// tmux session ID rather than by the raw name (see tmux.FindSessionID).
+func TestIntegrationDottedSessionName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+
+	r := tmux.Exec{SocketName: fmt.Sprintf("wyrm-it-dot-%d", os.Getpid())}
+	t.Cleanup(func() { r.Run("kill-server") }) //nolint:errcheck
+
+	root := t.TempDir()
+	cfg := &config.Config{
+		Session: config.Session{Name: "wyrm.vim", Root: root},
+		Windows: []config.Window{
+			{Name: "first"},
+			{Name: "second"},
+		},
+	}
+
+	name, sessionID, created, err := session.Create(r, cfg)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if name != "wyrm.vim" || sessionID == "" || !created {
+		t.Fatalf("Create = %q, %q, %v; want wyrm.vim, non-empty ID, true", name, sessionID, created)
+	}
+
+	// Reattach (second Create) must find the running session rather than
+	// erroring out or rebuilding it.
+	if _, secondID, created, err := session.Create(r, cfg); err != nil {
+		t.Fatalf("Create (second call): %v", err)
+	} else if created {
+		t.Error("created = true on second Create, want false for an already-running session")
+	} else if secondID != sessionID {
+		t.Errorf("second Create sessionID = %q, want %q (same session)", secondID, sessionID)
+	}
+
+	if _, err := session.Kill(r, cfg); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	if _, ok, err := tmux.FindSessionID(r, "wyrm.vim"); err != nil || ok {
+		t.Errorf("session still exists after Kill: ok=%v err=%v", ok, err)
 	}
 }

@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -96,5 +97,51 @@ func TestAttachError(t *testing.T) {
 
 	if err := Attach("myproj"); err == nil {
 		t.Error("Attach with nonzero exit: want error, got nil")
+	}
+}
+
+// stubRunner returns canned output/err regardless of the command given.
+type stubRunner struct {
+	out string
+	err error
+}
+
+func (s stubRunner) Run(args ...string) (string, error) {
+	return s.out, s.err
+}
+
+func TestFindSessionIDMatch(t *testing.T) {
+	r := stubRunner{out: "$1|alpha\n$2|wyrm.vim"}
+	id, ok, err := FindSessionID(r, "wyrm.vim")
+	if err != nil {
+		t.Fatalf("FindSessionID: %v", err)
+	}
+	if !ok || id != "$2" {
+		t.Errorf("FindSessionID = %q, %v; want $2, true", id, ok)
+	}
+}
+
+func TestFindSessionIDNoMatch(t *testing.T) {
+	r := stubRunner{out: "$1|alpha"}
+	id, ok, err := FindSessionID(r, "missing")
+	if err != nil {
+		t.Fatalf("FindSessionID: %v", err)
+	}
+	if ok {
+		t.Errorf("FindSessionID = %q, %v; want not-ok", id, ok)
+	}
+}
+
+func TestFindSessionIDNoServer(t *testing.T) {
+	r := stubRunner{out: "no server running on /tmp/tmux-1000/default", err: errors.New("exit status 1")}
+	if _, ok, err := FindSessionID(r, "alpha"); err != nil || ok {
+		t.Errorf("FindSessionID with no server: ok=%v err=%v, want false, nil", ok, err)
+	}
+}
+
+func TestFindSessionIDRealError(t *testing.T) {
+	r := stubRunner{out: "something else broke", err: errors.New("exit status 1")}
+	if _, _, err := FindSessionID(r, "alpha"); err == nil {
+		t.Error("FindSessionID with a real tmux failure: want error, got nil")
 	}
 }

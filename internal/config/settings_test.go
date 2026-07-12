@@ -169,6 +169,58 @@ func TestLoadUserDefaultInvalid(t *testing.T) {
 	}
 }
 
+func TestEditTargetDiscoversExisting(t *testing.T) {
+	chdir(t, t.TempDir())
+	if err := os.WriteFile(DefaultFileName, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	path, exists, err := EditTarget(&Settings{Storage: StorageLocal})
+	if err != nil {
+		t.Fatalf("EditTarget: %v", err)
+	}
+	if !exists {
+		t.Error("exists = false, want true for a discovered local config")
+	}
+	if path != DefaultFileName {
+		t.Errorf("path = %q, want %q", path, DefaultFileName)
+	}
+}
+
+func TestEditTargetCreatesLocal(t *testing.T) {
+	chdir(t, t.TempDir())
+
+	path, exists, err := EditTarget(&Settings{Storage: StorageLocal})
+	if err != nil {
+		t.Fatalf("EditTarget: %v", err)
+	}
+	if exists {
+		t.Error("exists = true, want false when nothing is present yet")
+	}
+	if path != DefaultFileName {
+		t.Errorf("path = %q, want %q", path, DefaultFileName)
+	}
+}
+
+func TestEditTargetCreatesShared(t *testing.T) {
+	sharedDir := t.TempDir()
+	projectDir := t.TempDir()
+	chdir(t, projectDir)
+
+	settings := &Settings{Storage: StorageShared, SharedDir: sharedDir}
+	path, exists, err := EditTarget(settings)
+	if err != nil {
+		t.Fatalf("EditTarget: %v", err)
+	}
+	if exists {
+		t.Error("exists = true, want false when nothing is present yet")
+	}
+	want := filepath.Join(sharedDir, filepath.Base(projectDir)+DefaultFileName)
+	if path != want {
+		t.Errorf("path = %q, want %q", path, want)
+	}
+}
+
 func TestDiscoverGlobalLocalMode(t *testing.T) {
 	chdir(t, t.TempDir())
 	if err := os.WriteFile(DefaultFileName, []byte(""), 0o644); err != nil {

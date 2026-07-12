@@ -6,6 +6,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `wyrm -edit`: open the resolved config (local, shared, or `-config`) in
+  `$EDITOR`, creating one at the right location for your `storage` setting
+  if none exists yet. Warns (without failing) if the saved file doesn't
+  validate.
+- `wyrm -validate`: check that the effective config parses and validates,
+  without building a session — useful in CI or a pre-commit hook.
+- `wyrm -list` (`-format table|json|toml`): print running tmux sessions
+  non-interactively, for scripts and status bars, as an alternative to the
+  interactive `-pick` UI.
+
+### Fixed
+- Creating, killing, attaching to, or switching to a session whose name
+  contains a `.` (e.g. `wyrm.vim`) could fail outright: tmux's `-t` target
+  syntax uses `.` as the window.pane separator, so such names were
+  misparsed by `has-session`, `new-window`, `kill-session`, and
+  `attach-session` alike — even with an `=` exact-match prefix, which only
+  guards against prefix ambiguity, not this. `wyrm` now looks up and targets
+  every session by its stable tmux session ID instead of its name, which
+  sidesteps the issue entirely.
+
 ## [0.1.4] - 2026-07-12
 
 ### Added

@@ -21,13 +21,13 @@ func (s *stubRunner) Run(args ...string) (string, error) {
 }
 
 func TestListSessionsParses(t *testing.T) {
-	// Fields are windows|attached|activity|name; beta is the most recently
+	// Fields are id|windows|attached|activity|name; beta is the most recently
 	// active, so it must sort first. "weird|name" exercises a name containing
 	// the delimiter (it's the last field, so SplitN keeps it whole).
 	r := &stubRunner{out: strings.Join([]string{
-		"3|1|1000|alpha",
-		"1|0|2000|beta",
-		"1|0|500|weird|name",
+		"$1|3|1|1000|alpha",
+		"$2|1|0|2000|beta",
+		"$3|1|0|500|weird|name",
 	}, "\n")}
 
 	got, err := ListSessions(r)
@@ -46,6 +46,9 @@ func TestListSessionsParses(t *testing.T) {
 	}
 	if got[0].Attached {
 		t.Errorf("beta should be unattached: %+v", got[0])
+	}
+	if got[0].ID != "$2" || got[1].ID != "$1" || got[2].ID != "$3" {
+		t.Errorf("wrong IDs: beta=%q alpha=%q weird|name=%q", got[0].ID, got[1].ID, got[2].ID)
 	}
 	// Verify the format string is actually passed to tmux.
 	if len(r.calls) != 1 || r.calls[0][0] != "list-sessions" {
@@ -71,12 +74,12 @@ func TestListSessionsRealError(t *testing.T) {
 	}
 }
 
-func TestKillSessionExactMatch(t *testing.T) {
+func TestKillSessionByID(t *testing.T) {
 	r := &stubRunner{}
-	if err := KillSession(r, "alpha"); err != nil {
+	if err := KillSession(r, "$3"); err != nil {
 		t.Fatalf("KillSession: %v", err)
 	}
-	want := []string{"kill-session", "-t", "=alpha"}
+	want := []string{"kill-session", "-t", "$3"}
 	if len(r.calls) != 1 || !reflect.DeepEqual(r.calls[0], want) {
 		t.Fatalf("got %v, want %v", r.calls, want)
 	}

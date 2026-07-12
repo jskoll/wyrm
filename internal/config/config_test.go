@@ -217,6 +217,118 @@ func chdir(t *testing.T, dir string) {
 	})
 }
 
+func TestResolveEffectiveExplicitPath(t *testing.T) {
+	path := writeConfig(t, `
+[session]
+name = "explicit"
+root = "."
+[[windows]]
+name = "w"
+`)
+	cfg, source, err := ResolveEffective(&Settings{Storage: StorageLocal}, path)
+	if err != nil {
+		t.Fatalf("ResolveEffective: %v", err)
+	}
+	if source != path {
+		t.Errorf("source = %q, want %q", source, path)
+	}
+	if cfg.Session.Name != "explicit" {
+		t.Errorf("Name = %q, want explicit", cfg.Session.Name)
+	}
+}
+
+func TestResolveEffectiveExplicitPathMissing(t *testing.T) {
+	if _, _, err := ResolveEffective(&Settings{Storage: StorageLocal}, filepath.Join(t.TempDir(), "nope.toml")); err == nil {
+		t.Error("ResolveEffective with missing explicit path: want error, got nil")
+	}
+}
+
+func TestResolveEffectiveDiscoversLocal(t *testing.T) {
+	chdir(t, t.TempDir())
+	content := "[session]\nname = \"local\"\nroot = \".\"\n[[windows]]\nname = \"w\"\n"
+	if err := os.WriteFile(DefaultFileName, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, source, err := ResolveEffective(&Settings{Storage: StorageLocal}, "")
+	if err != nil {
+		t.Fatalf("ResolveEffective: %v", err)
+	}
+	if source != DefaultFileName {
+		t.Errorf("source = %q, want %q", source, DefaultFileName)
+	}
+	if cfg.Session.Name != "local" {
+		t.Errorf("Name = %q, want local", cfg.Session.Name)
+	}
+}
+
+func TestResolveEffectiveDiscoversShared(t *testing.T) {
+	sharedDir := t.TempDir()
+	projectDir := t.TempDir()
+	chdir(t, projectDir)
+
+	folderName := filepath.Base(projectDir)
+	sharedPath := filepath.Join(sharedDir, folderName+DefaultFileName)
+	content := "[session]\nname = \"shared\"\nroot = \".\"\n[[windows]]\nname = \"w\"\n"
+	if err := os.WriteFile(sharedPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := &Settings{Storage: StorageShared, SharedDir: sharedDir}
+	cfg, source, err := ResolveEffective(settings, "")
+	if err != nil {
+		t.Fatalf("ResolveEffective: %v", err)
+	}
+	if source != sharedPath {
+		t.Errorf("source = %q, want %q", source, sharedPath)
+	}
+	if cfg.Session.Name != "shared" {
+		t.Errorf("Name = %q, want shared", cfg.Session.Name)
+	}
+}
+
+func TestResolveEffectiveFallsBackToUserDefault(t *testing.T) {
+	chdir(t, t.TempDir())
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	dir := filepath.Join(xdg, "wyrm")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "[session]\nname = \"user-default\"\nroot = \".\"\n[[windows]]\nname = \"w\"\n"
+	if err := os.WriteFile(filepath.Join(dir, UserDefaultFileName), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, source, err := ResolveEffective(&Settings{Storage: StorageLocal}, "")
+	if err != nil {
+		t.Fatalf("ResolveEffective: %v", err)
+	}
+	wantSource := filepath.Join(dir, UserDefaultFileName)
+	if source != wantSource {
+		t.Errorf("source = %q, want %q", source, wantSource)
+	}
+	if cfg.Session.Name != "user-default" {
+		t.Errorf("Name = %q, want user-default", cfg.Session.Name)
+	}
+}
+
+func TestResolveEffectiveFallsBackToBuiltInDefault(t *testing.T) {
+	chdir(t, t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	cfg, source, err := ResolveEffective(&Settings{Storage: StorageLocal}, "")
+	if err != nil {
+		t.Fatalf("ResolveEffective: %v", err)
+	}
+	if source != "built-in default" {
+		t.Errorf("source = %q, want %q", source, "built-in default")
+	}
+	if cfg == nil {
+		t.Error("cfg = nil, want built-in default config")
+	}
+}
+
 func TestDiscover(t *testing.T) {
 	chdir(t, t.TempDir())
 

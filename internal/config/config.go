@@ -132,6 +132,48 @@ func validateSplits(window string, splits []Split) error {
 	return nil
 }
 
+// ResolveEffective returns the config that would be used for this project,
+// mirroring wyrm's normal discovery order: an explicit path, the discovered
+// local or shared file, the user's default override, then the built-in
+// default. It returns the resolved source alongside the config — a file
+// path, or "built-in default" when none exists on disk. Unlike main's
+// bare-`wyrm` flow, it never falls back to the interactive session picker.
+func ResolveEffective(settings *Settings, explicitPath string) (*Config, string, error) {
+	if explicitPath != "" {
+		cfg, err := Load(explicitPath)
+		if err != nil {
+			return nil, "", err
+		}
+		return cfg, explicitPath, nil
+	}
+
+	if discovered, derr := DiscoverGlobal(settings); derr == nil {
+		cfg, err := Load(discovered)
+		if err != nil {
+			return nil, "", err
+		}
+		return cfg, discovered, nil
+	}
+
+	cfg, err := LoadUserDefault()
+	if err != nil {
+		return nil, "", err
+	}
+	if cfg != nil {
+		path, err := UserDefaultPath()
+		if err != nil {
+			return nil, "", err
+		}
+		return cfg, path, nil
+	}
+
+	cfg, err = LoadDefault()
+	if err != nil {
+		return nil, "", err
+	}
+	return cfg, "built-in default", nil
+}
+
 // Resolve returns the session name and absolute root directory, deriving the
 // name from the root's basename when unset. Root supports $VAR expansion.
 func (s Session) Resolve() (name, absRoot string, err error) {

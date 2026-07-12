@@ -25,18 +25,21 @@ import (
 
 // Session is a running tmux session shown in the picker.
 type Session struct {
-	Name     string
-	Windows  int
-	Attached bool
-	Activity time.Time
+	ID       string    `json:"id" toml:"id"`
+	Name     string    `json:"name" toml:"name"`
+	Windows  int       `json:"windows" toml:"windows"`
+	Attached bool      `json:"attached" toml:"attached"`
+	Activity time.Time `json:"activity" toml:"activity"`
 }
 
 // listFormat mirrors the pipe-separated fields parseSession expects. tmux
 // rewrites control characters (including tabs) in -F output to "_", so a
 // printable delimiter is required. The session name — the only field that may
 // contain the delimiter — is emitted last so a fixed-count SplitN keeps it
-// whole even when it holds a "|".
-const listFormat = "#{session_windows}|#{?session_attached,1,0}|#{session_activity}|#{session_name}"
+// whole even when it holds a "|". The session ID (e.g. "$3") never contains
+// "|" and is used to target this session unambiguously afterward — see
+// tmux.FindSessionID for why the name itself isn't a safe tmux target.
+const listFormat = "#{session_id}|#{session_windows}|#{?session_attached,1,0}|#{session_activity}|#{session_name}"
 
 // ListSessions returns the running tmux sessions, most-recently-active first.
 // When no tmux server is running it returns an empty slice and no error, so
@@ -69,17 +72,18 @@ func parseSession(line string) (Session, bool) {
 	if strings.TrimSpace(line) == "" {
 		return Session{}, false
 	}
-	// SplitN with n=4 so a "|" in the name (the last field) is preserved.
-	f := strings.SplitN(line, "|", 4)
-	if len(f) < 4 {
+	// SplitN with n=5 so a "|" in the name (the last field) is preserved.
+	f := strings.SplitN(line, "|", 5)
+	if len(f) < 5 {
 		return Session{}, false
 	}
-	windows, _ := strconv.Atoi(f[0])
-	epoch, _ := strconv.ParseInt(f[2], 10, 64)
+	windows, _ := strconv.Atoi(f[1])
+	epoch, _ := strconv.ParseInt(f[3], 10, 64)
 	return Session{
-		Name:     f[3],
+		ID:       f[0],
+		Name:     f[4],
 		Windows:  windows,
-		Attached: f[1] == "1",
+		Attached: f[2] == "1",
 		Activity: time.Unix(epoch, 0),
 	}, true
 }
@@ -94,13 +98,14 @@ func sortSessions(s []Session) {
 	})
 }
 
-// KillSession destroys a session by exact name. Unlike session.Kill it runs no
-// lifecycle hooks: the picker operates on arbitrary running sessions whose
-// config we don't have, so this is a plain tmux kill. The "=" forces an exact
-// match rather than tmux's default prefix match.
-func KillSession(r tmux.Runner, name string) error {
-	if out, err := r.Run("kill-session", "-t", "="+name); err != nil {
-		return fmt.Errorf("killing session %q: %v (%s)", name, err, out)
+// KillSession destroys a session by its tmux session ID (e.g. "$3") — see
+// tmux.FindSessionID for why a raw session name isn't used as a tmux target.
+// Unlike session.Kill it runs no lifecycle hooks: the picker operates on
+// arbitrary running sessions whose config we don't have, so this is a plain
+// tmux kill.
+func KillSession(r tmux.Runner, id string) error {
+	if out, err := r.Run("kill-session", "-t", id); err != nil {
+		return fmt.Errorf("killing session %q: %v (%s)", id, err, out)
 	}
 	return nil
 }
@@ -230,8 +235,9 @@ func (m *model) selected() (Session, bool) {
 	return m.filtered[m.cursor], true
 }
 
-// Run shows the interactive picker and returns the chosen session name, or ""
-// if the user aborted or there are no sessions to pick.
+// Run shows the interactive picker and returns the chosen session's tmux ID
+// (e.g. "$3" — see tmux.FindSessionID for why the ID rather than the name),
+// or "" if the user aborted or there are no sessions to pick.
 func Run(r tmux.Runner) (string, error) {
 	sessions, err := ListSessions(r)
 	if err != nil {
@@ -276,7 +282,7 @@ func Run(r tmux.Runner) (string, error) {
 		switch key {
 		case keyEnter:
 			if s, ok := m.selected(); ok {
-				return s.Name, nil
+				return s.ID, nil
 			}
 		case keyAbort:
 			return "", nil
@@ -289,7 +295,7 @@ func Run(r tmux.Runner) (string, error) {
 			if !ok {
 				break
 			}
-			_ = KillSession(r, s.Name) // ignore: it may already be gone
+			_ = KillSession(r, s.ID) // ignore: it may already be gone
 			remaining, listErr := ListSessions(r)
 			if listErr != nil || len(remaining) == 0 {
 				return "", listErr

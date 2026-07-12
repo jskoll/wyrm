@@ -17,55 +17,71 @@ import (
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
-// Create builds the session described by cfg and returns its name. If a
-// session with that name is already running it is left untouched — running
-// panes keep running — and created is false so the caller can attach to it.
-func Create(r tmux.Runner, cfg *config.Config) (name string, created bool, err error) {
+// Create builds the session described by cfg and returns its name and tmux
+// session ID (e.g. "$3"). If a session with that name is already running it
+// is left untouched — running panes keep running — and created is false so
+// the caller can attach to it.
+//
+// Every tmux command below targets the session by ID once one is known
+// (from FindSessionID, or captured off the initial new-session call), never
+// by the raw config-derived name: tmux's -t target syntax treats "." as the
+// window.pane separator, so a name containing "." (e.g. "wyrm.vim") would be
+// misparsed by has-session, new-window, and friends. See tmux.FindSessionID.
+func Create(r tmux.Runner, cfg *config.Config) (name, sessionID string, created bool, err error) {
 	name, root, err := cfg.Session.Resolve()
 	if err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
 	if len(cfg.Windows) == 0 {
-		return "", false, fmt.Errorf("no windows defined in config")
+		return "", "", false, fmt.Errorf("no windows defined in config")
 	}
 
-	// "=" forces an exact name match; bare -t would prefix-match.
-	if _, err := r.Run("has-session", "-t", "="+name); err == nil {
-		return name, false, nil
+	if id, ok, ferr := tmux.FindSessionID(r, name); ferr != nil {
+		return "", "", false, ferr
+	} else if ok {
+		return name, id, false, nil
 	}
 
 	if err := runHook(cfg.Session.OnProjectStart, root); err != nil {
 		warnf("on_project_start failed: %v", err)
 	}
 
+	var id string
 	for i, w := range cfg.Windows {
 		var out string
 		var err error
+		var windowID, paneID string
 		if i == 0 {
-			out, err = r.Run("new-session", "-d", "-P", "-F", "#{window_id}|#{pane_id}",
+			out, err = r.Run("new-session", "-d", "-P", "-F", "#{session_id}|#{window_id}|#{pane_id}",
 				"-s", name, "-n", w.Name, "-c", root)
 			if err != nil {
-				return "", false, fmt.Errorf("creating session: %v (%s)", err, out)
+				return "", "", false, fmt.Errorf("creating session: %v (%s)", err, out)
 			}
+			parts := strings.SplitN(out, "|", 3)
+			if len(parts) != 3 {
+				return "", "", false, fmt.Errorf("unexpected tmux output %q", out)
+			}
+			id, windowID, paneID = parts[0], parts[1], parts[2]
 		} else {
 			out, err = r.Run("new-window", "-P", "-F", "#{window_id}|#{pane_id}",
-				"-t", name, "-n", w.Name, "-c", root)
+				"-t", id, "-n", w.Name, "-c", root)
 			if err != nil {
-				return "", false, fmt.Errorf("creating window %q: %v (%s)", w.Name, err, out)
+				return "", "", false, fmt.Errorf("creating window %q: %v (%s)", w.Name, err, out)
 			}
-		}
-		windowID, paneID, ok := strings.Cut(out, "|")
-		if !ok {
-			return "", false, fmt.Errorf("unexpected tmux output %q", out)
+			var ok bool
+			windowID, paneID, ok = strings.Cut(out, "|")
+			if !ok {
+				return "", "", false, fmt.Errorf("unexpected tmux output %q", out)
+			}
 		}
 		fmt.Printf("window %s: %s\n", windowID, w.Name)
 		buildWindow(r, windowID, paneID, w)
 	}
 
 	if cfg.Session.StartupWindow != "" {
-		selectStartup(r, name, cfg.Session.StartupWindow, cfg.Session.StartupPane)
+		selectStartup(r, id, cfg.Session.StartupWindow, cfg.Session.StartupPane)
 	}
-	return name, true, nil
+	return name, id, true, nil
 }
 
 // Kill runs the on_project_exit hook and destroys the session. The hook is
@@ -75,13 +91,17 @@ func Kill(r tmux.Runner, cfg *config.Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := r.Run("has-session", "-t", name); err != nil {
+	id, ok, err := tmux.FindSessionID(r, name)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
 		return "", fmt.Errorf("session %q is not running", name)
 	}
 	if err := runHook(cfg.Session.OnProjectExit, root); err != nil {
 		warnf("on_project_exit failed: %v", err)
 	}
-	if out, err := r.Run("kill-session", "-t", name); err != nil {
+	if out, err := r.Run("kill-session", "-t", id); err != nil {
 		return "", fmt.Errorf("killing session %q: %v (%s)", name, err, out)
 	}
 	return name, nil

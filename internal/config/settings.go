@@ -145,6 +145,28 @@ func (s *Settings) SharedConfigPath(dir string) (string, error) {
 	return filepath.Join(sharedDir, filepath.Base(abs)+DefaultFileName), nil
 }
 
+// EditTarget returns the path wyrm -edit should open: the discovered config
+// if one exists, otherwise the path a new one should be created at per
+// settings.Storage — the shared path (mirroring -migrate-config's
+// destination) in shared mode, DefaultFileName in the cwd otherwise.
+func EditTarget(settings *Settings) (path string, exists bool, err error) {
+	if discovered, derr := DiscoverGlobal(settings); derr == nil {
+		return discovered, true, nil
+	}
+	if settings != nil && settings.Storage == StorageShared {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", false, err
+		}
+		path, err := settings.SharedConfigPath(cwd)
+		if err != nil {
+			return "", false, err
+		}
+		return path, false, nil
+	}
+	return DefaultFileName, false, nil
+}
+
 // DiscoverGlobal is like Discover, but honors settings.Storage: in
 // StorageShared mode it looks for the shared "<folderName>.wyrm.toml" first,
 // falling back to Discover's normal current-directory search if that file

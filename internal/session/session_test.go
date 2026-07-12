@@ -11,18 +11,21 @@ import (
 
 // fakeRunner records every tmux invocation and fabricates the outputs the
 // real tmux would print for -P -F commands, handing out sequential window
-// (@N) and pane (%N) IDs.
+// (@N) and pane (%N) IDs. "list-sessions" (used by tmux.FindSessionID to
+// check whether a session is already running) returns listOutput verbatim,
+// in the "id|name" format FindSessionID expects; empty means "not running".
 type fakeRunner struct {
-	calls      [][]string
-	winSeq     int
-	paneSeq    int
-	hasSession bool
+	calls   [][]string
+	winSeq  int
+	paneSeq int
 
 	// fail forces the named command (args[0]) to return an error.
 	fail map[string]bool
 	// badNewSessionOutput makes new-session/new-window return output with
 	// no "|" separator, exercising the "unexpected tmux output" path.
 	badNewSessionOutput bool
+	// listOutput is returned verbatim for "list-sessions" calls.
+	listOutput string
 }
 
 func (f *fakeRunner) Run(args ...string) (string, error) {
@@ -31,7 +34,14 @@ func (f *fakeRunner) Run(args ...string) (string, error) {
 		return "boom", errors.New("exit status 1")
 	}
 	switch args[0] {
-	case "new-session", "new-window":
+	case "new-session":
+		f.winSeq++
+		f.paneSeq++
+		if f.badNewSessionOutput {
+			return "malformed", nil
+		}
+		return fmt.Sprintf("$1|@%d|%%%d", f.winSeq, f.paneSeq), nil
+	case "new-window":
 		f.winSeq++
 		f.paneSeq++
 		if f.badNewSessionOutput {
@@ -41,11 +51,8 @@ func (f *fakeRunner) Run(args ...string) (string, error) {
 	case "split-window":
 		f.paneSeq++
 		return fmt.Sprintf("%%%d", f.paneSeq), nil
-	case "has-session":
-		if !f.hasSession {
-			return "no such session", errors.New("exit status 1")
-		}
-		return "", nil
+	case "list-sessions":
+		return f.listOutput, nil
 	}
 	return "", nil
 }
@@ -75,20 +82,23 @@ func TestCreateSplitTree(t *testing.T) {
 	}
 
 	r := &fakeRunner{}
-	name, created, err := Create(r, cfg)
+	name, sessionID, created, err := Create(r, cfg)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if name != "proj" {
 		t.Errorf("name = %q, want proj", name)
 	}
+	if sessionID != "$1" {
+		t.Errorf("sessionID = %q, want $1", sessionID)
+	}
 	if !created {
 		t.Error("created = false, want true")
 	}
 
 	want := []string{
-		"has-session -t =proj",
-		"new-session -d -P -F #{window_id}|#{pane_id} -s proj -n editor -c /tmp/proj",
+		"list-sessions -F #{session_id}|#{session_name}",
+		"new-session -d -P -F #{session_id}|#{window_id}|#{pane_id} -s proj -n editor -c /tmp/proj",
 		// first split entry: no type, reuses initial pane %1
 		"send-keys -t %1 nvm use 18 Enter",
 		"send-keys -t %1 nvim Enter",
@@ -126,7 +136,7 @@ func TestCreateLegacyPanes(t *testing.T) {
 	}
 
 	r := &fakeRunner{}
-	if _, _, err := Create(r, cfg); err != nil {
+	if _, _, _, err := Create(r, cfg); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -159,16 +169,17 @@ func TestCreateMultipleWindowsAndStartup(t *testing.T) {
 	}
 
 	r := &fakeRunner{}
-	if _, _, err := Create(r, cfg); err != nil {
+	_, sessionID, _, err := Create(r, cfg)
+	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
 	got := strings.Join(r.joined(), "\n")
 	for _, want := range []string{
-		"new-session -d -P -F #{window_id}|#{pane_id} -s proj -n first -c /tmp/proj",
-		"new-window -P -F #{window_id}|#{pane_id} -t proj -n second -c /tmp/proj",
-		"select-window -t proj:second",
-		"select-pane -t proj:second.1",
+		"new-session -d -P -F #{session_id}|#{window_id}|#{pane_id} -s proj -n first -c /tmp/proj",
+		"new-window -P -F #{window_id}|#{pane_id} -t " + sessionID + " -n second -c /tmp/proj",
+		"select-window -t " + sessionID + ":second",
+		"select-pane -t " + sessionID + ":second.1",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing call %q in:\n%s", want, got)
@@ -182,7 +193,7 @@ func TestCreateDerivesNameFromRoot(t *testing.T) {
 		Windows: []config.Window{{Name: "w"}},
 	}
 	r := &fakeRunner{}
-	name, _, err := Create(r, cfg)
+	name, _, _, err := Create(r, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +204,7 @@ func TestCreateDerivesNameFromRoot(t *testing.T) {
 
 func TestCreateRequiresWindows(t *testing.T) {
 	cfg := &config.Config{Session: config.Session{Name: "x"}}
-	if _, _, err := Create(&fakeRunner{}, cfg); err == nil {
+	if _, _, _, err := Create(&fakeRunner{}, cfg); err == nil {
 		t.Error("Create with no windows: want error, got nil")
 	}
 }
@@ -204,20 +215,44 @@ func TestCreateLeavesRunningSessionUntouched(t *testing.T) {
 		Windows: []config.Window{{Name: "w", Splits: []config.Split{{Command: "nvim"}}}},
 	}
 
-	r := &fakeRunner{hasSession: true}
-	name, created, err := Create(r, cfg)
+	r := &fakeRunner{listOutput: "$9|proj"}
+	name, sessionID, created, err := Create(r, cfg)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if name != "proj" {
 		t.Errorf("name = %q, want proj", name)
 	}
+	if sessionID != "$9" {
+		t.Errorf("sessionID = %q, want $9", sessionID)
+	}
 	if created {
 		t.Error("created = true, want false for a running session")
 	}
 	got := r.joined()
-	if len(got) != 1 || got[0] != "has-session -t =proj" {
+	if len(got) != 1 || got[0] != "list-sessions -F #{session_id}|#{session_name}" {
 		t.Errorf("running session must only be probed, got calls:\n%s", strings.Join(got, "\n"))
+	}
+}
+
+// TestCreateLeavesRunningSessionUntouchedDottedName guards against the bug
+// where a session name containing "." (e.g. "wyrm.vim") couldn't be found by
+// name: tmux's -t target syntax misparses such names, so the existence check
+// must match by comparing session_name strings in Go (via
+// tmux.FindSessionID), not by passing the name through -t.
+func TestCreateLeavesRunningSessionUntouchedDottedName(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "wyrm.vim", Root: "/tmp/proj"},
+		Windows: []config.Window{{Name: "w"}},
+	}
+
+	r := &fakeRunner{listOutput: "$4|wyrm.vim"}
+	name, sessionID, created, err := Create(r, cfg)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if name != "wyrm.vim" || sessionID != "$4" || created {
+		t.Errorf("Create = %q, %q, %v; want wyrm.vim, $4, false", name, sessionID, created)
 	}
 }
 
@@ -228,7 +263,7 @@ func TestKill(t *testing.T) {
 	}
 
 	t.Run("not running", func(t *testing.T) {
-		r := &fakeRunner{hasSession: false}
+		r := &fakeRunner{}
 		if _, err := Kill(r, cfg); err == nil {
 			t.Fatal("want error for missing session")
 		}
@@ -240,7 +275,7 @@ func TestKill(t *testing.T) {
 	})
 
 	t.Run("running", func(t *testing.T) {
-		r := &fakeRunner{hasSession: true}
+		r := &fakeRunner{listOutput: "$7|proj"}
 		name, err := Kill(r, cfg)
 		if err != nil {
 			t.Fatalf("Kill: %v", err)
@@ -249,7 +284,7 @@ func TestKill(t *testing.T) {
 			t.Errorf("name = %q, want proj", name)
 		}
 		got := strings.Join(r.joined(), "\n")
-		if !strings.Contains(got, "kill-session -t proj") {
+		if !strings.Contains(got, "kill-session -t $7") {
 			t.Errorf("missing kill-session call:\n%s", got)
 		}
 	})
@@ -259,7 +294,7 @@ func TestKill(t *testing.T) {
 			Session: config.Session{Name: "proj", Root: "/tmp/proj", OnProjectExit: "exit 1"},
 			Windows: []config.Window{{Name: "w"}},
 		}
-		r := &fakeRunner{hasSession: true}
+		r := &fakeRunner{listOutput: "$7|proj"}
 		name, err := Kill(r, exitCfg)
 		if err != nil {
 			t.Fatalf("Kill: %v", err)
@@ -270,7 +305,7 @@ func TestKill(t *testing.T) {
 	})
 
 	t.Run("kill-session error", func(t *testing.T) {
-		r := &fakeRunner{hasSession: true, fail: map[string]bool{"kill-session": true}}
+		r := &fakeRunner{listOutput: "$7|proj", fail: map[string]bool{"kill-session": true}}
 		if _, err := Kill(r, cfg); err == nil || !strings.Contains(err.Error(), "killing session") {
 			t.Errorf("Kill error = %v, want containing %q", err, "killing session")
 		}
@@ -283,7 +318,7 @@ func TestCreateOnProjectStartFailureStillCreates(t *testing.T) {
 		Windows: []config.Window{{Name: "w"}},
 	}
 	r := &fakeRunner{}
-	name, created, err := Create(r, cfg)
+	name, _, created, err := Create(r, cfg)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -298,7 +333,7 @@ func TestCreateNewSessionError(t *testing.T) {
 		Windows: []config.Window{{Name: "w"}},
 	}
 	r := &fakeRunner{fail: map[string]bool{"new-session": true}}
-	if _, _, err := Create(r, cfg); err == nil || !strings.Contains(err.Error(), "creating session") {
+	if _, _, _, err := Create(r, cfg); err == nil || !strings.Contains(err.Error(), "creating session") {
 		t.Errorf("Create error = %v, want containing %q", err, "creating session")
 	}
 }
@@ -309,7 +344,7 @@ func TestCreateNewWindowError(t *testing.T) {
 		Windows: []config.Window{{Name: "first"}, {Name: "second"}},
 	}
 	r := &fakeRunner{fail: map[string]bool{"new-window": true}}
-	_, _, err := Create(r, cfg)
+	_, _, _, err := Create(r, cfg)
 	if err == nil || !strings.Contains(err.Error(), `creating window "second"`) {
 		t.Errorf("Create error = %v, want containing %q", err, `creating window "second"`)
 	}
@@ -321,7 +356,7 @@ func TestCreateUnexpectedOutput(t *testing.T) {
 		Windows: []config.Window{{Name: "w"}},
 	}
 	r := &fakeRunner{badNewSessionOutput: true}
-	if _, _, err := Create(r, cfg); err == nil || !strings.Contains(err.Error(), "unexpected tmux output") {
+	if _, _, _, err := Create(r, cfg); err == nil || !strings.Contains(err.Error(), "unexpected tmux output") {
 		t.Errorf("Create error = %v, want containing %q", err, "unexpected tmux output")
 	}
 }
@@ -332,7 +367,7 @@ func TestCreatePreWindowOnly(t *testing.T) {
 		Windows: []config.Window{{Name: "w", PreWindow: "echo hi"}},
 	}
 	r := &fakeRunner{}
-	if _, _, err := Create(r, cfg); err != nil {
+	if _, _, _, err := Create(r, cfg); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	got := r.joined()
@@ -360,7 +395,7 @@ func TestApplySplitsSplitError(t *testing.T) {
 		}},
 	}
 	r := &fakeRunner{fail: map[string]bool{"split-window": true}}
-	if _, _, err := Create(r, cfg); err != nil {
+	if _, _, _, err := Create(r, cfg); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	got := strings.Join(r.joined(), "\n")
@@ -385,7 +420,7 @@ func TestApplyPanesSplitError(t *testing.T) {
 		}},
 	}
 	r := &fakeRunner{fail: map[string]bool{"split-window": true}}
-	if _, _, err := Create(r, cfg); err != nil {
+	if _, _, _, err := Create(r, cfg); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	got := strings.Join(r.joined(), "\n")
@@ -406,7 +441,7 @@ func TestApplyPanesSelectLayoutError(t *testing.T) {
 		}},
 	}
 	r := &fakeRunner{fail: map[string]bool{"select-layout": true}}
-	if _, _, err := Create(r, cfg); err != nil {
+	if _, _, _, err := Create(r, cfg); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 }
@@ -417,7 +452,7 @@ func TestSendKeysError(t *testing.T) {
 		Windows: []config.Window{{Name: "w", Splits: []config.Split{{Command: "nvim"}}}},
 	}
 	r := &fakeRunner{fail: map[string]bool{"send-keys": true}}
-	if _, _, err := Create(r, cfg); err != nil {
+	if _, _, _, err := Create(r, cfg); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 }
@@ -428,7 +463,7 @@ func TestSelectStartupInvalidWindowName(t *testing.T) {
 		Windows: []config.Window{{Name: "w"}},
 	}
 	r := &fakeRunner{}
-	if _, _, err := Create(r, cfg); err != nil {
+	if _, _, _, err := Create(r, cfg); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	got := strings.Join(r.joined(), "\n")
@@ -443,7 +478,7 @@ func TestSelectStartupSelectWindowError(t *testing.T) {
 		Windows: []config.Window{{Name: "w"}},
 	}
 	r := &fakeRunner{fail: map[string]bool{"select-window": true}}
-	if _, _, err := Create(r, cfg); err != nil {
+	if _, _, _, err := Create(r, cfg); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	got := strings.Join(r.joined(), "\n")
@@ -459,7 +494,7 @@ func TestSelectStartupSelectPaneError(t *testing.T) {
 		Windows: []config.Window{{Name: "w"}},
 	}
 	r := &fakeRunner{fail: map[string]bool{"select-pane": true}}
-	if _, _, err := Create(r, cfg); err != nil {
+	if _, _, _, err := Create(r, cfg); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 }

@@ -64,6 +64,9 @@ wyrm                       # use .wyrm.toml (or legacy .tmuxconfig) in the cwd
 wyrm -config path/to/file  # explicit config
 wyrm -kill                 # destroy the session (runs on_project_exit first)
 wyrm -pick                 # fuzzy-pick a running session and attach to it
+wyrm -edit                 # open the resolved config in $EDITOR, creating one if needed
+wyrm -validate             # check the effective config parses and validates, without building a session
+wyrm -list                 # list running tmux sessions non-interactively
 wyrm -migrate-config       # move the local config into the shared config directory
 wyrm -version
 ```
@@ -73,6 +76,30 @@ If neither `.wyrm.toml` nor `.tmuxconfig` is found, wyrm falls back to
 built-in default: a single unnamed window rooted at the current directory —
 unless tmux sessions are already running, in which case `wyrm` opens the
 session picker (below) instead.
+
+## Editing, validating, and listing
+
+`wyrm -edit` opens the config wyrm would actually use — wherever discovery
+(local, shared, or `-config`) finds it — in `$EDITOR` (falling back to
+`vi`). If none exists yet, it creates one at the right spot for your
+`storage` setting (a local `.wyrm.toml`, or the shared path `-migrate-config`
+would use) before opening it. After you save, wyrm re-parses the file and
+prints a warning (not an error) if it doesn't validate — you're free to save
+a work-in-progress and fix it later.
+
+`wyrm -validate` runs that same parse-and-validate check non-interactively,
+without opening an editor or building a session — handy in a pre-commit hook
+or CI for a repo that versions its `.wyrm.toml`.
+
+`wyrm -list` prints the running tmux sessions non-interactively (unlike
+`-pick`, no interactive UI) for scripts and status bars. Add `-format json`
+or `-format toml` for machine-readable output instead of the default aligned
+table:
+
+```sh
+wyrm -list                  # name / window count / attached marker, one per line
+wyrm -list -format json | jq .
+```
 
 ## Storing configs in a shared directory
 
