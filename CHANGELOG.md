@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-07-12
+
 ### Added
 - `wyrm -pick`: an interactive fuzzy picker for running tmux sessions. Type to
   filter, arrow keys (or Ctrl-N/Ctrl-P) to move, Enter to attach (or
@@ -65,7 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/jskoll/wyrm/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/jskoll/wyrm/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/jskoll/wyrm/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/jskoll/wyrm/releases/tag/v0.1.0
