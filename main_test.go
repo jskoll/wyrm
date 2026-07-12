@@ -159,7 +159,7 @@ func TestRunAttachError(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	r := &fakeRunner{}
-	attach := func(name string) error { return errors.New("boom") }
+	attach := func(_ string) error { return errors.New("boom") }
 
 	code := run([]string{"-config", path}, &stdout, &stderr, r, func() bool { return false }, attach)
 	if code != 1 {

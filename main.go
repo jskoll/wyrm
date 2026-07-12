@@ -35,7 +35,7 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 	}
 
 	if *showVersion {
-		fmt.Fprintln(stdout, "wyrm "+version)
+		_, _ = fmt.Fprintln(stdout, "wyrm "+version)
 		return 0
 	}
 
@@ -57,7 +57,7 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 				}
 			}
 			if cfg, err = config.LoadDefault(); err != nil {
-				fmt.Fprintln(stderr, "wyrm: "+err.Error())
+				_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
 				return 1
 			}
 		} else {
@@ -67,7 +67,7 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 	if cfg == nil {
 		var err error
 		if cfg, err = config.Load(path); err != nil {
-			fmt.Fprintln(stderr, "wyrm: "+err.Error())
+			_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
 			return 1
 		}
 	}
@@ -75,22 +75,22 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 	if *kill {
 		name, err := session.Kill(runner, cfg)
 		if err != nil {
-			fmt.Fprintln(stderr, "wyrm: "+err.Error())
+			_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
 			return 1
 		}
-		fmt.Fprintf(stdout, "killed session %s\n", name)
+		_, _ = fmt.Fprintf(stdout, "killed session %s\n", name)
 		return 0
 	}
 
 	name, created, err := session.Create(runner, cfg)
 	if err != nil {
-		fmt.Fprintln(stderr, "wyrm: "+err.Error())
+		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
 		return 1
 	}
 	if created {
-		fmt.Fprintf(stdout, "created session %s\n", name)
+		_, _ = fmt.Fprintf(stdout, "created session %s\n", name)
 	} else {
-		fmt.Fprintf(stdout, "session %s already running, attaching\n", name)
+		_, _ = fmt.Fprintf(stdout, "session %s already running, attaching\n", name)
 	}
 
 	return attachOrSwitch(runner, stderr, insideTmux, attach, name)
@@ -101,7 +101,7 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 func runPicker(runner tmux.Runner, stderr io.Writer, insideTmux func() bool, attach func(string) error) int {
 	name, err := picker.Run(runner)
 	if err != nil {
-		fmt.Fprintln(stderr, "wyrm: "+err.Error())
+		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
 		return 1
 	}
 	if name == "" {
@@ -115,14 +115,14 @@ func runPicker(runner tmux.Runner, stderr io.Writer, insideTmux func() bool, att
 func attachOrSwitch(runner tmux.Runner, stderr io.Writer, insideTmux func() bool, attach func(string) error, name string) int {
 	if insideTmux() {
 		if out, err := runner.Run("switch-client", "-t", name); err != nil {
-			fmt.Fprintf(stderr, "wyrm: switching to session: %v (%s)\n", err, out)
+			_, _ = fmt.Fprintf(stderr, "wyrm: switching to session: %v (%s)\n", err, out)
 			return 1
 		}
 		return 0
 	}
 
 	if err := attach(name); err != nil {
-		fmt.Fprintf(stderr, "wyrm: attaching to session: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "wyrm: attaching to session: %v\n", err)
 		return 1
 	}
 	return 0
