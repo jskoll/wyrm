@@ -1,5 +1,22 @@
 # Configuration reference
 
+## Where wyrm looks for a config
+
+By default wyrm looks for `.wyrm.toml` (then the legacy `.tmuxconfig`) in the
+current directory. To keep project configs in one shared place instead,
+create a global settings file at `~/.config/wyrm/config.toml`
+(`$XDG_CONFIG_HOME/wyrm/config.toml` if set):
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `storage` | string | `local` | `local` (search the cwd, as always) or `shared` |
+| `shared_dir` | string | `~/.config/wyrm/settings` | Directory to search in `shared` mode; `~` and `$VAR` are expanded |
+
+In `shared` mode, wyrm looks for `<folderName>.wyrm.toml` (the current
+directory's basename) inside `shared_dir` first, falling back to the normal
+local search if it's missing. Run `wyrm -migrate-config` to move an existing
+local config into the shared directory under the right name.
+
 ## `[session]`
 
 | Key | Type | Default | Description |

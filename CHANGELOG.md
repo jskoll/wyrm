@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Shared config storage: set `storage = "shared"` in a new global settings
+  file (`~/.config/wyrm/config.toml`) to keep project configs in one
+  directory (default `~/.config/wyrm/settings`) instead of `.wyrm.toml` next
+  to each project, named `<folderName>.wyrm.toml`. `wyrm -migrate-config`
+  moves an existing local config there.
+
 ## [0.1.3] - 2026-07-12
 
 ### Added

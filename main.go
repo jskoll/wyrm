@@ -2,10 +2,12 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/jskoll/wyrm/internal/config"
 	"github.com/jskoll/wyrm/internal/picker"
@@ -30,6 +32,7 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 	kill := fs.Bool("kill", false, "kill the session (runs on_project_exit) instead of creating it")
 	pick := fs.Bool("pick", false, "pick a running tmux session to attach to")
 	showVersion := fs.Bool("version", false, "print version and exit")
+	migrateConfig := fs.Bool("migrate-config", false, "move the local config into the shared config directory")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -39,6 +42,16 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 		return 0
 	}
 
+	settings, err := config.LoadSettings()
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+		return 1
+	}
+
+	if *migrateConfig {
+		return runMigrateConfig(stdout, stderr, settings)
+	}
+
 	if *pick {
 		return runPicker(runner, stderr, insideTmux, attach)
 	}
@@ -46,7 +59,7 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 	path := *configPath
 	var cfg *config.Config
 	if path == "" {
-		discovered, err := config.Discover()
+		discovered, err := config.DiscoverGlobal(settings)
 		if err != nil {
 			// No config here: if sessions are already running, offer to pick
 			// one instead of silently building the default session. -kill is
@@ -94,6 +107,55 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 	}
 
 	return attachOrSwitch(runner, stderr, insideTmux, attach, name)
+}
+
+// runMigrateConfig moves the current directory's local config file into the
+// shared config directory, named "<folderName>.wyrm.toml". It does not
+// touch the storage setting itself; run this after (or before) switching
+// settings.Storage to "shared".
+func runMigrateConfig(stdout, stderr io.Writer, settings *config.Settings) int {
+	src, err := config.Discover()
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "wyrm: no local config to migrate: "+err.Error())
+		return 1
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+		return 1
+	}
+	dst, err := settings.SharedConfigPath(cwd)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+		return 1
+	}
+
+	if _, err := os.Stat(dst); err == nil {
+		_, _ = fmt.Fprintf(stderr, "wyrm: %s already exists, remove it first\n", dst)
+		return 1
+	} else if !errors.Is(err, os.ErrNotExist) {
+		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+		return 1
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+		return 1
+	}
+	if err := os.Rename(src, dst); err != nil {
+		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+		return 1
+	}
+
+	_, _ = fmt.Fprintf(stdout, "moved %s to %s\n", src, dst)
+	if settings.Storage != config.StorageShared {
+		settingsPath, err := config.SettingsPath()
+		if err == nil {
+			_, _ = fmt.Fprintf(stdout, "note: set storage = \"shared\" in %s for wyrm to use it\n", settingsPath)
+		}
+	}
+	return 0
 }
 
 // runPicker lets the user choose a running session and attaches to it. An

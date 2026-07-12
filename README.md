@@ -64,6 +64,7 @@ wyrm                       # use .wyrm.toml (or legacy .tmuxconfig) in the cwd
 wyrm -config path/to/file  # explicit config
 wyrm -kill                 # destroy the session (runs on_project_exit first)
 wyrm -pick                 # fuzzy-pick a running session and attach to it
+wyrm -migrate-config       # move the local config into the shared config directory
 wyrm -version
 ```
 
@@ -71,6 +72,25 @@ If neither `.wyrm.toml` nor `.tmuxconfig` is found, wyrm falls back to a
 built-in default: a single unnamed window rooted at the current directory —
 unless tmux sessions are already running, in which case `wyrm` opens the
 session picker (below) instead.
+
+## Storing configs in a shared directory
+
+By default wyrm looks for `.wyrm.toml` in the current directory. If you'd
+rather keep all your project configs in one place (e.g. to version them
+together, or avoid an untracked file in every repo), set `storage = "shared"`
+in wyrm's global settings file at `~/.config/wyrm/config.toml`
+(`$XDG_CONFIG_HOME/wyrm/config.toml` if set):
+
+```toml
+storage = "shared"
+# shared_dir = "~/.config/wyrm/settings"  # optional, this is the default
+```
+
+In shared mode, running `wyrm` in a directory named `myproject` looks for
+`myproject.wyrm.toml` in the shared directory first, falling back to the
+usual local search if it isn't there. `wyrm -migrate-config` moves the
+current directory's local config into the shared directory under the right
+name for you.
 
 ## Picking a running session
 

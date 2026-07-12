@@ -10,6 +10,22 @@ import (
 	"testing"
 )
 
+// TestMain isolates every test in this package from the developer's real
+// global wyrm settings file (~/.config/wyrm/config.toml), so run()'s call
+// to config.LoadSettings() always sees defaults unless a test overrides
+// HOME/XDG_CONFIG_HOME itself.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "wyrm-test-config")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("XDG_CONFIG_HOME", dir)
+	os.Setenv("HOME", dir)
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
 // fakeRunner is a minimal tmux.Runner double, mirroring the one in
 // internal/session's tests: it fabricates -P -F output for commands that
 // need it and can be told to fail specific commands by name.
@@ -224,6 +240,86 @@ func TestRunAlreadyRunningAttaches(t *testing.T) {
 	if attachCalled != "proj" {
 		t.Errorf("attach called with %q, want proj", attachCalled)
 	}
+}
+
+func TestRunMigrateConfig(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("XDG_CONFIG_HOME", "")
+
+		projectDir := t.TempDir()
+		chdir(t, projectDir)
+		if err := os.WriteFile(".wyrm.toml", []byte(validConfig), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"-migrate-config"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+		if code != 0 {
+			t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+		}
+
+		want := filepath.Join(home, ".config", "wyrm", "settings", filepath.Base(projectDir)+".wyrm.toml")
+		if _, err := os.Stat(want); err != nil {
+			t.Errorf("expected migrated file at %s: %v", want, err)
+		}
+		if _, err := os.Stat(".wyrm.toml"); !os.IsNotExist(err) {
+			t.Errorf("local .wyrm.toml still present after migration")
+		}
+		if !strings.Contains(stdout.String(), "moved") {
+			t.Errorf("stdout = %q, want mention of moved file", stdout.String())
+		}
+		if !strings.Contains(stdout.String(), "note:") {
+			t.Errorf("stdout = %q, want a note about enabling shared storage", stdout.String())
+		}
+	})
+
+	t.Run("no local config", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("XDG_CONFIG_HOME", "")
+		chdir(t, t.TempDir())
+
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"-migrate-config"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+		if code != 1 {
+			t.Errorf("exit code = %d, want 1", code)
+		}
+		if !strings.Contains(stderr.String(), "no local config") {
+			t.Errorf("stderr = %q, want no-local-config message", stderr.String())
+		}
+	})
+
+	t.Run("destination already exists", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("XDG_CONFIG_HOME", "")
+
+		projectDir := t.TempDir()
+		chdir(t, projectDir)
+		if err := os.WriteFile(".wyrm.toml", []byte(validConfig), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		sharedDir := filepath.Join(home, ".config", "wyrm", "settings")
+		if err := os.MkdirAll(sharedDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		dst := filepath.Join(sharedDir, filepath.Base(projectDir)+".wyrm.toml")
+		if err := os.WriteFile(dst, []byte(""), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"-migrate-config"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+		if code != 1 {
+			t.Errorf("exit code = %d, want 1", code)
+		}
+		if !strings.Contains(stderr.String(), "already exists") {
+			t.Errorf("stderr = %q, want already-exists message", stderr.String())
+		}
+	})
 }
 
 func TestRunKill(t *testing.T) {
