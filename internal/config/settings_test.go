@@ -65,13 +65,13 @@ func TestResolvedSharedDirDefaultExpandsHome(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	s := &Settings{}
-	got, err := s.resolvedSharedDir()
+	got, err := s.ResolvedSharedDir()
 	if err != nil {
-		t.Fatalf("resolvedSharedDir: %v", err)
+		t.Fatalf("ResolvedSharedDir: %v", err)
 	}
 	want := filepath.Join(home, ".config", "wyrm", "settings")
 	if got != want {
-		t.Errorf("resolvedSharedDir = %q, want %q", got, want)
+		t.Errorf("ResolvedSharedDir = %q, want %q", got, want)
 	}
 }
 

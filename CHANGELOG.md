@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Dynamic shell completion for bash, zsh, and fish (`completions/`),
+  installed automatically by the Homebrew formula. Completes flag names,
+  `-format`'s values, `-config` (real local/shared config paths), and a
+  bare argument (real running session names).
+- `wyrm <name>`: attach or switch directly to a running session by exact
+  name, without the interactive picker — what shell completion completes a
+  bare argument to.
+- `-list -format names`: bare newline-separated session names, for
+  completion and scripting (e.g. piping into `fzf`).
+- `-list-configs`: list candidate config file paths (local + shared
+  directory), regardless of the current `storage` setting.
+
 ## [0.1.7] - 2026-07-13
 
 ### Added

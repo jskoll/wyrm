@@ -112,9 +112,9 @@ func LoadSettings() (*Settings, error) {
 	return s, nil
 }
 
-// resolvedSharedDir returns the absolute shared config directory, expanding
+// ResolvedSharedDir returns the absolute shared config directory, expanding
 // "~" and $VARS and defaulting to DefaultSharedDir when unset.
-func (s *Settings) resolvedSharedDir() (string, error) {
+func (s *Settings) ResolvedSharedDir() (string, error) {
 	dir := s.SharedDir
 	if dir == "" {
 		dir = DefaultSharedDir
@@ -134,7 +134,7 @@ func (s *Settings) resolvedSharedDir() (string, error) {
 // project rooted at dir: "<folderName>.wyrm.toml" inside the shared
 // config directory.
 func (s *Settings) SharedConfigPath(dir string) (string, error) {
-	sharedDir, err := s.resolvedSharedDir()
+	sharedDir, err := s.ResolvedSharedDir()
 	if err != nil {
 		return "", err
 	}

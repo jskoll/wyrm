@@ -342,6 +342,35 @@ func TestRunListTOML(t *testing.T) {
 	}
 }
 
+func TestRunListNames(t *testing.T) {
+	r := &fakeRunner{listOutput: strings.Join([]string{
+		"$1|3|1|2000|alpha",
+		"$2|1|0|1000|beta",
+	}, "\n")}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"-list", "-format", "names"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "alpha\nbeta" {
+		t.Errorf("stdout = %q, want bare names \"alpha\\nbeta\"", got)
+	}
+}
+
+func TestRunListNamesEmpty(t *testing.T) {
+	r := &fakeRunner{listOutput: "no server running on /tmp/tmux-1000/default"}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"-list", "-format", "names"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Errorf("stdout = %q, want empty output", stdout.String())
+	}
+}
+
 func TestRunListUnknownFormat(t *testing.T) {
 	r := &fakeRunner{listOutput: "$1|2|0|1000|alpha"}
 
@@ -545,6 +574,113 @@ func TestRunAlreadyRunningAttaches(t *testing.T) {
 	}
 	if attachCalled != "$5" {
 		t.Errorf("attach called with %q, want the existing session's tmux ID $5", attachCalled)
+	}
+}
+
+func TestRunAttachByNameFound(t *testing.T) {
+	r := &fakeRunner{listOutput: "$5|myproj"}
+	attachCalled := ""
+	attach := func(name string) error { attachCalled = name; return nil }
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"myproj"}, &stdout, &stderr, r, func() bool { return false }, attach)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if attachCalled != "$5" {
+		t.Errorf("attach called with %q, want the session's tmux ID $5", attachCalled)
+	}
+}
+
+func TestRunAttachByNameInsideTmux(t *testing.T) {
+	r := &fakeRunner{listOutput: "$5|myproj"}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"myproj"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	found := false
+	for _, c := range r.calls {
+		if len(c) > 0 && c[0] == "switch-client" {
+			found = true
+			if len(c) < 3 || c[2] != "$5" {
+				t.Errorf("switch-client args = %v, want -t $5", c)
+			}
+		}
+	}
+	if !found {
+		t.Error("switch-client was not called when inside tmux")
+	}
+}
+
+func TestRunAttachByNameNotFound(t *testing.T) {
+	r := &fakeRunner{}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"nonexistent"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), `no running session named "nonexistent"`) {
+		t.Errorf("stderr = %q, want a not-found message", stderr.String())
+	}
+}
+
+func TestRunListConfigsLocal(t *testing.T) {
+	chdir(t, t.TempDir())
+	if err := os.WriteFile(config.DefaultFileName, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"-list-configs"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != config.DefaultFileName {
+		t.Errorf("stdout = %q, want %q", got, config.DefaultFileName)
+	}
+}
+
+func TestRunListConfigsShared(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	chdir(t, t.TempDir())
+
+	sharedDir := filepath.Join(home, ".config", "wyrm", "settings")
+	if err := os.MkdirAll(sharedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sharedConfig := filepath.Join(sharedDir, "otherproj"+config.DefaultFileName)
+	if err := os.WriteFile(sharedConfig, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"-list-configs"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != sharedConfig {
+		t.Errorf("stdout = %q, want %q", got, sharedConfig)
+	}
+}
+
+func TestRunListConfigsNone(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	chdir(t, t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"-list-configs"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Errorf("stdout = %q, want empty output", stdout.String())
 	}
 }
 

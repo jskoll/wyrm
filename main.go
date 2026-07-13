@@ -39,8 +39,9 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 	migrateConfig := fs.Bool("migrate-config", false, "move the local config into the shared config directory")
 	validate := fs.Bool("validate", false, "check that the effective config parses and validates, without building a session")
 	list := fs.Bool("list", false, "list running tmux sessions non-interactively")
-	format := fs.String("format", "table", "output format for -list: table, json, or toml")
+	format := fs.String("format", "table", "output format for -list: table, json, toml, or names")
 	edit := fs.Bool("edit", false, "open the resolved config in $EDITOR, creating one if none exists")
+	listConfigs := fs.Bool("list-configs", false, "list candidate config file paths (for shell completion)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -48,6 +49,10 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 	if *showVersion {
 		_, _ = fmt.Fprintln(stdout, "wyrm "+version)
 		return 0
+	}
+
+	if fs.NArg() > 0 {
+		return runAttachByName(runner, stderr, insideTmux, attach, fs.Arg(0))
 	}
 
 	settings, err := config.LoadSettings()
@@ -66,6 +71,10 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 
 	if *edit {
 		return runEdit(stderr, settings, *configPath)
+	}
+
+	if *listConfigs {
+		return runListConfigs(stdout, settings)
 	}
 
 	if *list {
@@ -133,6 +142,41 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 	}
 
 	return attachOrSwitch(runner, stderr, insideTmux, attach, sessionID)
+}
+
+// runAttachByName attaches or switches directly to the exact-named running
+// session, without the interactive picker (-pick). This is what shell
+// completion (see completions/) completes a bare positional argument to.
+func runAttachByName(runner tmux.Runner, stderr io.Writer, insideTmux func() bool, attach func(string) error, name string) int {
+	id, ok, err := tmux.FindSessionID(runner, name)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+		return 1
+	}
+	if !ok {
+		_, _ = fmt.Fprintf(stderr, "wyrm: no running session named %q\n", name)
+		return 1
+	}
+	return attachOrSwitch(runner, stderr, insideTmux, attach, id)
+}
+
+// runListConfigs prints config paths wyrm knows about: the local file (if
+// present) and every candidate in the shared config directory. These are
+// the candidates shell completion offers for -config; -config itself can
+// point at any of them regardless of the current storage setting.
+func runListConfigs(stdout io.Writer, settings *config.Settings) int {
+	for _, name := range []string{config.DefaultFileName, config.LegacyFileName} {
+		if _, err := os.Stat(name); err == nil {
+			_, _ = fmt.Fprintln(stdout, name)
+		}
+	}
+	if dir, err := settings.ResolvedSharedDir(); err == nil {
+		matches, _ := filepath.Glob(filepath.Join(dir, "*"+config.DefaultFileName))
+		for _, m := range matches {
+			_, _ = fmt.Fprintln(stdout, m)
+		}
+	}
+	return 0
 }
 
 // runMigrateConfig moves the current directory's local config file into the
@@ -273,6 +317,10 @@ func runList(runner tmux.Runner, stdout, stderr io.Writer, format string) int {
 		for _, s := range sessions {
 			_, _ = fmt.Fprintln(stdout, formatSessionRow(s))
 		}
+	case "names":
+		for _, s := range sessions {
+			_, _ = fmt.Fprintln(stdout, s.Name)
+		}
 	case "json":
 		data, err := json.MarshalIndent(sessions, "", "  ")
 		if err != nil {
@@ -290,7 +338,7 @@ func runList(runner tmux.Runner, stdout, stderr io.Writer, format string) int {
 		}
 		_, _ = stdout.Write(data)
 	default:
-		_, _ = fmt.Fprintf(stderr, "wyrm: unknown -format %q (use table, json, or toml)\n", format)
+		_, _ = fmt.Fprintf(stderr, "wyrm: unknown -format %q (use table, json, toml, or names)\n", format)
 		return 1
 	}
 	return 0

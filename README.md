@@ -61,12 +61,14 @@ Or build from a clone: `make install` (uses `go install` with a stamped version)
 
 ```sh
 wyrm                       # use .wyrm.toml (or legacy .tmuxconfig) in the cwd
+wyrm <name>                # attach/switch directly to a running session by name (tab-completable)
 wyrm -config path/to/file  # explicit config
 wyrm -kill                 # destroy the session (runs on_project_exit first)
 wyrm -pick                 # fuzzy-pick a running session and attach to it
 wyrm -edit                 # open the resolved config in $EDITOR, creating one if needed
 wyrm -validate             # check the effective config parses and validates, without building a session
 wyrm -list                 # list running tmux sessions non-interactively
+wyrm -list-configs         # list candidate config file paths (used by shell completion)
 wyrm -migrate-config       # move the local config into the shared config directory
 wyrm -version
 ```
@@ -93,13 +95,20 @@ or CI for a repo that versions its `.wyrm.toml`.
 
 `wyrm -list` prints the running tmux sessions non-interactively (unlike
 `-pick`, no interactive UI) for scripts and status bars. Add `-format json`
-or `-format toml` for machine-readable output instead of the default aligned
-table:
+or `-format toml` for machine-readable output, or `-format names` for a bare
+newline-separated list (handy for piping into `fzf` or another tool),
+instead of the default aligned table:
 
 ```sh
 wyrm -list                  # name / window count / attached marker, one per line
 wyrm -list -format json | jq .
+wyrm -list -format names | fzf | xargs wyrm
 ```
+
+`wyrm -list-configs` prints the config file paths wyrm knows about — the
+local file (if present) and every config in the shared directory (see
+below) — regardless of the current `storage` setting. It exists mainly to
+back shell completion for `-config`, but works standalone too.
 
 ## Storing configs in a shared directory
 
@@ -151,6 +160,37 @@ Window counts are shown in cyan and `(attached)` in green. Set
 [`NO_COLOR`](https://no-color.org) (any value) to disable color — the rest
 of the picker's styling (bold, dim, the reverse-video selection highlight)
 isn't affected, since it isn't color.
+
+If you already know the session's name, `wyrm <name>` skips the picker and
+attaches (or `switch-client`s) directly to it — exact match only, no fuzzy
+matching. Combined with shell completion (below), this means `wyrm <TAB>`
+tab-completes to real running session names.
+
+## Shell completion
+
+Completion scripts for bash, zsh, and fish live in
+[`completions/`](https://github.com/jskoll/wyrm/tree/main/completions).
+They complete flag names, `-format`'s values, `-config` (to the local file
+and every config in the shared directory, via `wyrm -list-configs`), and a
+bare argument (to running session names, via `wyrm -list -format names`) —
+so any completion involving live state shells back out to wyrm itself
+rather than guessing.
+
+`brew install jskoll/tap/wyrm` installs all three automatically. Installing
+some other way:
+
+```sh
+# bash (needs bash-completion installed)
+source completions/wyrm.bash                                 # this shell only
+cp completions/wyrm.bash /usr/local/etc/bash_completion.d/    # every shell (macOS + Homebrew's bash-completion)
+
+# zsh
+cp completions/_wyrm ~/.zsh/completions/_wyrm   # any directory on your $fpath
+# then: autoload -Uz compinit && compinit
+
+# fish
+cp completions/wyrm.fish ~/.config/fish/completions/wyrm.fish  # auto-loaded
+```
 
 If a session with the same name is already running, wyrm **reattaches** to
 it instead of rebuilding it. Otherwise it builds the session fresh, then

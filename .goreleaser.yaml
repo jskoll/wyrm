@@ -14,6 +14,8 @@ builds:
 archives:
   - formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - completions/*
 
 checksum:
   name_template: checksums.txt
@@ -33,3 +35,8 @@ brews:
     homepage: https://github.com/jskoll/wyrm
     description: "Repeatable tmux session layouts from a TOML config"
     license: MIT
+    install: |
+      bin.install "wyrm"
+      bash_completion.install "completions/wyrm.bash" => "wyrm"
+      zsh_completion.install "completions/_wyrm"
+      fish_completion.install "completions/wyrm.fish"
