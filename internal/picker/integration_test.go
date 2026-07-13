@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/jskoll/wyrm/internal/tmux"
@@ -84,6 +85,15 @@ func TestDottedSessionNameIntegration(t *testing.T) {
 	t.Cleanup(func() { r.Run("kill-server") }) //nolint:errcheck
 
 	if out, err := r.Run("new-session", "-d", "-s", "wyrm.vim"); err != nil {
+		// Whether a "." in a session name is preserved, silently sanitized to
+		// "_", or rejected outright at creation time varies across tmux
+		// builds (observed all three across local, Ubuntu CI, and macOS CI
+		// runners, even nominally the same tmux version) — when it's
+		// rejected, this build never lets the ambiguous name exist in the
+		// first place, so the bug this test guards against can't occur.
+		if strings.Contains(out, "invalid session name") {
+			t.Skip(`this tmux build rejects "." in session names outright; the bug this test guards against doesn't apply here`)
+		}
 		t.Fatalf("new-session: %v (%s)", err, out)
 	}
 

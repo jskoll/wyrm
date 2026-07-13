@@ -140,6 +140,15 @@ func TestIntegrationDottedSessionName(t *testing.T) {
 
 	name, sessionID, created, err := session.Create(r, cfg)
 	if err != nil {
+		// Whether a "." in a session name is preserved, silently sanitized
+		// to "_", or rejected outright at creation time varies across tmux
+		// builds (observed all three across local, Ubuntu CI, and macOS CI
+		// runners, even nominally the same tmux version) — when it's
+		// rejected, this build never lets the ambiguous name exist in the
+		// first place, so the bug this test guards against can't occur.
+		if strings.Contains(err.Error(), "invalid session name") {
+			t.Skip(`this tmux build rejects "." in session names outright; the bug this test guards against doesn't apply here`)
+		}
 		t.Fatalf("Create: %v", err)
 	}
 	if name != "wyrm.vim" || sessionID == "" || !created {
