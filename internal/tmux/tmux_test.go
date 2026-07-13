@@ -106,7 +106,7 @@ type stubRunner struct {
 	err error
 }
 
-func (s stubRunner) Run(args ...string) (string, error) {
+func (s stubRunner) Run(_ ...string) (string, error) {
 	return s.out, s.err
 }
 
