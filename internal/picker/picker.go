@@ -380,7 +380,10 @@ func readKey(br *bufio.Reader) (key, rune, error) {
 	return keyNone, 0, nil
 }
 
-// ANSI control sequences used by the renderer.
+// ANSI control sequences used by the renderer. bold/dim/reverse are text
+// attributes, not color, and stay on regardless of NO_COLOR — they read fine
+// on a monochrome terminal. green and cyan are actual color accents; see
+// colorize for how NO_COLOR suppresses them.
 const (
 	esc       = "\x1b"
 	clearDown = esc + "[J"
@@ -389,9 +392,26 @@ const (
 	dim       = esc + "[2m"
 	bold      = esc + "[1m"
 	reset     = esc + "[0m"
+	fgReset   = esc + "[39m"
 	hideCur   = esc + "[?25l"
 	showCur   = esc + "[?25h"
+
+	green = esc + "[32m"
+	cyan  = esc + "[36m"
 )
+
+// colorize wraps s in an ANSI color code, resetting only the foreground
+// color afterward (fgReset, not the full SGR reset) so it composes with an
+// outer attribute like the selected row's reverse-video instead of
+// cancelling it partway through the line. It returns s unchanged when
+// NO_COLOR is set — https://no-color.org: present, regardless of value,
+// means no color.
+func colorize(code, s string) string {
+	if _, noColor := os.LookupEnv("NO_COLOR"); noColor {
+		return s
+	}
+	return code + s + fgReset
+}
 
 // renderer redraws the picker in place, tracking how many lines it last drew so
 // the next frame can move the cursor back up and overwrite them instead of
@@ -478,9 +498,10 @@ func formatRow(s Session) string {
 	if s.Windows == 1 {
 		unit = "window"
 	}
+	count := colorize(cyan, fmt.Sprintf("%d %s", s.Windows, unit))
 	att := ""
 	if s.Attached {
-		att = "  (attached)"
+		att = "  " + colorize(green, "(attached)")
 	}
-	return fmt.Sprintf("%-24s %d %s%s", s.Name, s.Windows, unit, att)
+	return fmt.Sprintf("%-24s %s%s", s.Name, count, att)
 }

@@ -147,6 +147,11 @@ because you aren't attached to a client yet.
 The picker is built into the binary — there's no dependency on `fzf` or any
 other external tool, keeping wyrm a single static binary.
 
+Window counts are shown in cyan and `(attached)` in green. Set
+[`NO_COLOR`](https://no-color.org) (any value) to disable color — the rest
+of the picker's styling (bold, dim, the reverse-video selection highlight)
+isn't affected, since it isn't color.
+
 If a session with the same name is already running, wyrm **reattaches** to
 it instead of rebuilding it. Otherwise it builds the session fresh, then
 attaches.

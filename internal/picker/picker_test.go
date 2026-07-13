@@ -2,6 +2,7 @@ package picker
 
 import (
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -202,6 +203,48 @@ func TestViewport(t *testing.T) {
 	// Cursor at end clamps end to n.
 	if s, e := viewport(9, 10, 3); s != 7 || e != 10 {
 		t.Errorf("end: got [%d,%d), want [7,10)", s, e)
+	}
+}
+
+// withNoColor unsets NO_COLOR for the duration of the test, restoring
+// whatever was there before. testing.T.Setenv can't represent "unset", which
+// is the state colorize needs to treat as "color enabled".
+func withNoColor(t *testing.T, set bool) {
+	t.Helper()
+	if set {
+		t.Setenv("NO_COLOR", "1")
+		return
+	}
+	orig, had := os.LookupEnv("NO_COLOR")
+	if err := os.Unsetenv("NO_COLOR"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if had {
+			os.Setenv("NO_COLOR", orig) //nolint:errcheck
+		}
+	})
+}
+
+func TestFormatRowColor(t *testing.T) {
+	withNoColor(t, false)
+	got := formatRow(Session{Name: "alpha", Windows: 2, Attached: true})
+	if !strings.Contains(got, cyan) || !strings.Contains(got, green) {
+		t.Errorf("formatRow = %q, want cyan/green color codes present", got)
+	}
+	if !strings.Contains(got, "2 windows") || !strings.Contains(got, "(attached)") {
+		t.Errorf("formatRow = %q, want plain text preserved alongside color codes", got)
+	}
+}
+
+func TestFormatRowNoColor(t *testing.T) {
+	withNoColor(t, true)
+	got := formatRow(Session{Name: "alpha", Windows: 1, Attached: true})
+	if strings.Contains(got, esc) {
+		t.Errorf("formatRow with NO_COLOR set = %q, want no ANSI escape codes", got)
+	}
+	if !strings.Contains(got, "1 window") || !strings.Contains(got, "(attached)") {
+		t.Errorf("formatRow = %q, want plain text present", got)
 	}
 }
 

@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Color in `wyrm -pick`: window counts in cyan, `(attached)` in green.
+  Respects [`NO_COLOR`](https://no-color.org) to disable it.
+
 ## [0.1.6] - 2026-07-12
 
 ### Fixed
