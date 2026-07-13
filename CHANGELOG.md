@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-07-13
+
 ### Added
 - Dynamic shell completion for bash, zsh, and fish (`completions/`),
   installed automatically by the Homebrew formula. Completes flag names,
@@ -130,7 +132,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/jskoll/wyrm/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/jskoll/wyrm/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/jskoll/wyrm/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/jskoll/wyrm/compare/v0.1.4...v0.1.5
