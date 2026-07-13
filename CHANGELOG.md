@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-07-13
+
 ### Added
 - Color in `wyrm -pick`: window counts in cyan, `(attached)` in green.
   Respects [`NO_COLOR`](https://no-color.org) to disable it.
@@ -115,7 +117,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/jskoll/wyrm/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/jskoll/wyrm/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/jskoll/wyrm/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/jskoll/wyrm/compare/v0.1.3...v0.1.4
