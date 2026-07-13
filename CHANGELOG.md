@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-07-12
+
+### Fixed
+- CI: fixed a lint error (unused test parameter) and made the dotted-
+  session-name integration tests added in 0.1.5 tolerant of tmux builds
+  that sanitize or reject `.` in session names outright instead of
+  preserving it, rather than failing on them. No functional changes; this
+  release is otherwise identical to 0.1.5.
+
 ## [0.1.5] - 2026-07-12
 
 ### Added
@@ -102,7 +111,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/jskoll/wyrm/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/jskoll/wyrm/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/jskoll/wyrm/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/jskoll/wyrm/compare/v0.1.2...v0.1.3
