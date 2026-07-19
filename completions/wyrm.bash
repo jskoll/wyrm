@@ -29,7 +29,7 @@ _wyrm_complete() {
     esac
 
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "-config -kill -pick -version -migrate-config -validate -list -format -edit -list-configs" -- "$cur"))
+        COMPREPLY=($(compgen -W "-config -kill -pick -save -version -migrate-config -validate -list -format -edit -list-configs" -- "$cur"))
         return
     fi
 

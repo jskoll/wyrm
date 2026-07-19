@@ -32,35 +32,35 @@ type Config struct {
 
 // Session describes the tmux session and its lifecycle hooks.
 type Session struct {
-	Name           string `toml:"name"`
-	Root           string `toml:"root"`
-	OnProjectStart string `toml:"on_project_start"`
-	OnProjectExit  string `toml:"on_project_exit"`
-	StartupWindow  string `toml:"startup_window"`
-	StartupPane    *int   `toml:"startup_pane"` // nil = unset; 0 is a valid pane
+	Name           string `toml:"name,omitempty"`
+	Root           string `toml:"root,omitempty"`
+	OnProjectStart string `toml:"on_project_start,omitempty"`
+	OnProjectExit  string `toml:"on_project_exit,omitempty"`
+	StartupWindow  string `toml:"startup_window,omitempty"`
+	StartupPane    *int   `toml:"startup_pane,omitempty"` // nil = unset; 0 is a valid pane
 }
 
 // Window is one tmux window, laid out either by a split tree or a flat pane
 // list (legacy format).
 type Window struct {
-	Name      string  `toml:"name"`
-	Layout    string  `toml:"layout"`
-	Splits    []Split `toml:"splits"`
-	Panes     []Pane  `toml:"panes"`
-	PreWindow string  `toml:"pre_window"`
+	Name      string  `toml:"name,omitempty"`
+	Layout    string  `toml:"layout,omitempty"`
+	Splits    []Split `toml:"splits,omitempty"`
+	Panes     []Pane  `toml:"panes,omitempty"`
+	PreWindow string  `toml:"pre_window,omitempty"`
 }
 
 // Split is a node in a window's split tree.
 type Split struct {
-	Type     string  `toml:"type"` // "", "h"/"horizontal", "v"/"vertical"
-	Size     int     `toml:"size"` // percentage for the new pane; 0 = tmux default
-	Command  string  `toml:"command"`
-	Children []Split `toml:"children"`
+	Type     string  `toml:"type,omitempty"` // "", "h"/"horizontal", "v"/"vertical"
+	Size     int     `toml:"size,omitempty"` // percentage for the new pane; 0 = tmux default
+	Command  string  `toml:"command,omitempty"`
+	Children []Split `toml:"children,omitempty"`
 }
 
 // Pane is one entry in the legacy flat pane list.
 type Pane struct {
-	Command string `toml:"command"`
+	Command string `toml:"command,omitempty"`
 }
 
 // Discover returns the config file to use when none was given: DefaultFileName

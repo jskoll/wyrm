@@ -65,6 +65,7 @@ wyrm <name>                # attach/switch directly to a running session by name
 wyrm -config path/to/file  # explicit config
 wyrm -kill                 # destroy the session (runs on_project_exit first)
 wyrm -pick                 # fuzzy-pick a running session and attach to it
+wyrm -save                 # save the running session's layout as this folder's config
 wyrm -edit                 # open the resolved config in $EDITOR, creating one if needed
 wyrm -validate             # check the effective config parses and validates, without building a session
 wyrm -list                 # list running tmux sessions non-interactively
@@ -75,9 +76,10 @@ wyrm -version
 
 If neither `.wyrm.toml` nor `.tmuxconfig` is found, wyrm falls back to
 `~/.config/wyrm/default.wyrm.toml` if you've created one, otherwise a
-built-in default: a single unnamed window rooted at the current directory —
-unless tmux sessions are already running, in which case `wyrm` opens the
-session picker (below) instead.
+built-in default: a single unnamed window rooted at the current directory.
+This always builds (or attaches to) a session for the current folder, even
+if unrelated sessions are already running elsewhere — the interactive
+picker (below) is only ever shown when you ask for it with `-pick`.
 
 ## Editing, validating, and listing
 
@@ -165,6 +167,30 @@ If you already know the session's name, `wyrm <name>` skips the picker and
 attaches (or `switch-client`s) directly to it — exact match only, no fuzzy
 matching. Combined with shell completion (below), this means `wyrm <TAB>`
 tab-completes to real running session names.
+
+## Saving a running session
+
+`wyrm -save` snapshots a running tmux session's windows, split layout, and
+sizes into a new config for the current folder — the reverse of building a
+session from one. Run it from inside the session you want to capture, or
+from a plain shell in the session's folder (it looks up the session the same
+way a bare `wyrm` would).
+
+```sh
+wyrm -save                  # writes .wyrm.toml (or the shared-storage path)
+```
+
+tmux keeps no record of what was originally typed into a pane, so each
+split's `command` is captured as whatever program is currently running in
+that pane's foreground (`nvim`, `npm`, ...) — the same approach tools like
+tmuxp's `freeze` use. That's usually enough to relaunch the same programs,
+but it won't recover one-off shell commands that have already finished, and
+it can't capture `pre_window`, `on_project_start`/`on_project_exit`, or
+comments — those are yours to add by hand afterward, e.g. with `wyrm -edit`.
+
+Like `-migrate-config`, `-save` refuses to overwrite an existing config
+rather than silently discarding hooks or comments you've already written —
+remove or rename the file first if you want to re-save over it.
 
 ## Shell completion
 

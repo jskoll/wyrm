@@ -48,6 +48,21 @@ func Attach(target string) error {
 	return cmd.Run()
 }
 
+// CurrentSession returns the ID and name of the tmux session wyrm is
+// running inside (i.e. $TMUX is set). It's meaningless to call this outside
+// tmux — callers should check InsideTmux first.
+func CurrentSession(r Runner) (id, name string, err error) {
+	out, err := r.Run("display-message", "-p", "-F", "#{session_id}|#{session_name}")
+	if err != nil {
+		return "", "", fmt.Errorf("finding current session: %v (%s)", err, out)
+	}
+	id, name, ok := strings.Cut(out, "|")
+	if !ok {
+		return "", "", fmt.Errorf("unexpected tmux output %q", out)
+	}
+	return id, name, nil
+}
+
 // FindSessionID returns the tmux session ID for the exact session name, and
 // whether a matching session exists. It lists every session and compares
 // names in Go rather than passing the name through tmux's -t target syntax:

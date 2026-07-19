@@ -145,3 +145,96 @@ func TestFindSessionIDRealError(t *testing.T) {
 		t.Error("FindSessionID with a real tmux failure: want error, got nil")
 	}
 }
+
+func TestCurrentSession(t *testing.T) {
+	r := stubRunner{out: "$3|myproj"}
+	id, name, err := CurrentSession(r)
+	if err != nil {
+		t.Fatalf("CurrentSession: %v", err)
+	}
+	if id != "$3" || name != "myproj" {
+		t.Errorf("CurrentSession = %q, %q; want $3, myproj", id, name)
+	}
+}
+
+func TestCurrentSessionCommandError(t *testing.T) {
+	r := stubRunner{out: "no current client", err: errors.New("exit status 1")}
+	if _, _, err := CurrentSession(r); err == nil {
+		t.Error("CurrentSession with a failing command: want error, got nil")
+	}
+}
+
+func TestCurrentSessionUnexpectedOutput(t *testing.T) {
+	r := stubRunner{out: "no-separator"}
+	if _, _, err := CurrentSession(r); err == nil {
+		t.Error("CurrentSession with unexpected output: want error, got nil")
+	}
+}
+
+func TestListWindows(t *testing.T) {
+	r := stubRunner{out: "0|@1|1|abcd,1x1,0,0,0|editor\n1|@2|0|efgh,1x1,0,0,1|server\n"}
+	windows, err := ListWindows(r, "$3")
+	if err != nil {
+		t.Fatalf("ListWindows: %v", err)
+	}
+	want := []WindowInfo{
+		{Index: 0, ID: "@1", Active: true, Layout: "abcd,1x1,0,0,0", Name: "editor"},
+		{Index: 1, ID: "@2", Active: false, Layout: "efgh,1x1,0,0,1", Name: "server"},
+	}
+	if len(windows) != len(want) {
+		t.Fatalf("ListWindows returned %d windows, want %d", len(windows), len(want))
+	}
+	for i := range want {
+		if windows[i] != want[i] {
+			t.Errorf("windows[%d] = %+v, want %+v", i, windows[i], want[i])
+		}
+	}
+}
+
+func TestListWindowsCommandError(t *testing.T) {
+	r := stubRunner{out: "boom", err: errors.New("exit status 1")}
+	if _, err := ListWindows(r, "$3"); err == nil {
+		t.Error("ListWindows with a failing command: want error, got nil")
+	}
+}
+
+func TestListWindowsMalformedLine(t *testing.T) {
+	r := stubRunner{out: "not-enough-fields"}
+	if _, err := ListWindows(r, "$3"); err == nil {
+		t.Error("ListWindows with a malformed line: want error, got nil")
+	}
+}
+
+func TestListPanes(t *testing.T) {
+	r := stubRunner{out: "%0|0|1|nvim\n%1|1|0|htop\n"}
+	panes, err := ListPanes(r, "@1")
+	if err != nil {
+		t.Fatalf("ListPanes: %v", err)
+	}
+	want := []PaneInfo{
+		{ID: "%0", Index: 0, Active: true, Command: "nvim"},
+		{ID: "%1", Index: 1, Active: false, Command: "htop"},
+	}
+	if len(panes) != len(want) {
+		t.Fatalf("ListPanes returned %d panes, want %d", len(panes), len(want))
+	}
+	for i := range want {
+		if panes[i] != want[i] {
+			t.Errorf("panes[%d] = %+v, want %+v", i, panes[i], want[i])
+		}
+	}
+}
+
+func TestListPanesCommandError(t *testing.T) {
+	r := stubRunner{out: "boom", err: errors.New("exit status 1")}
+	if _, err := ListPanes(r, "@1"); err == nil {
+		t.Error("ListPanes with a failing command: want error, got nil")
+	}
+}
+
+func TestListPanesMalformedLine(t *testing.T) {
+	r := stubRunner{out: "not-enough-fields"}
+	if _, err := ListPanes(r, "@1"); err == nil {
+		t.Error("ListPanes with a malformed line: want error, got nil")
+	}
+}

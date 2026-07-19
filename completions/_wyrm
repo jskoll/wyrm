@@ -18,6 +18,7 @@ _wyrm() {
         '-config[config file path]:config file:->configs' \
         '-kill[kill the session (runs on_project_exit)]' \
         '-pick[fuzzy-pick a running session to attach to]' \
+        '-save[save the running session layout as a config for this folder]' \
         '-version[print version and exit]' \
         '-migrate-config[move the local config into the shared config directory]' \
         '-validate[check the effective config without building a session]' \

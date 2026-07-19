@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/jskoll/wyrm/internal/config"
+	"github.com/jskoll/wyrm/internal/freeze"
 	"github.com/jskoll/wyrm/internal/picker"
 	"github.com/jskoll/wyrm/internal/session"
 	"github.com/jskoll/wyrm/internal/tmux"
@@ -42,6 +43,7 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 	format := fs.String("format", "table", "output format for -list: table, json, toml, or names")
 	edit := fs.Bool("edit", false, "open the resolved config in $EDITOR, creating one if none exists")
 	listConfigs := fs.Bool("list-configs", false, "list candidate config file paths (for shell completion)")
+	save := fs.Bool("save", false, "save the running session's current layout as this folder's config")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -77,6 +79,10 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 		return runListConfigs(stdout, settings)
 	}
 
+	if *save {
+		return runSave(runner, stdout, stderr, settings, insideTmux)
+	}
+
 	if *list {
 		return runList(runner, stdout, stderr, *format)
 	}
@@ -90,14 +96,10 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 	if path == "" {
 		discovered, err := config.DiscoverGlobal(settings)
 		if err != nil {
-			// No config here: if sessions are already running, offer to pick
-			// one instead of silently building the default session. -kill is
-			// exempt — it targets the default-config session, not the picker.
-			if !*kill {
-				if sessions, lerr := picker.ListSessions(runner); lerr == nil && len(sessions) > 0 {
-					return runPicker(runner, stderr, insideTmux, attach)
-				}
-			}
+			// No config here: build the default session for this folder.
+			// session.Create reattaches instead of rebuilding if a session
+			// by that name is already running, so unrelated sessions running
+			// elsewhere don't affect this folder's outcome.
 			if cfg, err = config.LoadUserDefault(); err != nil {
 				_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
 				return 1
@@ -289,6 +291,83 @@ func runEdit(stderr io.Writer, settings *config.Settings, explicitPath string) i
 		_, _ = fmt.Fprintln(stderr, "wyrm: "+runErr.Error())
 		return 1
 	}
+	return 0
+}
+
+// runSave snapshots a running session's windows, split layout, and
+// foreground pane commands into a new config for the current folder (see
+// internal/freeze). The target session is the one wyrm is currently
+// attached to when run from inside tmux, or the folder's own session
+// (looked up the same way a bare `wyrm` would resolve its name) otherwise.
+// Like -migrate-config, it refuses to overwrite an existing config rather
+// than silently discarding hand-written hooks or comments.
+func runSave(runner tmux.Runner, stdout, stderr io.Writer, settings *config.Settings, insideTmux func() bool) int {
+	var sessionID, sessionName string
+	if insideTmux() {
+		id, name, err := tmux.CurrentSession(runner)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+			return 1
+		}
+		sessionID, sessionName = id, name
+	} else {
+		cfg, _, err := config.ResolveEffective(settings, "")
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+			return 1
+		}
+		name, _, err := cfg.Session.Resolve()
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+			return 1
+		}
+		id, ok, err := tmux.FindSessionID(runner, name)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+			return 1
+		}
+		if !ok {
+			_, _ = fmt.Fprintf(stderr, "wyrm: no running session named %q for this folder (run it from inside the session you want to save, or start it with wyrm first)\n", name)
+			return 1
+		}
+		sessionID, sessionName = id, name
+	}
+
+	dest, exists, err := config.EditTarget(settings)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+		return 1
+	}
+	if exists {
+		_, _ = fmt.Fprintf(stderr, "wyrm: %s already exists, remove it first\n", dest)
+		return 1
+	}
+
+	cfg, err := freeze.Config(runner, sessionID, sessionName, ".")
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+		return 1
+	}
+	data, err := toml.Marshal(cfg)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+		return 1
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+		return 1
+	}
+	if err := os.WriteFile(dest, data, 0o644); err != nil {
+		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+		return 1
+	}
+
+	if _, loadErr := config.Load(dest); loadErr != nil {
+		_, _ = fmt.Fprintf(stderr, "wyrm: warning: %s: %v\n", dest, loadErr)
+	}
+
+	_, _ = fmt.Fprintf(stdout, "saved session %s to %s\n", sessionName, dest)
 	return 0
 }
 

@@ -42,6 +42,14 @@ type fakeRunner struct {
 	// format) — whichever a given test actually exercises. Empty means "no
 	// matching/running sessions", matching real tmux's "no server running".
 	listOutput string
+	// displayMessageOutput backs "display-message" (tmux.CurrentSession),
+	// as "$id|name".
+	displayMessageOutput string
+	// listWindowsOutput backs any "list-windows" call, regardless of target.
+	listWindowsOutput string
+	// listPanesOutput backs "list-panes", keyed by the -t target (a window
+	// ID such as "@1").
+	listPanesOutput map[string]string
 }
 
 func (f *fakeRunner) Run(args ...string) (string, error) {
@@ -55,6 +63,12 @@ func (f *fakeRunner) Run(args ...string) (string, error) {
 		return fmt.Sprintf("$%d|@%d|%%%d", f.seq, f.seq, f.seq), nil
 	case "list-sessions":
 		return f.listOutput, nil
+	case "display-message":
+		return f.displayMessageOutput, nil
+	case "list-windows":
+		return f.listWindowsOutput, nil
+	case "list-panes":
+		return f.listPanesOutput[args[2]], nil
 	}
 	return "", nil
 }
@@ -256,6 +270,113 @@ func TestRunEditWarnsOnInvalidSave(t *testing.T) {
 	}
 }
 
+func TestRunSaveInsideTmux(t *testing.T) {
+	chdir(t, t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		displayMessageOutput: "$3|myproj",
+		listWindowsOutput:    "0|@1|1|abcd,80x24,0,0,0|main",
+		listPanesOutput:      map[string]string{"@1": "%0|0|1|nvim"},
+	}
+	code := run([]string{"-save"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "saved session myproj to "+config.DefaultFileName) {
+		t.Errorf("stdout = %q, want a saved-session message", stdout.String())
+	}
+	got, err := os.ReadFile(config.DefaultFileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), `name = 'myproj'`) || !strings.Contains(string(got), `command = 'nvim'`) {
+		t.Errorf("file content = %q, want the captured session name and pane command", got)
+	}
+}
+
+func TestRunSaveOutsideTmux(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	name := filepath.Base(dir)
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		listOutput:        "$7|" + name,
+		listWindowsOutput: "0|@2|1|abcd,80x24,0,0,3|shell",
+		listPanesOutput:   map[string]string{"@2": "%3|0|1|zsh"},
+	}
+	code := run([]string{"-save"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "saved session "+name+" to "+config.DefaultFileName) {
+		t.Errorf("stdout = %q, want a saved-session message for %q", stdout.String(), name)
+	}
+	if _, err := os.Stat(config.DefaultFileName); err != nil {
+		t.Errorf("expected %s to be created: %v", config.DefaultFileName, err)
+	}
+}
+
+func TestRunSaveOutsideTmuxNoRunningSession(t *testing.T) {
+	chdir(t, t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{} // no sessions running
+	code := run([]string{"-save"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "no running session") {
+		t.Errorf("stderr = %q, want a no-running-session message", stderr.String())
+	}
+	if _, err := os.Stat(config.DefaultFileName); err == nil {
+		t.Error("expected no config file to be created")
+	}
+}
+
+func TestRunSaveRefusesExistingConfig(t *testing.T) {
+	chdir(t, t.TempDir())
+	if err := os.WriteFile(config.DefaultFileName, []byte(validConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		displayMessageOutput: "$3|myproj",
+		listWindowsOutput:    "0|@1|1|abcd,80x24,0,0,0|main",
+		listPanesOutput:      map[string]string{"@1": "%0|0|1|nvim"},
+	}
+	code := run([]string{"-save"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "already exists") {
+		t.Errorf("stderr = %q, want an already-exists message", stderr.String())
+	}
+	got, err := os.ReadFile(config.DefaultFileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != validConfig {
+		t.Error("existing config was overwritten, want it left untouched")
+	}
+}
+
+func TestRunSaveCurrentSessionError(t *testing.T) {
+	chdir(t, t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{fail: map[string]bool{"display-message": true}}
+	code := run([]string{"-save"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "wyrm:") {
+		t.Errorf("stderr = %q, want a wyrm: prefixed error", stderr.String())
+	}
+}
+
 func TestRunListTable(t *testing.T) {
 	r := &fakeRunner{listOutput: strings.Join([]string{
 		"$1|3|1|2000|alpha",
@@ -395,6 +516,29 @@ func TestRunDiscoverFallsBackToDefault(t *testing.T) {
 	code := run(nil, &stdout, &stderr, r, func() bool { return false }, attach)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if attachCalled == "" {
+		t.Error("attach was not called; want the default config's session to be created and attached")
+	}
+}
+
+func TestRunDiscoverBuildsDefaultDespiteUnrelatedSessions(t *testing.T) {
+	chdir(t, t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	// A session is running, but for a different folder: the default session
+	// for this folder should still be built and attached directly, not
+	// routed through the interactive picker.
+	r := &fakeRunner{listOutput: "$9|some-other-project"}
+	attachCalled := ""
+	attach := func(name string) error { attachCalled = name; return nil }
+
+	code := run(nil, &stdout, &stderr, r, func() bool { return false }, attach)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "created session") {
+		t.Errorf("stdout = %q, want a new session to be created for this folder", stdout.String())
 	}
 	if attachCalled == "" {
 		t.Error("attach was not called; want the default config's session to be created and attached")
