@@ -300,7 +300,7 @@ func Run(r tmux.Runner, stderr io.Writer) (string, error) {
 		return "", err
 	}
 	if len(sessions) == 0 {
-		fmt.Fprintln(stderr, "wyrm: no running tmux sessions")
+		_, _ = fmt.Fprintln(stderr, "wyrm: no running tmux sessions")
 		return "", nil
 	}
 

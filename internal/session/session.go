@@ -79,7 +79,7 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer) (name, 
 				return "", "", false, fmt.Errorf("unexpected tmux output %q", out)
 			}
 		}
-		fmt.Fprintf(stdout, "window %s: %s\n", windowID, w.Name)
+		_, _ = fmt.Fprintf(stdout, "window %s: %s\n", windowID, w.Name)
 		buildWindow(r, windowID, paneID, w, stderr)
 	}
 
@@ -245,5 +245,5 @@ func runHook(hook, dir string) error {
 }
 
 func warnf(w io.Writer, format string, args ...any) {
-	fmt.Fprintf(w, "wyrm: warning: "+format+"\n", args...)
+	_, _ = fmt.Fprintf(w, "wyrm: warning: "+format+"\n", args...)
 }
