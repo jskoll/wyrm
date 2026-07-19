@@ -47,7 +47,7 @@ func TestIntegration(t *testing.T) {
 		},
 	}
 
-	name, _, created, err := session.Create(r, cfg)
+	name, _, created, err := session.Create(r, cfg, os.Stdout, os.Stderr)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestIntegration(t *testing.T) {
 		t.Errorf("active window = %q, want startup_window code", activeWindow)
 	}
 
-	if _, _, created, err := session.Create(r, cfg); err != nil {
+	if _, _, created, err := session.Create(r, cfg, os.Stdout, os.Stderr); err != nil {
 		t.Fatalf("Create (second call): %v", err)
 	} else if created {
 		t.Error("created = true on second Create, want false for an already-running session")
@@ -101,7 +101,7 @@ func TestIntegration(t *testing.T) {
 		t.Errorf("window count after reattach = %d, want 2 (session was rebuilt instead of reattached)", got)
 	}
 
-	if _, err := session.Kill(r, cfg); err != nil {
+	if _, err := session.Kill(r, cfg, os.Stderr); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "exited")); err != nil {
@@ -138,7 +138,7 @@ func TestIntegrationDottedSessionName(t *testing.T) {
 		},
 	}
 
-	name, sessionID, created, err := session.Create(r, cfg)
+	name, sessionID, created, err := session.Create(r, cfg, os.Stdout, os.Stderr)
 	if err != nil {
 		// Whether a "." in a session name is preserved, silently sanitized
 		// to "_", or rejected outright at creation time varies across tmux
@@ -167,7 +167,7 @@ func TestIntegrationDottedSessionName(t *testing.T) {
 
 	// Reattach (second Create) must find the running session rather than
 	// erroring out or rebuilding it.
-	if _, secondID, created, err := session.Create(r, cfg); err != nil {
+	if _, secondID, created, err := session.Create(r, cfg, os.Stdout, os.Stderr); err != nil {
 		t.Fatalf("Create (second call): %v", err)
 	} else if created {
 		t.Error("created = true on second Create, want false for an already-running session")
@@ -175,7 +175,7 @@ func TestIntegrationDottedSessionName(t *testing.T) {
 		t.Errorf("second Create sessionID = %q, want %q (same session)", secondID, sessionID)
 	}
 
-	if _, err := session.Kill(r, cfg); err != nil {
+	if _, err := session.Kill(r, cfg, os.Stderr); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
 	if _, ok, err := tmux.FindSessionID(r, "wyrm.vim"); err != nil || ok {

@@ -123,7 +123,7 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 	}
 
 	if *kill {
-		name, err := session.Kill(runner, cfg)
+		name, err := session.Kill(runner, cfg, stderr)
 		if err != nil {
 			_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
 			return 1
@@ -132,7 +132,7 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 		return 0
 	}
 
-	name, sessionID, created, err := session.Create(runner, cfg)
+	name, sessionID, created, err := session.Create(runner, cfg, stdout, stderr)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
 		return 1
@@ -424,24 +424,16 @@ func runList(runner tmux.Runner, stdout, stderr io.Writer, format string) int {
 }
 
 // formatSessionRow renders one session as a plain, awk-able line: name,
-// window count, and an attached marker — the same shape as the picker's row
-// (internal/picker/picker.go's formatRow), minus color codes.
+// window count, and an attached marker — the same shape as the picker's row,
+// minus color codes. See picker.FormatRow.
 func formatSessionRow(s picker.Session) string {
-	unit := "windows"
-	if s.Windows == 1 {
-		unit = "window"
-	}
-	att := ""
-	if s.Attached {
-		att = "  (attached)"
-	}
-	return fmt.Sprintf("%-24s %d %s%s", s.Name, s.Windows, unit, att)
+	return picker.FormatRow(s, false)
 }
 
 // runPicker lets the user choose a running session and attaches to it. An
 // empty choice (nothing running, or the user aborted) exits quietly.
 func runPicker(runner tmux.Runner, stderr io.Writer, insideTmux func() bool, attach func(string) error) int {
-	sessionID, err := picker.Run(runner)
+	sessionID, err := picker.Run(runner, stderr)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
 		return 1

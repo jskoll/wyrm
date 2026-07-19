@@ -2,7 +2,9 @@ package picker
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
+	"io"
 	"os"
 	"reflect"
 	"strings"
@@ -22,6 +24,29 @@ type stubRunner struct {
 func (s *stubRunner) Run(args ...string) (string, error) {
 	s.calls = append(s.calls, args)
 	return s.out, s.err
+}
+
+// scriptedRunner returns canned output for each tmux subcommand (args[0]),
+// unlike stubRunner's single fixed response — needed for runLoop tests that
+// drive more than one distinct tmux call in the same run (e.g. list-windows
+// during Ctrl-W, then list-sessions again after Ctrl-X).
+type scriptedRunner struct {
+	out   map[string]string
+	calls [][]string
+}
+
+func (s *scriptedRunner) Run(args ...string) (string, error) {
+	s.calls = append(s.calls, args)
+	return s.out[args[0]], nil
+}
+
+func (s *scriptedRunner) called(name string, target string) bool {
+	for _, c := range s.calls {
+		if len(c) >= 3 && c[0] == name && c[2] == target {
+			return true
+		}
+	}
+	return false
 }
 
 func TestListSessionsParses(t *testing.T) {
@@ -289,6 +314,135 @@ func TestFormatWindowRowInactiveNoMarker(t *testing.T) {
 	got := formatWindowRow(tmux.WindowInfo{Name: "editor"})
 	if got != "editor" {
 		t.Errorf("formatWindowRow(inactive) = %q, want just the name", got)
+	}
+}
+
+// fixedHeight is a runLoop height func that reports a constant terminal
+// size, comfortably above the fallback threshold used by every test session
+// list here.
+func fixedHeight() int { return 20 }
+
+func TestRunLoopFilterAndSelect(t *testing.T) {
+	sessions := []Session{
+		{ID: "$1", Name: "alpha"},
+		{ID: "$2", Name: "beta"},
+	}
+	br := bufio.NewReader(strings.NewReader("be\r")) // type "be", Enter
+	var out bytes.Buffer
+	id, err := runLoop(&stubRunner{}, sessions, br, &renderer{w: &out}, fixedHeight)
+	if err != nil {
+		t.Fatalf("runLoop: %v", err)
+	}
+	if id != "$2" {
+		t.Errorf("runLoop = %q, want $2 (beta, the only match for %q)", id, "be")
+	}
+	if !strings.Contains(out.String(), "beta") {
+		t.Errorf("drawn output = %q, want the beta row", out.String())
+	}
+}
+
+func TestRunLoopAbortAtTopLevelReturnsEmpty(t *testing.T) {
+	sessions := []Session{{ID: "$1", Name: "alpha"}}
+	br := bufio.NewReader(strings.NewReader("\x1b")) // lone Escape
+	id, err := runLoop(&stubRunner{}, sessions, br, &renderer{w: &bytes.Buffer{}}, fixedHeight)
+	if err != nil || id != "" {
+		t.Errorf("runLoop(Esc) = %q, %v; want empty, nil", id, err)
+	}
+}
+
+func TestRunLoopQuitReturnsEmpty(t *testing.T) {
+	sessions := []Session{{ID: "$1", Name: "alpha"}}
+	br := bufio.NewReader(strings.NewReader("\x03")) // Ctrl-C
+	id, err := runLoop(&stubRunner{}, sessions, br, &renderer{w: &bytes.Buffer{}}, fixedHeight)
+	if err != nil || id != "" {
+		t.Errorf("runLoop(Ctrl-C) = %q, %v; want empty, nil", id, err)
+	}
+}
+
+func TestRunLoopWindowsDrilldownSelectsWindow(t *testing.T) {
+	sessions := []Session{{ID: "$1", Name: "alpha"}}
+	r := &scriptedRunner{out: map[string]string{
+		"list-windows": "0|@1|1|abcd,80x24,0,0,0|code\n1|@2|0|abcd,80x24,0,0,1|logs",
+	}}
+	br := bufio.NewReader(strings.NewReader("\x17\r")) // Ctrl-W, Enter (first window: code)
+	id, err := runLoop(r, sessions, br, &renderer{w: &bytes.Buffer{}}, fixedHeight)
+	if err != nil {
+		t.Fatalf("runLoop: %v", err)
+	}
+	if id != "$1" {
+		t.Errorf("runLoop = %q, want $1 (the session, once a window is chosen)", id)
+	}
+	if !r.called("select-window", "@1") {
+		t.Errorf("select-window @1 not called: %v", r.calls)
+	}
+}
+
+// stepReader hands back its data one byte per Read call, mimicking how
+// bufio.Reader sees real keystrokes arriving from a tty: each one a separate
+// short read. A strings.Reader would instead let bufio buffer the whole
+// input in one fill, so two consecutive Escape bytes would misparse as one
+// (invalid) escape sequence instead of two lone Escapes — see readKey's
+// br.Buffered() check.
+type stepReader struct{ data []byte }
+
+func (s *stepReader) Read(p []byte) (int, error) {
+	if len(s.data) == 0 {
+		return 0, io.EOF
+	}
+	p[0] = s.data[0]
+	s.data = s.data[1:]
+	return 1, nil
+}
+
+func TestRunLoopEscBacksOutOfWindowsThenQuits(t *testing.T) {
+	sessions := []Session{{ID: "$1", Name: "alpha"}}
+	r := &scriptedRunner{out: map[string]string{
+		"list-windows": "0|@1|1|abcd,80x24,0,0,0|code",
+	}}
+	// Ctrl-W into the window list, Esc back to the session list, Esc to quit.
+	br := bufio.NewReader(&stepReader{data: []byte("\x17\x1b\x1b")})
+	id, err := runLoop(r, sessions, br, &renderer{w: &bytes.Buffer{}}, fixedHeight)
+	if err != nil || id != "" {
+		t.Errorf("runLoop = %q, %v; want empty, nil", id, err)
+	}
+}
+
+func TestRunLoopKillSession(t *testing.T) {
+	sessions := []Session{
+		{ID: "$1", Name: "alpha"},
+		{ID: "$2", Name: "beta"},
+	}
+	r := &scriptedRunner{out: map[string]string{
+		"list-sessions": "$2|1|0|1000|beta",
+	}}
+	// Ctrl-X kills the selected (first, alpha) session, then Esc quits.
+	br := bufio.NewReader(strings.NewReader("\x18\x1b"))
+	id, err := runLoop(r, sessions, br, &renderer{w: &bytes.Buffer{}}, fixedHeight)
+	if err != nil || id != "" {
+		t.Errorf("runLoop = %q, %v; want empty, nil", id, err)
+	}
+	if !r.called("kill-session", "$1") {
+		t.Errorf("kill-session $1 not called: %v", r.calls)
+	}
+}
+
+func TestRendererHideCursorAndClear(t *testing.T) {
+	var buf bytes.Buffer
+	rn := &renderer{w: &buf}
+
+	rn.hideCursor()
+	if !strings.Contains(buf.String(), hideCur) {
+		t.Errorf("hideCursor: wrote %q, want it to contain %q", buf.String(), hideCur)
+	}
+
+	buf.Reset()
+	rn.prevLines = 3
+	rn.clear()
+	if !strings.Contains(buf.String(), showCur) {
+		t.Errorf("clear: wrote %q, want it to contain %q", buf.String(), showCur)
+	}
+	if rn.prevLines != 0 {
+		t.Errorf("clear: prevLines = %d, want 0", rn.prevLines)
 	}
 }
 

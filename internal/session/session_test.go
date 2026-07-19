@@ -1,8 +1,10 @@
 package session
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -82,7 +84,7 @@ func TestCreateSplitTree(t *testing.T) {
 	}
 
 	r := &fakeRunner{}
-	name, sessionID, created, err := Create(r, cfg)
+	name, sessionID, created, err := Create(r, cfg, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -136,7 +138,7 @@ func TestCreateLegacyPanes(t *testing.T) {
 	}
 
 	r := &fakeRunner{}
-	if _, _, _, err := Create(r, cfg); err != nil {
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -169,7 +171,7 @@ func TestCreateMultipleWindowsAndStartup(t *testing.T) {
 	}
 
 	r := &fakeRunner{}
-	_, sessionID, _, err := Create(r, cfg)
+	_, sessionID, _, err := Create(r, cfg, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -193,7 +195,7 @@ func TestCreateDerivesNameFromRoot(t *testing.T) {
 		Windows: []config.Window{{Name: "w"}},
 	}
 	r := &fakeRunner{}
-	name, _, _, err := Create(r, cfg)
+	name, _, _, err := Create(r, cfg, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +206,7 @@ func TestCreateDerivesNameFromRoot(t *testing.T) {
 
 func TestCreateRequiresWindows(t *testing.T) {
 	cfg := &config.Config{Session: config.Session{Name: "x"}}
-	if _, _, _, err := Create(&fakeRunner{}, cfg); err == nil {
+	if _, _, _, err := Create(&fakeRunner{}, cfg, io.Discard, io.Discard); err == nil {
 		t.Error("Create with no windows: want error, got nil")
 	}
 }
@@ -216,7 +218,7 @@ func TestCreateLeavesRunningSessionUntouched(t *testing.T) {
 	}
 
 	r := &fakeRunner{listOutput: "$9|proj"}
-	name, sessionID, created, err := Create(r, cfg)
+	name, sessionID, created, err := Create(r, cfg, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -247,7 +249,7 @@ func TestCreateLeavesRunningSessionUntouchedDottedName(t *testing.T) {
 	}
 
 	r := &fakeRunner{listOutput: "$4|wyrm.vim"}
-	name, sessionID, created, err := Create(r, cfg)
+	name, sessionID, created, err := Create(r, cfg, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -264,7 +266,7 @@ func TestKill(t *testing.T) {
 
 	t.Run("not running", func(t *testing.T) {
 		r := &fakeRunner{}
-		if _, err := Kill(r, cfg); err == nil {
+		if _, err := Kill(r, cfg, io.Discard); err == nil {
 			t.Fatal("want error for missing session")
 		}
 		for _, c := range r.joined() {
@@ -276,7 +278,7 @@ func TestKill(t *testing.T) {
 
 	t.Run("running", func(t *testing.T) {
 		r := &fakeRunner{listOutput: "$7|proj"}
-		name, err := Kill(r, cfg)
+		name, err := Kill(r, cfg, io.Discard)
 		if err != nil {
 			t.Fatalf("Kill: %v", err)
 		}
@@ -295,18 +297,22 @@ func TestKill(t *testing.T) {
 			Windows: []config.Window{{Name: "w"}},
 		}
 		r := &fakeRunner{listOutput: "$7|proj"}
-		name, err := Kill(r, exitCfg)
+		var stderr bytes.Buffer
+		name, err := Kill(r, exitCfg, &stderr)
 		if err != nil {
 			t.Fatalf("Kill: %v", err)
 		}
 		if name != "proj" {
 			t.Errorf("name = %q, want proj", name)
 		}
+		if !strings.Contains(stderr.String(), "on_project_exit failed") {
+			t.Errorf("stderr = %q, want on_project_exit failure warning", stderr.String())
+		}
 	})
 
 	t.Run("kill-session error", func(t *testing.T) {
 		r := &fakeRunner{listOutput: "$7|proj", fail: map[string]bool{"kill-session": true}}
-		if _, err := Kill(r, cfg); err == nil || !strings.Contains(err.Error(), "killing session") {
+		if _, err := Kill(r, cfg, io.Discard); err == nil || !strings.Contains(err.Error(), "killing session") {
 			t.Errorf("Kill error = %v, want containing %q", err, "killing session")
 		}
 	})
@@ -318,12 +324,16 @@ func TestCreateOnProjectStartFailureStillCreates(t *testing.T) {
 		Windows: []config.Window{{Name: "w"}},
 	}
 	r := &fakeRunner{}
-	name, _, created, err := Create(r, cfg)
+	var stderr bytes.Buffer
+	name, _, created, err := Create(r, cfg, io.Discard, &stderr)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if name != "proj" || !created {
 		t.Errorf("name, created = %q, %v; want proj, true", name, created)
+	}
+	if !strings.Contains(stderr.String(), "on_project_start failed") {
+		t.Errorf("stderr = %q, want on_project_start failure warning", stderr.String())
 	}
 }
 
@@ -333,7 +343,7 @@ func TestCreateNewSessionError(t *testing.T) {
 		Windows: []config.Window{{Name: "w"}},
 	}
 	r := &fakeRunner{fail: map[string]bool{"new-session": true}}
-	if _, _, _, err := Create(r, cfg); err == nil || !strings.Contains(err.Error(), "creating session") {
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "creating session") {
 		t.Errorf("Create error = %v, want containing %q", err, "creating session")
 	}
 }
@@ -344,7 +354,7 @@ func TestCreateNewWindowError(t *testing.T) {
 		Windows: []config.Window{{Name: "first"}, {Name: "second"}},
 	}
 	r := &fakeRunner{fail: map[string]bool{"new-window": true}}
-	_, _, _, err := Create(r, cfg)
+	_, _, _, err := Create(r, cfg, io.Discard, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), `creating window "second"`) {
 		t.Errorf("Create error = %v, want containing %q", err, `creating window "second"`)
 	}
@@ -356,7 +366,7 @@ func TestCreateUnexpectedOutput(t *testing.T) {
 		Windows: []config.Window{{Name: "w"}},
 	}
 	r := &fakeRunner{badNewSessionOutput: true}
-	if _, _, _, err := Create(r, cfg); err == nil || !strings.Contains(err.Error(), "unexpected tmux output") {
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "unexpected tmux output") {
 		t.Errorf("Create error = %v, want containing %q", err, "unexpected tmux output")
 	}
 }
@@ -367,7 +377,7 @@ func TestCreatePreWindowOnly(t *testing.T) {
 		Windows: []config.Window{{Name: "w", PreWindow: "echo hi"}},
 	}
 	r := &fakeRunner{}
-	if _, _, _, err := Create(r, cfg); err != nil {
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	got := r.joined()
@@ -395,7 +405,7 @@ func TestApplySplitsSplitError(t *testing.T) {
 		}},
 	}
 	r := &fakeRunner{fail: map[string]bool{"split-window": true}}
-	if _, _, _, err := Create(r, cfg); err != nil {
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	got := strings.Join(r.joined(), "\n")
@@ -420,7 +430,7 @@ func TestApplyPanesSplitError(t *testing.T) {
 		}},
 	}
 	r := &fakeRunner{fail: map[string]bool{"split-window": true}}
-	if _, _, _, err := Create(r, cfg); err != nil {
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	got := strings.Join(r.joined(), "\n")
@@ -441,7 +451,7 @@ func TestApplyPanesSelectLayoutError(t *testing.T) {
 		}},
 	}
 	r := &fakeRunner{fail: map[string]bool{"select-layout": true}}
-	if _, _, _, err := Create(r, cfg); err != nil {
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 }
@@ -452,7 +462,7 @@ func TestSendKeysError(t *testing.T) {
 		Windows: []config.Window{{Name: "w", Splits: []config.Split{{Command: "nvim"}}}},
 	}
 	r := &fakeRunner{fail: map[string]bool{"send-keys": true}}
-	if _, _, _, err := Create(r, cfg); err != nil {
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 }
@@ -463,7 +473,7 @@ func TestSelectStartupInvalidWindowName(t *testing.T) {
 		Windows: []config.Window{{Name: "w"}},
 	}
 	r := &fakeRunner{}
-	if _, _, _, err := Create(r, cfg); err != nil {
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	got := strings.Join(r.joined(), "\n")
@@ -478,7 +488,7 @@ func TestSelectStartupSelectWindowError(t *testing.T) {
 		Windows: []config.Window{{Name: "w"}},
 	}
 	r := &fakeRunner{fail: map[string]bool{"select-window": true}}
-	if _, _, _, err := Create(r, cfg); err != nil {
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	got := strings.Join(r.joined(), "\n")
@@ -494,7 +504,7 @@ func TestSelectStartupSelectPaneError(t *testing.T) {
 		Windows: []config.Window{{Name: "w"}},
 	}
 	r := &fakeRunner{fail: map[string]bool{"select-pane": true}}
-	if _, _, _, err := Create(r, cfg); err != nil {
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 }

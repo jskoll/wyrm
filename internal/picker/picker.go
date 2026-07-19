@@ -285,14 +285,22 @@ func (m *model) selectedWindow() (tmux.WindowInfo, bool) {
 
 // Run shows the interactive picker and returns the chosen session's tmux ID
 // (e.g. "$3" — see tmux.FindSessionID for why the ID rather than the name),
-// or "" if the user aborted or there are no sessions to pick.
-func Run(r tmux.Runner) (string, error) {
+// or "" if the user aborted or there are no sessions to pick. stderr is
+// where the "nothing to pick" notice goes — passed in rather than hardcoded
+// so callers can capture or redirect it, the same way main.run threads
+// stdout/stderr throughout the CLI.
+//
+// Run itself only sets up the real terminal (opening /dev/tty, entering raw
+// mode); the read-key/update/redraw cycle lives in runLoop, kept separate so
+// it can be driven by an in-memory reader/writer in tests instead of a real
+// tty — see runLoop's doc.
+func Run(r tmux.Runner, stderr io.Writer) (string, error) {
 	sessions, err := ListSessions(r)
 	if err != nil {
 		return "", err
 	}
 	if len(sessions) == 0 {
-		fmt.Fprintln(os.Stderr, "wyrm: no running tmux sessions")
+		fmt.Fprintln(stderr, "wyrm: no running tmux sessions")
 		return "", nil
 	}
 
@@ -313,15 +321,32 @@ func Run(r tmux.Runner) (string, error) {
 	rn.hideCursor()
 	defer rn.clear()
 
+	height := func() int {
+		_, h, err := term.GetSize(fd)
+		if err != nil {
+			return 0
+		}
+		return h
+	}
+	return runLoop(r, sessions, bufio.NewReader(tty), rn, height)
+}
+
+// runLoop drives the picker's read-key/update/redraw cycle until the user
+// picks a session/window or backs out, returning the same result Run does.
+// It knows nothing about /dev/tty or raw mode — br and rn can be backed by
+// anything, and height reports the terminal's current row count (or any
+// value below 3, e.g. 0, when it can't be determined), letting the pure
+// filtering/model logic and the terminal plumbing in Run be tested
+// independently.
+func runLoop(r tmux.Runner, sessions []Session, br *bufio.Reader, rn *renderer, height func() int) (string, error) {
 	m := newModel(sessions)
-	br := bufio.NewReader(tty)
 
 	for {
-		_, height, sizeErr := term.GetSize(fd)
-		if sizeErr != nil || height < 3 {
-			height = len(m.filtered) + 2
+		h := height()
+		if h < 3 {
+			h = len(m.filtered) + 2
 		}
-		rn.draw(m, height-2)
+		rn.draw(m, h-2)
 
 		key, ch, err := readKey(br)
 		if err != nil {
@@ -626,18 +651,30 @@ func viewport(cursor, n, maxRows int) (int, int) {
 	return start, end
 }
 
-func formatRow(s Session) string {
+// FormatRow renders a session as "name  N window(s)[  (attached)]" — the
+// shape shared by the interactive picker's colorized rows and -list's plain
+// table (see main.formatSessionRow). colored selects ANSI color for the
+// window count and attached marker; colorize still suppresses it on top of
+// this when NO_COLOR is set.
+func FormatRow(s Session, colored bool) string {
 	unit := "windows"
 	if s.Windows == 1 {
 		unit = "window"
 	}
-	count := colorize(cyan, fmt.Sprintf("%d %s", s.Windows, unit))
+	count := fmt.Sprintf("%d %s", s.Windows, unit)
 	att := ""
-	if s.Attached {
-		att = "  " + colorize(green, "(attached)")
+	if colored {
+		count = colorize(cyan, count)
+		if s.Attached {
+			att = "  " + colorize(green, "(attached)")
+		}
+	} else if s.Attached {
+		att = "  (attached)"
 	}
 	return fmt.Sprintf("%-24s %s%s", s.Name, count, att)
 }
+
+func formatRow(s Session) string { return FormatRow(s, true) }
 
 func formatWindowRow(w tmux.WindowInfo) string {
 	if w.Active {
