@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-07-18
+
 ### Added
 - `wyrm -pick`: `Ctrl-W` on a selected session shows its windows (names
   only) so you can jump straight to one — `Enter` selects a window and
@@ -155,7 +157,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/jskoll/wyrm/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/jskoll/wyrm/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/jskoll/wyrm/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/jskoll/wyrm/compare/v0.1.6...v0.1.7
