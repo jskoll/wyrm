@@ -1,11 +1,14 @@
 package picker
 
 import (
+	"bufio"
 	"errors"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/jskoll/wyrm/internal/tmux"
 )
 
 // stubRunner returns canned output/err for the first arg it's given and records
@@ -188,6 +191,121 @@ func TestModelBackspace(t *testing.T) {
 	m.backspace() // empty query, no-op
 	if m.query != "" {
 		t.Fatalf("query should be empty, got %q", m.query)
+	}
+}
+
+func TestModelEnterExitWindows(t *testing.T) {
+	m := newModel(sessions("alpha", "beta"))
+	m.cursor = 1 // "beta"
+	m.query = "b"
+	m.filter()
+
+	s, ok := m.selected()
+	if !ok || s.Name != "beta" {
+		t.Fatalf("selected = %v, %v; want beta", s.Name, ok)
+	}
+
+	windows := []tmux.WindowInfo{{ID: "@1", Name: "editor"}, {ID: "@2", Name: "server", Active: true}}
+	m.enterWindows(s, windows)
+	if !m.viewingWindows {
+		t.Fatal("viewingWindows = false after enterWindows")
+	}
+	if m.windowSession.Name != "beta" || len(m.windows) != 2 || m.windowCursor != 0 {
+		t.Fatalf("state after enterWindows = %+v", m)
+	}
+
+	m.exitWindows()
+	if m.viewingWindows || m.windows != nil || m.windowSession != (Session{}) {
+		t.Fatalf("state after exitWindows = %+v, want cleared", m)
+	}
+	// The session list itself (query, cursor) is untouched by the round trip.
+	if m.query != "b" || m.cursor != 0 {
+		t.Fatalf("session state after exitWindows = query %q cursor %d, want unchanged", m.query, m.cursor)
+	}
+}
+
+func TestModelWindowMovement(t *testing.T) {
+	m := &model{}
+	m.enterWindows(Session{Name: "beta"}, []tmux.WindowInfo{
+		{ID: "@1", Name: "a"}, {ID: "@2", Name: "b"}, {ID: "@3", Name: "c"},
+	})
+
+	m.moveWindowUp() // already at top, no-op
+	if m.windowCursor != 0 {
+		t.Fatalf("moveWindowUp at top should stay 0, got %d", m.windowCursor)
+	}
+	m.moveWindowDown()
+	m.moveWindowDown()
+	if m.windowCursor != 2 {
+		t.Fatalf("want windowCursor 2, got %d", m.windowCursor)
+	}
+	m.moveWindowDown() // at bottom, no-op
+	if m.windowCursor != 2 {
+		t.Fatalf("moveWindowDown at bottom should stay 2, got %d", m.windowCursor)
+	}
+	w, ok := m.selectedWindow()
+	if !ok || w.Name != "c" {
+		t.Fatalf("selectedWindow = %v, %v; want c", w.Name, ok)
+	}
+}
+
+func TestModelSelectedWindowEmpty(t *testing.T) {
+	m := &model{}
+	if _, ok := m.selectedWindow(); ok {
+		t.Error("selectedWindow on an empty model: want not-ok")
+	}
+}
+
+func TestSelectWindow(t *testing.T) {
+	r := &stubRunner{}
+	if err := selectWindow(r, "@3"); err != nil {
+		t.Fatalf("selectWindow: %v", err)
+	}
+	want := []string{"select-window", "-t", "@3"}
+	if len(r.calls) != 1 || !reflect.DeepEqual(r.calls[0], want) {
+		t.Fatalf("got %v, want %v", r.calls, want)
+	}
+}
+
+func TestSelectWindowError(t *testing.T) {
+	r := &stubRunner{err: errors.New("exit status 1")}
+	if err := selectWindow(r, "@3"); err == nil {
+		t.Error("selectWindow with a failing command: want error, got nil")
+	}
+}
+
+func TestFormatWindowRowColor(t *testing.T) {
+	withNoColor(t, false)
+	got := formatWindowRow(tmux.WindowInfo{Name: "editor", Active: true})
+	if !strings.Contains(got, green) {
+		t.Errorf("formatWindowRow = %q, want the green color code present", got)
+	}
+	if !strings.Contains(got, "editor") || !strings.Contains(got, "(active)") {
+		t.Errorf("formatWindowRow = %q, want plain text preserved alongside color codes", got)
+	}
+}
+
+func TestFormatWindowRowInactiveNoMarker(t *testing.T) {
+	got := formatWindowRow(tmux.WindowInfo{Name: "editor"})
+	if got != "editor" {
+		t.Errorf("formatWindowRow(inactive) = %q, want just the name", got)
+	}
+}
+
+func TestReadKeyWindowsAndQuit(t *testing.T) {
+	br := bufio.NewReader(strings.NewReader("\x17\x03"))
+	if k, _, err := readKey(br); err != nil || k != keyWindows {
+		t.Fatalf("readKey(Ctrl-W) = %v, %v; want keyWindows", k, err)
+	}
+	if k, _, err := readKey(br); err != nil || k != keyQuit {
+		t.Fatalf("readKey(Ctrl-C) = %v, %v; want keyQuit", k, err)
+	}
+}
+
+func TestReadKeyEscapeAborts(t *testing.T) {
+	br := bufio.NewReader(strings.NewReader("\x1b"))
+	if k, _, err := readKey(br); err != nil || k != keyAbort {
+		t.Fatalf("readKey(lone Escape) = %v, %v; want keyAbort", k, err)
 	}
 }
 

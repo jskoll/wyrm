@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `wyrm -pick`: `Ctrl-W` on a selected session shows its windows (names
+  only) so you can jump straight to one — `Enter` selects a window and
+  attaches or switches directly to it, `Esc` backs out to the session list.
+  `Ctrl-C` now always quits the picker outright, from either view.
+
 ## [0.1.9] - 2026-07-18
 
 ### Added

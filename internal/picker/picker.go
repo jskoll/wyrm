@@ -160,6 +160,17 @@ type model struct {
 	query    string
 	filtered []Session // subset matching query, best score first
 	cursor   int
+
+	// viewingWindows and the fields below hold a drill-down into one
+	// session's windows (Ctrl-W), replacing the session list until the user
+	// picks a window or backs out with Esc. There's no query here — window
+	// counts per session are small enough that a plain list suffices, and
+	// it sidesteps needing a second reserved key to distinguish "type to
+	// filter windows" from "type to filter sessions".
+	viewingWindows bool
+	windowSession  Session
+	windows        []tmux.WindowInfo
+	windowCursor   int
 }
 
 func newModel(sessions []Session) *model {
@@ -235,6 +246,43 @@ func (m *model) selected() (Session, bool) {
 	return m.filtered[m.cursor], true
 }
 
+// enterWindows switches the model into the window-drill-down view for
+// session s. windows must already be fetched (Run does the tmux call; the
+// model stays pure and side-effect-free).
+func (m *model) enterWindows(s Session, windows []tmux.WindowInfo) {
+	m.viewingWindows = true
+	m.windowSession = s
+	m.windows = windows
+	m.windowCursor = 0
+}
+
+// exitWindows returns to the session list, preserving its query/cursor.
+func (m *model) exitWindows() {
+	m.viewingWindows = false
+	m.windowSession = Session{}
+	m.windows = nil
+	m.windowCursor = 0
+}
+
+func (m *model) moveWindowUp() {
+	if m.windowCursor > 0 {
+		m.windowCursor--
+	}
+}
+
+func (m *model) moveWindowDown() {
+	if m.windowCursor < len(m.windows)-1 {
+		m.windowCursor++
+	}
+}
+
+func (m *model) selectedWindow() (tmux.WindowInfo, bool) {
+	if m.windowCursor < 0 || m.windowCursor >= len(m.windows) {
+		return tmux.WindowInfo{}, false
+	}
+	return m.windows[m.windowCursor], true
+}
+
 // Run shows the interactive picker and returns the chosen session's tmux ID
 // (e.g. "$3" — see tmux.FindSessionID for why the ID rather than the name),
 // or "" if the user aborted or there are no sessions to pick.
@@ -281,16 +329,56 @@ func Run(r tmux.Runner) (string, error) {
 		}
 		switch key {
 		case keyEnter:
+			if m.viewingWindows {
+				w, ok := m.selectedWindow()
+				if !ok {
+					break
+				}
+				if err := selectWindow(r, w.ID); err != nil {
+					return "", err
+				}
+				return m.windowSession.ID, nil
+			}
 			if s, ok := m.selected(); ok {
 				return s.ID, nil
 			}
 		case keyAbort:
+			if m.viewingWindows {
+				m.exitWindows()
+				break
+			}
+			return "", nil
+		case keyQuit:
 			return "", nil
 		case keyUp:
-			m.moveUp()
+			if m.viewingWindows {
+				m.moveWindowUp()
+			} else {
+				m.moveUp()
+			}
 		case keyDown:
-			m.moveDown()
+			if m.viewingWindows {
+				m.moveWindowDown()
+			} else {
+				m.moveDown()
+			}
+		case keyWindows:
+			if m.viewingWindows {
+				break
+			}
+			s, ok := m.selected()
+			if !ok {
+				break
+			}
+			windows, listErr := tmux.ListWindows(r, s.ID)
+			if listErr != nil || len(windows) == 0 {
+				break // session vanished or came up empty; stay put
+			}
+			m.enterWindows(s, windows)
 		case keyKill:
+			if m.viewingWindows {
+				break
+			}
 			s, ok := m.selected()
 			if !ok {
 				break
@@ -305,11 +393,26 @@ func Run(r tmux.Runner) (string, error) {
 			m.query = q
 			m.filter()
 		case keyBackspace:
-			m.backspace()
+			if !m.viewingWindows {
+				m.backspace()
+			}
 		case keyRune:
-			m.appendRune(ch)
+			if !m.viewingWindows {
+				m.appendRune(ch)
+			}
 		}
 	}
+}
+
+// selectWindow activates windowID (e.g. "@3") within its session, without
+// requiring a client to be attached — attaching or switching afterward
+// (attachOrSwitch in main.go) then lands on this window. Mirrors
+// KillSession: a raw tmux call with no wyrm-specific bookkeeping.
+func selectWindow(r tmux.Runner, windowID string) error {
+	if out, err := r.Run("select-window", "-t", windowID); err != nil {
+		return fmt.Errorf("selecting window %q: %v (%s)", windowID, err, out)
+	}
+	return nil
 }
 
 // key classifies a decoded key press.
@@ -320,14 +423,17 @@ const (
 	keyRune
 	keyEnter
 	keyAbort
+	keyQuit
 	keyUp
 	keyDown
 	keyBackspace
 	keyKill
+	keyWindows
 )
 
 // readKey decodes one key press, resolving the common escape sequences for
-// arrow and delete keys. A lone Escape (no bytes queued behind it) aborts.
+// arrow and delete keys. A lone Escape (no bytes queued behind it) backs out
+// one level (or quits, at the top level); Ctrl-C always quits outright.
 func readKey(br *bufio.Reader) (key, rune, error) {
 	b, err := br.ReadByte()
 	if err != nil {
@@ -337,11 +443,13 @@ func readKey(br *bufio.Reader) (key, rune, error) {
 	case '\r', '\n':
 		return keyEnter, 0, nil
 	case 3: // Ctrl-C
-		return keyAbort, 0, nil
+		return keyQuit, 0, nil
 	case 16: // Ctrl-P
 		return keyUp, 0, nil
 	case 14: // Ctrl-N
 		return keyDown, 0, nil
+	case 23: // Ctrl-W
+		return keyWindows, 0, nil
 	case 24: // Ctrl-X
 		return keyKill, 0, nil
 	case 8, 127: // Backspace / Ctrl-H
@@ -441,6 +549,17 @@ func (rn *renderer) draw(m *model, maxRows int) {
 		lines++
 	}
 
+	if m.viewingWindows {
+		drawWindows(m, maxRows, writeLine)
+	} else {
+		drawSessions(m, maxRows, writeLine)
+	}
+
+	rn.prevLines = lines
+	_, _ = io.WriteString(rn.w, b.String())
+}
+
+func drawSessions(m *model, maxRows int, writeLine func(string)) {
 	writeLine(fmt.Sprintf("%s> %s%s", bold, reset, m.query))
 
 	start, end := viewport(m.cursor, len(m.filtered), maxRows)
@@ -456,11 +575,25 @@ func (rn *renderer) draw(m *model, maxRows int) {
 		writeLine(dim + "  (no matching sessions)" + reset)
 	}
 
-	writeLine(fmt.Sprintf("%s  %d/%d · up/down move · enter attach · ctrl-x kill · esc quit%s",
+	writeLine(fmt.Sprintf("%s  %d/%d · up/down move · enter attach · ctrl-x kill · ctrl-w windows · esc quit%s",
 		dim, len(m.filtered), len(m.all), reset))
+}
 
-	rn.prevLines = lines
-	_, _ = io.WriteString(rn.w, b.String())
+func drawWindows(m *model, maxRows int, writeLine func(string)) {
+	writeLine(fmt.Sprintf("%swindows of %s%s", bold, m.windowSession.Name, reset))
+
+	start, end := viewport(m.windowCursor, len(m.windows), maxRows)
+	for i := start; i < end; i++ {
+		row := formatWindowRow(m.windows[i])
+		if i == m.windowCursor {
+			writeLine(reverse + "> " + row + reset)
+		} else {
+			writeLine("  " + row)
+		}
+	}
+
+	writeLine(fmt.Sprintf("%s  %d windows · up/down move · enter switch · esc back%s",
+		dim, len(m.windows), reset))
 }
 
 // clear erases the picker UI and restores the cursor, leaving the terminal
@@ -504,4 +637,11 @@ func formatRow(s Session) string {
 		att = "  " + colorize(green, "(attached)")
 	}
 	return fmt.Sprintf("%-24s %s%s", s.Name, count, att)
+}
+
+func formatWindowRow(w tmux.WindowInfo) string {
+	if w.Active {
+		return w.Name + "  " + colorize(green, "(active)")
+	}
+	return w.Name
 }

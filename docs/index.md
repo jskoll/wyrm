@@ -128,11 +128,39 @@ attached to a client yet.
 | type | fuzzy-filter by session name |
 | ↑ / ↓, `Ctrl-P` / `Ctrl-N` | move the selection |
 | `Enter` | attach (or `switch-client` if you're already in tmux) |
+| `Ctrl-W` | show the selected session's windows, to jump straight to one (below) |
 | `Ctrl-X` | kill the selected session (a plain tmux kill, no `on_project_exit`) |
-| `Esc` / `Ctrl-C` | cancel |
+| `Esc` | cancel |
+| `Ctrl-C` | quit outright, from either view |
+
+The `>`-prefixed row is the current selection (shown in reverse video in a
+real terminal):
+
+```
+> 
+  api-server               2 windows
+> wyrm                     3 windows  (attached)
+  notes                    1 window
+
+  3/3 · up/down move · enter attach · ctrl-x kill · ctrl-w windows · esc quit
+```
 
 The picker is built into the binary — no dependency on `fzf` or any other
 external tool.
+
+`Ctrl-W` drops into that session's window list (names only, no fuzzy filter —
+window counts per session are small enough a plain list is enough). `Enter`
+selects a window and attaches (or switches) straight to it; `Esc` backs out
+to the session list instead of quitting the picker.
+
+```
+windows of wyrm
+  code
+> server  (active)
+  logs
+
+  3 windows · up/down move · enter switch · esc back
+```
 
 Window counts are shown in cyan and `(attached)` in green. Set
 [`NO_COLOR`](https://no-color.org) (any value) to disable color — the rest
