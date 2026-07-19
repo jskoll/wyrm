@@ -6,6 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `wyrm -save`: snapshot a running tmux session's windows, split layout,
+  and sizes into a new config for the current folder — the reverse of
+  building a session from one. Each split's `command` is captured from
+  whatever program is currently running in that pane's foreground, since
+  tmux keeps no record of what was originally typed. Like
+  `-migrate-config`, it refuses to overwrite an existing config.
+
+### Changed
+- A bare `wyrm` with no config file now always builds (or attaches to) a
+  session for the current folder, even if unrelated tmux sessions are
+  already running elsewhere. Previously it opened the interactive picker
+  instead whenever *any* session was running; that's now only triggered
+  explicitly via `-pick`.
+
 ## [0.1.8] - 2026-07-13
 
 ### Added
