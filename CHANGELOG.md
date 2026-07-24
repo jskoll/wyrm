@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-07-24
+
+### Fixed
+- `wyrm -pick`: fixed screen jitter when the session list is taller than
+  the picker's viewport, most visible inside a small tmux `display-popup`.
+  The frame now reserves the terminal's bottom row so its trailing newline
+  no longer scrolls the display on every keypress, and each repaint is
+  wrapped in synchronized-update mode (DEC 2026) so it presents atomically.
+
 ## [0.1.10] - 2026-07-18
 
 ### Added
@@ -157,7 +166,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.1.10...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/jskoll/wyrm/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/jskoll/wyrm/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/jskoll/wyrm/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/jskoll/wyrm/compare/v0.1.7...v0.1.8
