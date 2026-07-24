@@ -148,6 +148,18 @@ real terminal):
 The picker is built into the binary — no dependency on `fzf` or any other
 external tool.
 
+It also works well inside a tmux `display-popup`, which is a convenient way
+to bind it to a key while attached to a session:
+
+```tmux
+# ~/.tmux.conf — prefix + y opens the session picker in a popup
+bind y display-popup -d "#{pane_current_path}" -w 50% -h 50% -E "wyrm -pick"
+```
+
+The picker redraws in place and clips over-long rows to the popup's width, so
+navigation stays stable regardless of the popup size or how many sessions are
+running.
+
 `Ctrl-W` drops into that session's window list (names only, no fuzzy filter —
 window counts per session are small enough a plain list is enough). `Enter`
 selects a window and attaches (or switches) straight to it; `Esc` backs out
