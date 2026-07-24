@@ -109,7 +109,7 @@ func TestStartProjectAttaches(t *testing.T) {
 }
 
 func TestKillProjectRequiresRunning(t *testing.T) {
-	r := &funcRunner{fn: func(args ...string) (string, error) { return "", nil }}
+	r := &funcRunner{fn: func(_ ...string) (string, error) { return "", nil }}
 	m := projectModel(r, "/tmp/x/.wyrm.toml")
 	m.projects[0].Running = false
 	// x on a not-running project is a no-op (no confirm modal).

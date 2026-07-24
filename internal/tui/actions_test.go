@@ -132,7 +132,7 @@ func TestRenameWindowPromptFlow(t *testing.T) {
 }
 
 func TestEmptyPromptDoesNothing(t *testing.T) {
-	r := funcRunner{fn: func(args ...string) (string, error) { return "", nil }}
+	r := funcRunner{fn: func(_ ...string) (string, error) { return "", nil }}
 	m := modelWithData(r)
 	m.focus = panelWindows
 	m, _ = update(m, key("n")) // new window prompt
@@ -147,7 +147,7 @@ func TestEmptyPromptDoesNothing(t *testing.T) {
 }
 
 func TestPromptEscCancels(t *testing.T) {
-	r := funcRunner{fn: func(args ...string) (string, error) { return "", nil }}
+	r := funcRunner{fn: func(_ ...string) (string, error) { return "", nil }}
 	m := modelWithData(r)
 	m.focus = panelWindows
 	m, _ = update(m, key("r"))

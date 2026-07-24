@@ -19,7 +19,7 @@ type funcRunner struct {
 func (r funcRunner) Run(args ...string) (string, error) { return r.fn(args...) }
 
 func nopRunner() funcRunner {
-	return funcRunner{fn: func(args ...string) (string, error) { return "", nil }}
+	return funcRunner{fn: func(_ ...string) (string, error) { return "", nil }}
 }
 
 // run executes a command (if non-nil) and returns its message.
@@ -145,7 +145,7 @@ func TestPreviewMsgSetsContent(t *testing.T) {
 }
 
 func TestNavigationResetsChildCursors(t *testing.T) {
-	r := funcRunner{fn: func(args ...string) (string, error) { return "", nil }}
+	r := funcRunner{fn: func(_ ...string) (string, error) { return "", nil }}
 	m := New(r, nil)
 	m.focus = panelSessions
 	m.sessions = []picker.Session{{ID: "$1"}, {ID: "$2"}}
