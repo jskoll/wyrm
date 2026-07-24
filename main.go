@@ -17,6 +17,7 @@ import (
 	"github.com/jskoll/wyrm/internal/picker"
 	"github.com/jskoll/wyrm/internal/session"
 	"github.com/jskoll/wyrm/internal/tmux"
+	"github.com/jskoll/wyrm/internal/tui"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -36,6 +37,7 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 	configPath := fs.String("config", "", "path to config file (default: .wyrm.toml, then .tmuxconfig)")
 	kill := fs.Bool("kill", false, "kill the session (runs on_project_exit) instead of creating it")
 	pick := fs.Bool("pick", false, "pick a running tmux session to attach to")
+	tuiFlag := fs.Bool("tui", false, "open the interactive session-management TUI")
 	showVersion := fs.Bool("version", false, "print version and exit")
 	migrateConfig := fs.Bool("migrate-config", false, "move the local config into the shared config directory")
 	validate := fs.Bool("validate", false, "check that the effective config parses and validates, without building a session")
@@ -85,6 +87,10 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 
 	if *list {
 		return runList(runner, stdout, stderr, *format)
+	}
+
+	if *tuiFlag {
+		return runTUI(runner, stderr, settings, insideTmux, attach)
 	}
 
 	if *pick {
@@ -434,6 +440,22 @@ func formatSessionRow(s picker.Session) string {
 // empty choice (nothing running, or the user aborted) exits quietly.
 func runPicker(runner tmux.Runner, stderr io.Writer, insideTmux func() bool, attach func(string) error) int {
 	sessionID, err := picker.Run(runner, stderr)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+		return 1
+	}
+	if sessionID == "" {
+		return 0
+	}
+	return attachOrSwitch(runner, stderr, insideTmux, attach, sessionID)
+}
+
+// runTUI opens the interactive session-management TUI and, if the user chose a
+// session to attach to, hands the terminal over after the alt-screen program
+// exits — the same deferred-attach dance runPicker uses, since a full-screen
+// program can't attach in place.
+func runTUI(runner tmux.Runner, stderr io.Writer, settings *config.Settings, insideTmux func() bool, attach func(string) error) int {
+	sessionID, err := tui.Run(runner, settings, stderr)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
 		return 1

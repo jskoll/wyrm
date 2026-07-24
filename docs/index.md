@@ -61,6 +61,7 @@ wyrm <name>                # attach/switch directly to a running session by name
 wyrm -config path/to/file  # explicit config
 wyrm -kill                 # destroy the session (runs on_project_exit first)
 wyrm -pick                 # fuzzy-pick a running session and attach to it
+wyrm -tui                  # full-screen session manager (browse, preview, kill, rename, start)
 wyrm -save                 # save the running session's layout as this folder's config
 wyrm -edit                 # open the resolved config in $EDITOR, creating one if needed
 wyrm -validate             # check the effective config parses and validates, without building a session
@@ -183,6 +184,69 @@ If you already know the session's name, `wyrm <name>` skips the picker and
 attaches (or `switch-client`s) directly to it — exact match only, no fuzzy
 matching. Combined with shell completion (below), this means `wyrm <TAB>`
 tab-completes to real running session names.
+
+## The session manager TUI
+
+`wyrm -tui` opens a full-screen, keyboard-driven session manager in the spirit
+of lazygit. Where `-pick` is a one-shot "choose and attach", the TUI is for
+_browsing and managing_ everything at once — your project configs, the running
+sessions, and the windows and panes inside them — with a live preview of the
+selected pane.
+
+```
+┌ Projects ─────┐┌ %1 nvim ─────────────────────────┐
+│ ● webapp      ││ (live capture of the selected     │
+│   dotfiles    ││  pane — refreshed every second —  │
+├ Sessions ─────┤│  or, on the Projects panel, the   │
+│ ● webapp  2w  ││  selected config's contents)      │
+│   notes   1w  ││                                   │
+├ Windows ──────┤│                                   │
+│ 0: code       ││                                   │
+│ 1: servers    ││                                   │
+├ Panes ────────┤│                                   │
+│ %1 nvim       ││                                   │
+│ %2 npm        ││                                   │
+└───────────────┘└───────────────────────────────────┘
+ ↵: attach  x: kill  r: rename  n: new-win  L: layout  tab/1-4: focus  ?: help
+```
+
+The four left panels form a hierarchy: **Projects** (every `.wyrm.toml` wyrm can
+discover — the local one plus the shared directory, marked `●` when a session by
+that name is running) → **Sessions** (running now) → **Windows** → **Panes**.
+Windows track the selected session and panes track the selected window. The main
+panel previews the selection: the live pane contents (via `capture-pane`) for the
+session panels, or the config file's contents on the Projects panel.
+
+| Key | Action |
+|---|---|
+| `Tab` / `Shift-Tab`, `1`–`4` | move focus between panels |
+| `↑` / `↓`, `j` / `k` | move the selection in the focused panel |
+| `Enter` | attach — lands on the exact window/pane under the cursor (or, on Projects, starts/attaches the config's session) |
+| `x` | kill the focused session / window / pane (or, on Projects, stop the session running `on_project_exit`) — with a confirm |
+| `r` | rename the focused session or window |
+| `n` | new window in the current session |
+| `L` | cycle the focused window through tmux's standard layouts |
+| `z` | toggle zoom on the focused pane |
+| `e` | edit the selected project's config in `$EDITOR` |
+| `R` | reload the project and session lists |
+| `?` | show the full keyboard-shortcut help overlay |
+| `q` / `Ctrl-C` | quit |
+
+Press `?` at any time for a full-screen cheat sheet of every binding. Like
+`-pick`, attaching from the TUI uses `switch-client` when you're already inside
+tmux and `attach-session` otherwise. When run inside tmux, the pane the TUI
+itself occupies shows a placeholder instead of a preview, to avoid capturing the
+TUI into its own view. It also pairs well with tmux's `display-popup` for a
+floating session manager over your current work:
+
+```sh
+# ~/.tmux.conf — prefix + g opens the session manager in a popup
+bind g display-popup -d "#{pane_current_path}" -w 80% -h 80% -E "wyrm -tui"
+```
+
+The TUI is the one part of wyrm built on the [Charm](https://charm.sh) stack
+(Bubble Tea / Lipgloss); the core build/attach path and `-pick` remain
+dependency-free.
 
 ## Saving a running session
 

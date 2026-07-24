@@ -17,6 +17,7 @@
 complete -c wyrm -o config -d 'config file path' -r -a '(wyrm -list-configs 2>/dev/null)'
 complete -c wyrm -o kill -d 'kill the session (runs on_project_exit)'
 complete -c wyrm -o pick -d 'fuzzy-pick a running session to attach to'
+complete -c wyrm -o tui -d 'open the full-screen session-management TUI'
 complete -c wyrm -o save -d 'save the running session layout as a config for this folder'
 complete -c wyrm -o version -d 'print version and exit'
 complete -c wyrm -o migrate-config -d 'move the local config into the shared config directory'
