@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-24
+
+### Fixed
+- `wyrm -tui`: the `?` help overlay no longer runs off the top of the screen
+  when it's taller than the terminal (only the bottom was visible, with no way
+  to reach the rest). It now scrolls — `↑`/`↓` or `j`/`k`, `PgUp`/`PgDn`,
+  `g`/`G`, `Esc` to close — with a position indicator, and lays its sections out
+  in two columns (collapsing to one on a narrow terminal) so it fits without
+  scrolling in more cases.
+
 ## [0.2.0] - 2026-07-24
 
 ### Added
@@ -196,7 +206,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/jskoll/wyrm/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/jskoll/wyrm/compare/v0.1.12...v0.2.0
 [0.1.12]: https://github.com/jskoll/wyrm/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/jskoll/wyrm/compare/v0.1.10...v0.1.11
