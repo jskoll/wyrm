@@ -6,6 +6,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-24
+
+### Added
+- `wyrm -tui`: a full-screen, keyboard-driven session manager in the spirit of
+  lazygit. Four stacked panels — Projects, Sessions, Windows, Panes — drive a
+  live preview of the selected pane (`capture-pane`, refreshed each second), or
+  the selected config's contents on the Projects panel. Navigate with
+  `Tab`/`1`-`4` and `j`/`k`; `Enter` attaches, landing on the exact window/pane
+  under the cursor (or starts/attaches a project's session). Manage tmux
+  directly: `x` kills the focused session/window/pane (with a confirm), `r`
+  renames, `n` opens a new window, `L` cycles the window layout, `z` toggles
+  pane zoom. On the Projects panel, `e` edits a config in `$EDITOR` and `x`
+  stops a session running its `on_project_exit` hook. Press `?` for a
+  full-screen overlay of every binding. Like `-pick`, it uses `switch-client`
+  inside tmux and `attach-session` otherwise, and suppresses the preview of the
+  pane it is itself running in. Shell completion now offers `-tui`.
+
 ## [0.1.12] - 2026-07-24
 
 ### Fixed
@@ -179,7 +196,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/jskoll/wyrm/compare/v0.1.12...v0.2.0
 [0.1.12]: https://github.com/jskoll/wyrm/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/jskoll/wyrm/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/jskoll/wyrm/compare/v0.1.9...v0.1.10
