@@ -258,33 +258,99 @@ var helpSections = []helpSection{
 	}},
 }
 
-// renderHelpOverlay draws a centered, full-screen cheat sheet of every binding.
-func (m Model) renderHelpOverlay() string {
+// helpColumn renders a set of sections into one aligned block of lines: a
+// styled section header followed by its "key  description" rows, blank line
+// between sections.
+func helpColumn(sections []helpSection) string {
 	keyCol := 0
-	for _, s := range helpSections {
+	for _, s := range sections {
 		for _, e := range s.entries {
 			if w := lipgloss.Width(e[0]); w > keyCol {
 				keyCol = w
 			}
 		}
 	}
-
-	var b strings.Builder
-	b.WriteString(focusedTitle.Render("wyrm — keyboard shortcuts"))
-	b.WriteString("\n")
-	for _, s := range helpSections {
-		b.WriteString("\n")
-		b.WriteString(blurredTitle.Render(s.title))
-		b.WriteString("\n")
+	var lines []string
+	for i, s := range sections {
+		if i > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, blurredTitle.Render(s.title))
 		for _, e := range s.entries {
-			key := keyStyle.Render(padRight(e[0], keyCol))
-			b.WriteString("  " + key + "  " + e[1] + "\n")
+			lines = append(lines, "  "+keyStyle.Render(padRight(e[0], keyCol))+"  "+e[1])
 		}
 	}
-	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("press any key to close"))
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
 
-	box := focusedBorder.Padding(0, 1).Render(b.String())
+// helpLines returns the body of the help overlay as individual lines (so it can
+// be scrolled). It lays the sections out in two side-by-side columns when the
+// terminal is wide enough, and falls back to a single column otherwise.
+func (m Model) helpLines() []string {
+	half := (len(helpSections) + 1) / 2
+	two := lipgloss.JoinHorizontal(lipgloss.Top,
+		helpColumn(helpSections[:half]), "    ", helpColumn(helpSections[half:]))
+	if lipgloss.Width(two) <= m.width-helpChrome {
+		return strings.Split(two, "\n")
+	}
+	return strings.Split(helpColumn(helpSections), "\n")
+}
+
+// helpChrome is the horizontal space the overlay's border + padding consume.
+const helpChrome = 4 // border (2) + padding (2)
+
+// helpVisible is how many body lines fit between the title and footer.
+func (m Model) helpVisible() int {
+	// border (2) + title (1) + footer (1).
+	v := m.height - 4
+	if v < 1 {
+		v = 1
+	}
+	return v
+}
+
+func (m Model) helpMaxScroll() int {
+	maxScroll := len(m.helpLines()) - m.helpVisible()
+	if maxScroll < 0 {
+		return 0
+	}
+	return maxScroll
+}
+
+// renderHelpOverlay draws a centered cheat sheet of every binding. When the
+// content is taller than the terminal it shows a scrollable window with a
+// position indicator instead of overflowing off-screen.
+func (m Model) renderHelpOverlay() string {
+	lines := m.helpLines()
+	visible := m.helpVisible()
+
+	scroll := m.helpScroll
+	if maxScroll := len(lines) - visible; scroll > maxScroll {
+		scroll = maxScroll
+	}
+	if scroll < 0 {
+		scroll = 0
+	}
+	end := scroll + visible
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	title := focusedTitle.Render("wyrm — keyboard shortcuts")
+	body := lipgloss.JoinVertical(lipgloss.Left, lines[scroll:end]...)
+
+	var footer string
+	if len(lines) > visible {
+		pct := 100
+		if maxScroll := len(lines) - visible; maxScroll > 0 {
+			pct = scroll * 100 / maxScroll
+		}
+		footer = hintStyle.Render(fmt.Sprintf("%d%%  ·  ↑↓/jk scroll  ·  esc close", pct))
+	} else {
+		footer = hintStyle.Render("esc close")
+	}
+
+	box := focusedBorder.Padding(0, 1).Render(lipgloss.JoinVertical(lipgloss.Left, title, body, footer))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 

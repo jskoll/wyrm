@@ -104,6 +104,7 @@ type Model struct {
 	promptTitle   string          // label shown in modePrompt
 	textInput     textinput.Model // active in modePrompt
 	layoutIdx     int             // rotates through cycleLayouts on "L"
+	helpScroll    int             // top line offset of the help overlay (modeHelp)
 
 	err error
 
@@ -341,11 +342,40 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modePrompt:
 		return m.handlePromptKey(msg)
 	case modeHelp:
-		// Any key dismisses the help overlay.
-		m.mode = modeNormal
-		return m, nil
+		return m.handleHelpKey(msg)
 	}
 	return m.handleNormalKey(msg)
+}
+
+// handleHelpKey scrolls the help overlay or closes it. Only esc/q/?/Ctrl-C
+// close; navigation keys scroll so a taller-than-screen cheat sheet stays fully
+// reachable.
+func (m Model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q", "?", "ctrl+c":
+		m.mode = modeNormal
+		m.helpScroll = 0
+		return m, nil
+	case "down", "j":
+		m.helpScroll++
+	case "up", "k":
+		m.helpScroll--
+	case "pgdown", "ctrl+d", "f", " ":
+		m.helpScroll += m.helpVisible() - 1
+	case "pgup", "ctrl+u", "b":
+		m.helpScroll -= m.helpVisible() - 1
+	case "g", "home":
+		m.helpScroll = 0
+	case "G", "end":
+		m.helpScroll = m.helpMaxScroll()
+	}
+	if maxScroll := m.helpMaxScroll(); m.helpScroll > maxScroll {
+		m.helpScroll = maxScroll
+	}
+	if m.helpScroll < 0 {
+		m.helpScroll = 0
+	}
+	return m, nil
 }
 
 func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -395,6 +425,7 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.editProject()
 	case "?":
 		m.mode = modeHelp
+		m.helpScroll = 0
 		return m, nil
 	}
 	return m, nil

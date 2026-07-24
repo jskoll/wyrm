@@ -229,10 +229,12 @@ session panels, or the config file's contents on the Projects panel.
 | `z` | toggle zoom on the focused pane |
 | `e` | edit the selected project's config in `$EDITOR` |
 | `R` | reload the project and session lists |
-| `?` | show the full keyboard-shortcut help overlay |
+| `?` | show the full keyboard-shortcut help overlay (scrollable) |
 | `q` / `Ctrl-C` | quit |
 
-Press `?` at any time for a full-screen cheat sheet of every binding. Like
+Press `?` at any time for a full-screen cheat sheet of every binding — laid out
+in two columns, or one on a narrow terminal, and scrollable (`↑`/`↓` or `j`/`k`,
+`Esc` to close) when it's taller than the screen. Like
 `-pick`, attaching from the TUI uses `switch-client` when you're already inside
 tmux and `attach-session` otherwise. When run inside tmux, the pane the TUI
 itself occupies shows a placeholder instead of a preview, to avoid capturing the
