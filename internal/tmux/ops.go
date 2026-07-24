@@ -5,11 +5,13 @@ import (
 	"strings"
 )
 
-// CapturePane returns the visible contents of a pane as plain text. target is a
-// pane ID (e.g. "%1"); the -p flag prints to stdout instead of a paste buffer.
-// The wyrm TUI polls this to show a live preview of the selected pane.
+// CapturePane returns the visible contents of a pane. target is a pane ID
+// (e.g. "%1"); -p prints to stdout instead of a paste buffer, and -e keeps the
+// SGR escape sequences so the preview reflects the pane's real colors and text
+// attributes rather than flattening them to plain text. The wyrm TUI polls this
+// to show a live preview of the selected pane.
 func CapturePane(r Runner, target string) (string, error) {
-	out, err := r.Run("capture-pane", "-p", "-t", target)
+	out, err := r.Run("capture-pane", "-e", "-p", "-t", target)
 	if err != nil {
 		return "", fmt.Errorf("capturing pane %q: %v (%s)", target, err, out)
 	}

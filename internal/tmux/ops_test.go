@@ -28,8 +28,8 @@ func TestCapturePane(t *testing.T) {
 	if want := "line one\nline two"; out != want {
 		t.Errorf("CapturePane output = %q, want %q", out, want)
 	}
-	if got := strings.Join(r.args, " "); got != "capture-pane -p -t %1" {
-		t.Errorf("CapturePane invoked tmux with %q, want %q", got, "capture-pane -p -t %1")
+	if got := strings.Join(r.args, " "); got != "capture-pane -e -p -t %1" {
+		t.Errorf("CapturePane invoked tmux with %q, want %q", got, "capture-pane -e -p -t %1")
 	}
 }
 

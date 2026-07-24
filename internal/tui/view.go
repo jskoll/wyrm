@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Layout constants. The left column holds the three stacked list panels; the
@@ -20,8 +20,10 @@ const (
 )
 
 var (
-	accentColor = lipgloss.Color("6")   // cyan: focused border + active markers
+	accentColor = lipgloss.Color("6")   // cyan: focused border + preview title
 	subtleColor = lipgloss.Color("240") // dim gray: blurred borders, hints
+	activeColor = lipgloss.Color("2")   // green: running/attached status dots
+	indexColor  = lipgloss.Color("4")   // blue: window indices and pane IDs
 
 	focusedBorder = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accentColor)
 	blurredBorder = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(subtleColor)
@@ -34,6 +36,9 @@ var (
 	helpStyle   = lipgloss.NewStyle().Foreground(subtleColor)
 	modalStyle  = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
 	keyStyle    = lipgloss.NewStyle().Bold(true)
+
+	activeMark = lipgloss.NewStyle().Foreground(activeColor) // "●" running/attached
+	indexMark  = lipgloss.NewStyle().Foreground(indexColor)  // window/pane identifiers
 )
 
 // View renders the whole TUI frame.
@@ -78,7 +83,7 @@ func (m Model) renderProjects(outerW, outerH int) string {
 	for i, p := range m.projects {
 		mark := " "
 		if p.Running {
-			mark = "●"
+			mark = activeMark.Render("●")
 		}
 		rows[i] = fmt.Sprintf("%s %s", mark, p.Name)
 	}
@@ -90,9 +95,9 @@ func (m Model) renderSessions(outerW, outerH int) string {
 	for i, s := range m.sessions {
 		mark := " "
 		if s.Attached {
-			mark = "●"
+			mark = activeMark.Render("●")
 		}
-		rows[i] = fmt.Sprintf("%s %s (%dw)", mark, s.Name, s.Windows)
+		rows[i] = fmt.Sprintf("%s %s %s", mark, s.Name, hintStyle.Render(fmt.Sprintf("(%dw)", s.Windows)))
 	}
 	return m.renderPanel(panelSessions, "Sessions", rows, m.sessionCur, outerW, outerH, "no running sessions")
 }
@@ -104,7 +109,7 @@ func (m Model) renderWindows(outerW, outerH int) string {
 		if name == "" {
 			name = fmt.Sprintf("window %d", w.Index)
 		}
-		rows[i] = fmt.Sprintf("%d: %s", w.Index, name)
+		rows[i] = fmt.Sprintf("%s %s", indexMark.Render(fmt.Sprintf("%d:", w.Index)), name)
 	}
 	return m.renderPanel(panelWindows, "Windows", rows, m.windowCur, outerW, outerH, "")
 }
@@ -112,7 +117,7 @@ func (m Model) renderWindows(outerW, outerH int) string {
 func (m Model) renderPanes(outerW, outerH int) string {
 	rows := make([]string, len(m.panes))
 	for i, p := range m.panes {
-		rows[i] = fmt.Sprintf("%s %s", p.ID, p.Command)
+		rows[i] = fmt.Sprintf("%s %s", indexMark.Render(p.ID), p.Command)
 	}
 	return m.renderPanel(panelPanes, "Panes", rows, m.paneCur, outerW, outerH, "")
 }
@@ -178,14 +183,24 @@ func (m Model) renderPreview(outerW, outerH int) string {
 		title = "Preview"
 	}
 
+	// A live pane capture gets an accent title so it reads as "live"; a static
+	// config preview stays dim.
+	titleStyle := blurredTitle
+	if m.previewSrc == previewPane {
+		titleStyle = focusedTitle
+	}
+
 	var b strings.Builder
-	b.WriteString(blurredTitle.Render(truncate(title, innerW)))
+	b.WriteString(titleStyle.Render(truncate(title, innerW)))
 	b.WriteByte('\n')
 
 	content := m.preview
 	if content == "" && m.err != nil {
 		content = "error: " + m.err.Error()
 	}
+	// Pane captures carry SGR escapes (capture-pane -e); reset after every line
+	// so an unterminated color can't bleed into the padding or the border.
+	colored := m.previewSrc == previewPane
 	lines := strings.Split(content, "\n")
 	if len(lines) > bodyH {
 		lines = lines[:bodyH]
@@ -193,6 +208,9 @@ func (m Model) renderPreview(outerW, outerH int) string {
 	for i := 0; i < bodyH; i++ {
 		if i < len(lines) {
 			b.WriteString(truncate(lines[i], innerW))
+			if colored {
+				b.WriteString(ansi.ResetStyle)
+			}
 		}
 		if i < bodyH-1 {
 			b.WriteByte('\n')
@@ -387,20 +405,23 @@ func viewport(cursor, n, rows int) (int, int) {
 }
 
 // truncate clips s to a display width of w columns, appending "…" when cut.
+// It is ANSI-aware so embedded color/attribute escapes count as zero width and
+// are never split mid-sequence.
 func truncate(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
-	if runewidth.StringWidth(s) <= w {
+	if ansi.StringWidth(s) <= w {
 		return s
 	}
-	return runewidth.Truncate(s, w, "…")
+	return ansi.Truncate(s, w, "…")
 }
 
 // padRight pads s with spaces to a display width of w so a reverse-video
-// selected row fills the panel width.
+// selected row fills the panel width. Width is measured ANSI-aware so colored
+// rows pad to the correct visible column.
 func padRight(s string, w int) string {
-	gap := w - runewidth.StringWidth(s)
+	gap := w - ansi.StringWidth(s)
 	if gap <= 0 {
 		return s
 	}

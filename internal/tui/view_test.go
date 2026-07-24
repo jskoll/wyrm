@@ -109,6 +109,24 @@ func TestHelpOverlayScrolls(t *testing.T) {
 	}
 }
 
+func TestPreviewPreservesPaneColors(t *testing.T) {
+	// A live pane capture (capture-pane -e) carries SGR escapes; the preview
+	// must pass them through so it shows the pane's real colors, not strip them.
+	m := New(nopRunner(), nil)
+	m.width, m.height, m.ready = 100, 30, true
+	m.previewSrc = previewPane
+	m.previewTitle = "%1 nvim"
+	m.preview = "\x1b[31mERROR\x1b[m done"
+
+	out := m.View()
+	if !strings.Contains(out, "\x1b[31m") {
+		t.Errorf("preview dropped the pane's color escape\n%q", out)
+	}
+	if !strings.Contains(out, "ERROR") {
+		t.Errorf("preview missing content\n%q", out)
+	}
+}
+
 func TestViewEmptySessions(t *testing.T) {
 	m := New(nopRunner(), nil)
 	m.width, m.height, m.ready = 100, 30, true
