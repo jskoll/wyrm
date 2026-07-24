@@ -426,6 +426,29 @@ func TestRunLoopKillSession(t *testing.T) {
 	}
 }
 
+// TestRunLoopReservesBottomRow guards the fix for the popup-jitter bug: when
+// the session list overflows the viewport, the drawn frame must stay within
+// h-1 lines. Drawing exactly h lines — each terminated with "\r\n" — scrolls
+// the terminal on the final newline every keypress, which reads as jitter,
+// especially inside a tmux display-popup.
+func TestRunLoopReservesBottomRow(t *testing.T) {
+	// Far more sessions than fixedHeight's 20 rows can show, forcing the
+	// viewport to clamp.
+	var sessions []Session
+	for i := 0; i < 50; i++ {
+		sessions = append(sessions, Session{ID: "$1", Name: "session"})
+	}
+	rn := &renderer{w: &bytes.Buffer{}}
+	// Ctrl-C quits right after the first frame is drawn.
+	br := bufio.NewReader(strings.NewReader("\x03"))
+	if _, err := runLoop(&stubRunner{}, sessions, br, rn, fixedHeight); err != nil {
+		t.Fatalf("runLoop: %v", err)
+	}
+	if h := fixedHeight(); rn.prevLines > h-1 {
+		t.Errorf("frame drew %d lines in a %d-row terminal; want <= %d to avoid a bottom-row scroll", rn.prevLines, h, h-1)
+	}
+}
+
 func TestRendererHideCursorAndClear(t *testing.T) {
 	var buf bytes.Buffer
 	rn := &renderer{w: &buf}

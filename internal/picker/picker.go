@@ -344,9 +344,15 @@ func runLoop(r tmux.Runner, sessions []Session, br *bufio.Reader, rn *renderer, 
 	for {
 		h := height()
 		if h < 3 {
-			h = len(m.filtered) + 2
+			// Unknown terminal size (e.g. tests): show every row, no clamp.
+			h = len(m.filtered) + 3
 		}
-		rn.draw(m, h-2)
+		// The frame is maxRows session rows plus two chrome lines (the query
+		// line and the footer). Reserve one further row so the whole frame is
+		// at most h-1 lines: drawing exactly h lines, each ending in "\r\n",
+		// scrolls the terminal on the final newline every keypress, which reads
+		// as jitter once the list overflows the viewport.
+		rn.draw(m, h-3)
 
 		key, ch, err := readKey(br)
 		if err != nil {
@@ -529,6 +535,16 @@ const (
 	hideCur   = esc + "[?25l"
 	showCur   = esc + "[?25h"
 
+	// syncSet/syncReset bracket a frame in the synchronized-update mode (DEC
+	// private mode 2026) so the terminal presents the whole repaint atomically
+	// instead of showing it mid-paint. This matters most inside a tmux
+	// display-popup, which composites the inner client's output and can
+	// otherwise tear a frame. Terminals that don't support 2026 ignore the
+	// sequences (unknown DEC private modes are no-ops), so it's safe to always
+	// emit.
+	syncSet   = esc + "[?2026h"
+	syncReset = esc + "[?2026l"
+
 	green = esc + "[32m"
 	cyan  = esc + "[36m"
 )
@@ -561,6 +577,7 @@ func (rn *renderer) draw(m *model, maxRows int) {
 		maxRows = 1
 	}
 	var b strings.Builder
+	b.WriteString(syncSet)
 	if rn.prevLines > 0 {
 		fmt.Fprintf(&b, "%s[%dA", esc, rn.prevLines) // move cursor to top of frame
 	}
@@ -579,6 +596,8 @@ func (rn *renderer) draw(m *model, maxRows int) {
 	} else {
 		drawSessions(m, maxRows, writeLine)
 	}
+
+	b.WriteString(syncReset)
 
 	rn.prevLines = lines
 	_, _ = io.WriteString(rn.w, b.String())
@@ -625,11 +644,13 @@ func drawWindows(m *model, maxRows int, writeLine func(string)) {
 // clean before wyrm attaches to (or switches to) the chosen session.
 func (rn *renderer) clear() {
 	var b strings.Builder
+	b.WriteString(syncSet)
 	if rn.prevLines > 0 {
 		fmt.Fprintf(&b, "%s[%dA", esc, rn.prevLines)
 	}
 	b.WriteString(clearDown)
 	b.WriteString(showCur)
+	b.WriteString(syncReset)
 	_, _ = io.WriteString(rn.w, b.String())
 	rn.prevLines = 0
 }
