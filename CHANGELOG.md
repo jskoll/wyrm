@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-07-24
+
+### Fixed
+- `wyrm -pick`: fixed the picker leaving a trail of stale header lines that
+  marched down the screen as you navigated inside a narrow tmux
+  `display-popup`. An over-long row (such as the footer) wrapped onto a
+  second physical line, desyncing the renderer's line count from the rows on
+  screen so each redraw's cursor reposition undershot. The picker now
+  disables terminal autowrap while running, clipping long rows at the right
+  margin instead. This is the real cause of the popup rendering issue 0.1.11
+  attempted to address; the synchronized-update (DEC 2026) change from 0.1.11
+  is reverted, as it did not fix the problem.
+
 ## [0.1.11] - 2026-07-24
 
 ### Fixed
@@ -166,7 +179,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.1.11...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/jskoll/wyrm/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/jskoll/wyrm/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/jskoll/wyrm/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/jskoll/wyrm/compare/v0.1.8...v0.1.9
