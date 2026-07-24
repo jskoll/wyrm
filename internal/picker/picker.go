@@ -318,7 +318,7 @@ func Run(r tmux.Runner, stderr io.Writer) (string, error) {
 	defer func() { _ = term.Restore(fd, oldState) }()
 
 	rn := &renderer{w: tty}
-	rn.hideCursor()
+	rn.enter()
 	defer rn.clear()
 
 	height := func() int {
@@ -535,15 +535,15 @@ const (
 	hideCur   = esc + "[?25l"
 	showCur   = esc + "[?25h"
 
-	// syncSet/syncReset bracket a frame in the synchronized-update mode (DEC
-	// private mode 2026) so the terminal presents the whole repaint atomically
-	// instead of showing it mid-paint. This matters most inside a tmux
-	// display-popup, which composites the inner client's output and can
-	// otherwise tear a frame. Terminals that don't support 2026 ignore the
-	// sequences (unknown DEC private modes are no-ops), so it's safe to always
-	// emit.
-	syncSet   = esc + "[?2026h"
-	syncReset = esc + "[?2026l"
+	// wrapOff/wrapOn toggle autowrap (DECAWM, mode 7). The picker keeps it off
+	// while running so an over-long row (a wide session name, or the footer in
+	// a narrow tmux popup) is clipped at the right margin instead of wrapping
+	// onto a second physical row. Wrapping would desync the renderer's logical
+	// line count from the physical rows on screen, so the per-frame cursor-up
+	// reposition undershoots and the frame walks down the screen, leaving a
+	// trail of stale header lines. clear restores autowrap on the way out.
+	wrapOff = esc + "[?7l"
+	wrapOn  = esc + "[?7h"
 
 	green = esc + "[32m"
 	cyan  = esc + "[36m"
@@ -570,14 +570,15 @@ type renderer struct {
 	prevLines int
 }
 
-func (rn *renderer) hideCursor() { _, _ = io.WriteString(rn.w, hideCur) }
+// enter puts the terminal into the mode the picker draws in: cursor hidden and
+// autowrap off (see wrapOff). clear reverses both when the picker exits.
+func (rn *renderer) enter() { _, _ = io.WriteString(rn.w, hideCur+wrapOff) }
 
 func (rn *renderer) draw(m *model, maxRows int) {
 	if maxRows < 1 {
 		maxRows = 1
 	}
 	var b strings.Builder
-	b.WriteString(syncSet)
 	if rn.prevLines > 0 {
 		fmt.Fprintf(&b, "%s[%dA", esc, rn.prevLines) // move cursor to top of frame
 	}
@@ -596,8 +597,6 @@ func (rn *renderer) draw(m *model, maxRows int) {
 	} else {
 		drawSessions(m, maxRows, writeLine)
 	}
-
-	b.WriteString(syncReset)
 
 	rn.prevLines = lines
 	_, _ = io.WriteString(rn.w, b.String())
@@ -640,17 +639,16 @@ func drawWindows(m *model, maxRows int, writeLine func(string)) {
 		dim, len(m.windows), reset))
 }
 
-// clear erases the picker UI and restores the cursor, leaving the terminal
-// clean before wyrm attaches to (or switches to) the chosen session.
+// clear erases the picker UI and restores the cursor and autowrap, leaving the
+// terminal clean before wyrm attaches to (or switches to) the chosen session.
 func (rn *renderer) clear() {
 	var b strings.Builder
-	b.WriteString(syncSet)
 	if rn.prevLines > 0 {
 		fmt.Fprintf(&b, "%s[%dA", esc, rn.prevLines)
 	}
 	b.WriteString(clearDown)
 	b.WriteString(showCur)
-	b.WriteString(syncReset)
+	b.WriteString(wrapOn)
 	_, _ = io.WriteString(rn.w, b.String())
 	rn.prevLines = 0
 }

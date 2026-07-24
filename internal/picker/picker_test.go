@@ -449,20 +449,23 @@ func TestRunLoopReservesBottomRow(t *testing.T) {
 	}
 }
 
-func TestRendererHideCursorAndClear(t *testing.T) {
+func TestRendererEnterAndClear(t *testing.T) {
 	var buf bytes.Buffer
 	rn := &renderer{w: &buf}
 
-	rn.hideCursor()
-	if !strings.Contains(buf.String(), hideCur) {
-		t.Errorf("hideCursor: wrote %q, want it to contain %q", buf.String(), hideCur)
+	// enter hides the cursor and disables autowrap so long rows are clipped
+	// rather than wrapping onto a second physical line (which would desync the
+	// renderer's line count and walk the frame down the screen).
+	rn.enter()
+	if got := buf.String(); !strings.Contains(got, hideCur) || !strings.Contains(got, wrapOff) {
+		t.Errorf("enter: wrote %q, want it to contain %q and %q", got, hideCur, wrapOff)
 	}
 
 	buf.Reset()
 	rn.prevLines = 3
 	rn.clear()
-	if !strings.Contains(buf.String(), showCur) {
-		t.Errorf("clear: wrote %q, want it to contain %q", buf.String(), showCur)
+	if got := buf.String(); !strings.Contains(got, showCur) || !strings.Contains(got, wrapOn) {
+		t.Errorf("clear: wrote %q, want it to contain %q and %q", got, showCur, wrapOn)
 	}
 	if rn.prevLines != 0 {
 		t.Errorf("clear: prevLines = %d, want 0", rn.prevLines)
