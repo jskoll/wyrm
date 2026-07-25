@@ -1,15 +1,13 @@
 package tui
 
 import (
-	"errors"
 	"io"
 	"os"
-	"os/exec"
-	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jskoll/wyrm/internal/config"
+	"github.com/jskoll/wyrm/internal/editor"
 	"github.com/jskoll/wyrm/internal/picker"
 	"github.com/jskoll/wyrm/internal/session"
 	"github.com/jskoll/wyrm/internal/tmux"
@@ -116,17 +114,12 @@ func killProjectCmd(r tmux.Runner, settings *config.Settings, path string) tea.C
 
 // editConfigCmd opens the config in $EDITOR (suspending the TUI via
 // tea.ExecProcess and resuming after), then re-lists projects. Editor
-// resolution mirrors `wyrm edit`.
+// resolution is shared with `wyrm edit`.
 func editConfigCmd(r tmux.Runner, settings *config.Settings, path string) tea.Cmd {
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "vi"
+	c, err := editor.Command(path)
+	if err != nil {
+		return func() tea.Msg { return actionErrMsg{err} }
 	}
-	parts := strings.Fields(editor)
-	if len(parts) == 0 {
-		return func() tea.Msg { return actionErrMsg{errors.New("$EDITOR is set but empty")} }
-	}
-	c := exec.Command(parts[0], append(parts[1:], path)...)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		if err != nil {
 			return actionErrMsg{err}

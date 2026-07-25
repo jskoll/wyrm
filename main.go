@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/jskoll/wyrm/internal/config"
+	"github.com/jskoll/wyrm/internal/editor"
 	"github.com/jskoll/wyrm/internal/freeze"
 	"github.com/jskoll/wyrm/internal/picker"
 	"github.com/jskoll/wyrm/internal/session"
@@ -696,16 +697,11 @@ func runEdit(args []string, stderr io.Writer) int {
 		return 1
 	}
 
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "vi"
-	}
-	parts := strings.Fields(editor)
-	if len(parts) == 0 {
-		_, _ = fmt.Fprintln(stderr, "wyrm: $EDITOR is set but empty")
+	cmd, err := editor.Command(path)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
 		return 1
 	}
-	cmd := exec.Command(parts[0], append(parts[1:], path)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	runErr := cmd.Run()
 

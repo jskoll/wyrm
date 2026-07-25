@@ -3,10 +3,13 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/jskoll/wyrm/internal/editor"
 )
 
 // projectModel returns a model focused on the Projects panel with one project.
@@ -105,6 +108,35 @@ func TestStartProjectAttaches(t *testing.T) {
 	}
 	if _, ok := run(quit).(tea.QuitMsg); !ok {
 		t.Error("starting a project should quit to hand off the attach")
+	}
+}
+
+func TestEditProjectLaunchesEditor(t *testing.T) {
+	t.Setenv("EDITOR", "nvim")
+	m := projectModel(&funcRunner{fn: func(_ ...string) (string, error) { return "", nil }}, "/tmp/x/.wyrm.toml")
+
+	// tea.ExecProcess wraps the command in an unexported message, so assert on
+	// the command itself rather than round-tripping through the model.
+	cmd, err := editor.Command(m.projects[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"nvim", "/tmp/x/.wyrm.toml"}
+	if !reflect.DeepEqual(cmd.Args, want) {
+		t.Errorf("editor command = %q, want %q", cmd.Args, want)
+	}
+	if _, c := update(m, key("e")); c == nil {
+		t.Error("e on the Projects panel should produce a command")
+	}
+}
+
+func TestEditProjectSurfacesResolutionError(t *testing.T) {
+	t.Setenv("EDITOR", "   ")
+	m := projectModel(&funcRunner{fn: func(_ ...string) (string, error) { return "", nil }}, "/tmp/x/.wyrm.toml")
+
+	_, cmd := update(m, key("e"))
+	if _, ok := run(cmd).(actionErrMsg); !ok {
+		t.Error("an unusable $EDITOR should surface as an actionErrMsg, not a launch")
 	}
 }
 

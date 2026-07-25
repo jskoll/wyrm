@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- `wyrm edit` and the TUI's `e` no longer fall back to `vi` when `$EDITOR` is
+  missing from the environment. A pane the tmux server launches inherits the
+  server's environment, which never sourced the shell rc files that export
+  `$EDITOR`, so a user with `EDITOR=nvim` still got dropped into `vi`. Editor
+  resolution now asks the login shell before giving up, and is shared by both
+  entry points so they can't drift.
+
 ## [0.4.0] - 2026-07-25
 
 ### Added

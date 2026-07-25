@@ -111,9 +111,12 @@ picker (below) is only ever shown when you ask for it with `pick`.
 (local, shared, or `-config`) finds it — in `$EDITOR` (falling back to
 `vi`). If none exists yet, it creates one at the right spot for your
 `storage` setting (a local `.wyrm.toml`, or the shared path `migrate-config`
-would use) before opening it. After you save, wyrm re-parses the file and
-prints a warning (not an error) if it doesn't validate — you're free to save
-a work-in-progress and fix it later.
+would use) before opening it. If `$EDITOR` isn't in the environment at all —
+which is what a pane launched by the tmux server sees, since the server's
+environment never sourced your shell's rc files — wyrm asks your login shell
+for it rather than dropping you into `vi`. After you save, wyrm re-parses the
+file and prints a warning (not an error) if it doesn't validate — you're free
+to save a work-in-progress and fix it later.
 
 `wyrm validate` runs that same parse-and-validate check non-interactively,
 without opening an editor or building a session — handy in a pre-commit hook
