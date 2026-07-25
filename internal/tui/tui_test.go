@@ -54,16 +54,16 @@ func update(m Model, msg tea.Msg) (Model, tea.Cmd) {
 
 func TestFocusCycling(t *testing.T) {
 	m := New(nopRunner(), nil)
-	if m.focus != panelProjects {
-		t.Fatalf("initial focus = %d, want panelProjects", m.focus)
+	if m.focus != panelSessions {
+		t.Fatalf("initial focus = %d, want panelSessions", m.focus)
 	}
 	m, _ = update(m, key("tab"))
-	if m.focus != panelSessions {
-		t.Errorf("after tab focus = %d, want panelSessions", m.focus)
+	if m.focus != panelWindows {
+		t.Errorf("after tab focus = %d, want panelWindows", m.focus)
 	}
 	m, _ = update(m, key("shift+tab"))
-	if m.focus != panelProjects {
-		t.Errorf("after shift+tab focus = %d, want panelProjects", m.focus)
+	if m.focus != panelSessions {
+		t.Errorf("after shift+tab focus = %d, want panelSessions", m.focus)
 	}
 	m, _ = update(m, key("4"))
 	if m.focus != panelPanes {
@@ -73,6 +73,20 @@ func TestFocusCycling(t *testing.T) {
 	m, _ = update(m, key("tab"))
 	if m.focus != panelProjects {
 		t.Errorf("after wrap focus = %d, want panelProjects", m.focus)
+	}
+}
+
+// The default focus must leave the preview on the live pane capture: an
+// initial projects load has to stay silent rather than pull the main panel
+// over to a config file.
+func TestInitialFocusKeepsPanePreview(t *testing.T) {
+	m := New(nopRunner(), nil)
+	m, cmd := update(m, projectsMsg{projects: []Project{{Name: "webapp", Path: "/tmp/.wyrm.toml"}}})
+	if m.previewSrc != previewPane {
+		t.Errorf("previewSrc = %d, want previewPane", m.previewSrc)
+	}
+	if cmd != nil {
+		t.Errorf("projects load with Sessions focused produced %T, want no command", run(cmd))
 	}
 }
 

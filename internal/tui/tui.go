@@ -139,9 +139,19 @@ type Model struct {
 
 // New builds a Model backed by runner. windowCur/paneCur start at -1 so the
 // first load of each snaps to the active window/pane rather than index 0.
+// Focus starts on Sessions rather than the first panel: the common reason to
+// open the TUI is to reach a running session, and it makes the initial preview
+// a live pane capture instead of a config file.
 // settings may be nil (the Projects panel then lists only local configs).
 func New(runner tmux.Runner, settings *config.Settings) Model {
-	return Model{runner: runner, settings: settings, windowCur: -1, paneCur: -1, selfPane: os.Getenv("TMUX_PANE")}
+	return Model{
+		runner:    runner,
+		settings:  settings,
+		focus:     panelSessions,
+		windowCur: -1,
+		paneCur:   -1,
+		selfPane:  os.Getenv("TMUX_PANE"),
+	}
 }
 
 // Init loads the initial project and session lists and starts the refresh

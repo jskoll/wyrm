@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- `wyrm tui` now opens with the **Sessions** panel focused instead of
+  Projects, so the first preview is a live pane rather than a config file.
+
 ## [0.3.0] - 2026-07-25
 
 ### Added

@@ -251,7 +251,9 @@ discover — the local one plus the shared directory, marked `●` when a sessio
 that name is running) → **Sessions** (running now) → **Windows** → **Panes**.
 Windows track the selected session and panes track the selected window. The main
 panel previews the selection: the live pane contents (via `capture-pane`) for the
-session panels, or the config file's contents on the Projects panel.
+session panels, or the config file's contents on the Projects panel. Focus starts
+on **Sessions** — the usual reason to open the TUI is to get back to something
+already running.
 
 | Key | Action |
 |---|---|
