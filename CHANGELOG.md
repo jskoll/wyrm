@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-25
+
 ### Added
 - `wyrm restart` stops the session and builds it again from the current
   config — previously `wyrm kill && wyrm`.
@@ -393,7 +395,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jskoll/wyrm/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/jskoll/wyrm/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/jskoll/wyrm/compare/v0.1.12...v0.2.0
 [0.1.12]: https://github.com/jskoll/wyrm/compare/v0.1.11...v0.1.12
