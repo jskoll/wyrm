@@ -110,6 +110,34 @@ func TestViewPreviewError(t *testing.T) {
 	}
 }
 
+// TestFilteredPanelUsesFilterAccent covers the border/title switching to the
+// filter color while a filter is active, and only on the panel that has focus
+// — a filter never applies to any other panel, so accenting one would point at
+// rows the filter isn't touching.
+func TestFilteredPanelUsesFilterAccent(t *testing.T) {
+	withColor(t)
+
+	filterFgSGR := fgSGR(t, DefaultTheme().Filter)
+
+	m := newSizedModel()
+	m.focus = panelSessions
+	m.sessions = []picker.Session{{ID: "$1", Name: "webapp", Windows: 1}}
+
+	if out := m.renderSessions(30, 6); strings.Contains(out, filterFgSGR) {
+		t.Errorf("unfiltered panel should not use the filter accent:\n%q", out)
+	}
+
+	m.filtering = true
+	m.filter = "web"
+	if out := m.renderSessions(30, 6); !strings.Contains(out, filterFgSGR) {
+		t.Errorf("filtered panel should use the filter accent:\n%q", out)
+	}
+	// The filter belongs to the focused panel only.
+	if out := m.renderWindows(30, 6); strings.Contains(out, filterFgSGR) {
+		t.Errorf("unfocused panel should not use the filter accent:\n%q", out)
+	}
+}
+
 func TestViewConfigPreview(t *testing.T) {
 	m := newSizedModel()
 	m.focus = panelProjects

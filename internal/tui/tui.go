@@ -993,6 +993,14 @@ func (m *Model) reloadPreview() tea.Cmd {
 // still holding when the user quit is reported on stderr — the alt screen is
 // gone by then, so the footer that would have shown it is too.
 func Run(runner tmux.Runner, settings *config.Settings, stderr io.Writer) (pendingAttach string, err error) {
+	// Before the alt screen: a broken theme file has to be reportable, and
+	// styles are read by every render from here on.
+	theme, err := LoadTheme()
+	if err != nil {
+		return "", err
+	}
+	SetTheme(theme)
+
 	fm, err := tea.NewProgram(New(runner, settings), tea.WithAltScreen()).Run()
 	if err != nil {
 		return "", err

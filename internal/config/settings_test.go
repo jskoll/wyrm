@@ -109,6 +109,31 @@ func TestResolvedSharedDirDefaultHonorsXDG(t *testing.T) {
 	}
 }
 
+// The theme file has to land next to the settings file under the same
+// $XDG_CONFIG_HOME rules, or a user who moved their config root would edit a
+// theme wyrm never reads.
+func TestThemePathHonorsXDG(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("HOME", t.TempDir()) // deliberately different
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	got, err := ThemePath()
+	if err != nil {
+		t.Fatalf("ThemePath: %v", err)
+	}
+	if want := filepath.Join(xdg, "wyrm", ThemeFileName); got != want {
+		t.Errorf("ThemePath = %q, want %q", got, want)
+	}
+
+	settings, err := SettingsPath()
+	if err != nil {
+		t.Fatalf("SettingsPath: %v", err)
+	}
+	if filepath.Dir(got) != filepath.Dir(settings) {
+		t.Errorf("theme file %q is not alongside the settings file %q", got, settings)
+	}
+}
+
 func TestSharedConfigPath(t *testing.T) {
 	s := &Settings{SharedDir: "/shared"}
 	got, err := s.SharedConfigPath("/home/user/myproject")

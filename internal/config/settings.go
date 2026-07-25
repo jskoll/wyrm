@@ -16,6 +16,10 @@ const SettingsFileName = "config.toml"
 // default config, stored alongside SettingsFileName.
 const UserDefaultFileName = "default.wyrm.toml"
 
+// ThemeFileName is the TUI's optional color override, stored alongside
+// SettingsFileName.
+const ThemeFileName = "theme.toml"
+
 // DefaultSharedDir is the shared config directory used when
 // Settings.SharedDir is unset, for documentation and error messages. The
 // resolved path comes from defaultSharedDir, which honors $XDG_CONFIG_HOME.
@@ -60,6 +64,18 @@ func SettingsPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "wyrm", SettingsFileName), nil
+}
+
+// ThemePath returns the path to the TUI's optional color override file,
+// honoring $XDG_CONFIG_HOME and falling back to ~/.config. The file is read by
+// internal/tui; config only owns where it lives, alongside the other
+// user-level files.
+func ThemePath() (string, error) {
+	dir, err := configDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "wyrm", ThemeFileName), nil
 }
 
 // UserDefaultPath returns the path to the user's default config override,

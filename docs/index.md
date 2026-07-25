@@ -256,6 +256,37 @@ floating session manager over your current work:
 bind g display-popup -d "#{pane_current_path}" -w 80% -h 80% -E "wyrm tui"
 ```
 
+### Colors
+
+The TUI ships with [Nord](https://www.nordtheme.com): frost blue on the focused
+panel, dim polar-night gray on the rest, aurora yellow while a filter is active,
+and a gray selection band that leaves each row's own colors (teal window
+indices, green "running" dots) intact.
+
+Override any of it with `~/.config/wyrm/theme.toml`
+(`$XDG_CONFIG_HOME/wyrm/theme.toml` if set) — every role is optional, and the
+ones you leave out keep their Nord default:
+
+```toml
+accent   = "#88c0d0"  # focused panel border + title, live preview title
+subtle   = "#4c566a"  # blurred borders, hints, help footer
+filter   = "#ebcb8b"  # the panel being filtered: border, title, prompt
+selected = "#434c5e"  # selection band in the focused panel
+text     = "#eceff4"  # text on the selection band
+trail    = "#3b4252"  # selection band in the other panels
+index    = "#8fbcbb"  # window indices and pane IDs
+active   = "#a3be8c"  # running / attached dots
+error    = "#bf616a"  # failed actions
+```
+
+Values are `#rgb` or `#rrggbb`. A misspelled role or an unparseable color is an
+error rather than a silently ignored line — `wyrm tui` says which one and
+exits, since the alt screen would otherwise wipe the message on its way up.
+
+Colors are literal hex rather than terminal palette indices, so a theme looks
+the same wherever it runs; Lipgloss degrades them on terminals without true
+color and drops them entirely under [`NO_COLOR`](https://no-color.org).
+
 The TUI is the one part of wyrm built on the [Charm](https://charm.sh) stack
 (Bubble Tea / Lipgloss); the core build/attach path and `pick` remain
 dependency-free.

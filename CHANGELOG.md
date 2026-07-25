@@ -6,6 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- The TUI's colors can be themed from `~/.config/wyrm/theme.toml`
+  (`$XDG_CONFIG_HOME/wyrm/theme.toml` if set). Nine roles — `accent`,
+  `subtle`, `filter`, `selected`, `text`, `trail`, `index`, `active`, `error`
+  — each an optional `#rgb`/`#rrggbb` value layered over the built-in default.
+  A misspelled role or an unparseable color fails with a message naming it,
+  rather than being dropped in silence.
+
+### Changed
+- The TUI now ships a [Nord](https://www.nordtheme.com) theme: frost-blue
+  focused borders, polar-night blurred ones, teal window indices, green status
+  dots, aurora-red errors. The selection is a background band instead of
+  reverse video, so a row's own colors survive being selected, and the focused
+  panel switches to an aurora-yellow accent — border, title, and footer prompt
+  — while a filter is active.
+
 ## [0.3.1] - 2026-07-25
 
 ### Changed

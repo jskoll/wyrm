@@ -32,35 +32,6 @@ var (
 	minHeight = int(numPanels)*minPanelHeight + helpHeight
 )
 
-var (
-	accentColor = lipgloss.Color("6")   // cyan: focused border + preview title
-	subtleColor = lipgloss.Color("240") // dim gray: blurred borders, hints
-	activeColor = lipgloss.Color("2")   // green: running/attached status dots
-	indexColor  = lipgloss.Color("4")   // blue: window indices and pane IDs
-	errorColor  = lipgloss.Color("1")   // red: failed actions
-
-	focusedBorder = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accentColor)
-	blurredBorder = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(subtleColor)
-
-	focusedTitle = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
-	blurredTitle = lipgloss.NewStyle().Bold(true).Foreground(subtleColor)
-
-	selectedRow = lipgloss.NewStyle().Reverse(true)
-	// unfocusedRow marks the selection in a panel that doesn't have focus.
-	// Without it the cascade loses its point: while the cursor is in Panes you
-	// can't see which session or window you drilled through to get there.
-	// Bold rather than reverse, so the focused panel still stands out.
-	unfocusedRow = lipgloss.NewStyle().Bold(true)
-	hintStyle    = lipgloss.NewStyle().Foreground(subtleColor)
-	helpStyle    = lipgloss.NewStyle().Foreground(subtleColor)
-	errorStyle   = lipgloss.NewStyle().Bold(true).Foreground(errorColor)
-	modalStyle   = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
-	keyStyle     = lipgloss.NewStyle().Bold(true)
-
-	activeMark = lipgloss.NewStyle().Foreground(activeColor) // "●" running/attached
-	indexMark  = lipgloss.NewStyle().Foreground(indexColor)  // window/pane identifiers
-)
-
 // span is one styled run of text within a list row. Rows are assembled as
 // spans rather than as pre-rendered strings so the selection highlight can be
 // folded into each run's own style — see renderRow.
@@ -269,9 +240,15 @@ func (m Model) renderPanel(p panel, title string, rows [][]span, cursor, outerW,
 		listH = 1
 	}
 
-	titleStyle := blurredTitle
+	// A filter only ever applies to the focused panel, so the focused panel
+	// switches to the filter accent while one is active — the same signal
+	// lazygit gives a view it's searching in.
+	box, titleStyle := blurredBorder, blurredTitle
 	if focused {
-		titleStyle = focusedTitle
+		box, titleStyle = focusedBorder, focusedTitle
+		if m.filtering || m.filter != "" {
+			box, titleStyle = filterBorder, filterTitle
+		}
 	}
 	// Show where the viewport sits when the list is taller than the panel, so
 	// scrolling isn't invisible.
@@ -290,7 +267,7 @@ func (m Model) renderPanel(p panel, title string, rows [][]span, cursor, outerW,
 			b.WriteByte('\n')
 		}
 	} else {
-		selStyle := unfocusedRow
+		selStyle := trailRow
 		if focused {
 			selStyle = selectedRow
 		}
@@ -306,10 +283,6 @@ func (m Model) renderPanel(p panel, title string, rows [][]span, cursor, outerW,
 		}
 	}
 
-	box := blurredBorder
-	if focused {
-		box = focusedBorder
-	}
 	// MaxHeight as well as Height: Height only pads, so without the cap a box
 	// whose content overran its budget would push the layout off-screen.
 	return box.Width(innerW).Height(innerH).MaxHeight(outerH).Render(b.String())
@@ -404,7 +377,7 @@ func (m Model) renderFilterLine() string {
 	if !m.filtering {
 		line += "  (esc clears)"
 	}
-	return modalStyle.Render(truncate(line, m.width))
+	return filterStyle.Render(truncate(line, m.width))
 }
 
 // helpSection is one titled group of key bindings in the full help overlay.
