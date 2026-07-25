@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-25
+
 ### Changed
 - `wyrm tui` now opens with the **Sessions** panel focused instead of
   Projects, so the first preview is a live pane rather than a config file.
@@ -399,7 +401,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/jskoll/wyrm/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/jskoll/wyrm/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/jskoll/wyrm/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/jskoll/wyrm/compare/v0.1.12...v0.2.0
