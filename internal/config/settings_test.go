@@ -60,9 +60,14 @@ func TestLoadSettingsInvalidStorage(t *testing.T) {
 	}
 }
 
-func TestResolvedSharedDirDefaultExpandsHome(t *testing.T) {
+// TestResolvedSharedDirDefaultUsesHome covers the no-XDG case. XDG_CONFIG_HOME
+// has to be cleared explicitly: CI runners set it, and the default shared dir
+// now sits next to the settings file rather than being hardcoded under
+// ~/.config, so it honors XDG the same way SettingsPath does.
+func TestResolvedSharedDirDefaultUsesHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
 
 	s := &Settings{}
 	got, err := s.ResolvedSharedDir()
@@ -72,6 +77,35 @@ func TestResolvedSharedDirDefaultExpandsHome(t *testing.T) {
 	want := filepath.Join(home, ".config", "wyrm", "settings")
 	if got != want {
 		t.Errorf("ResolvedSharedDir = %q, want %q", got, want)
+	}
+}
+
+// TestResolvedSharedDirDefaultHonorsXDG is the other half: settings and shared
+// configs must resolve under the same root. They didn't — the settings file
+// followed XDG_CONFIG_HOME while the shared directory was hardcoded to
+// ~/.config/wyrm/settings, so a user with XDG set had wyrm read its
+// preferences from one place and look for project configs in another.
+func TestResolvedSharedDirDefaultHonorsXDG(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("HOME", t.TempDir()) // deliberately different
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	s := &Settings{}
+	got, err := s.ResolvedSharedDir()
+	if err != nil {
+		t.Fatalf("ResolvedSharedDir: %v", err)
+	}
+	if want := filepath.Join(xdg, "wyrm", "settings"); got != want {
+		t.Errorf("ResolvedSharedDir = %q, want %q", got, want)
+	}
+
+	// And it must sit alongside the settings file, not merely under the same root.
+	settings, err := SettingsPath()
+	if err != nil {
+		t.Fatalf("SettingsPath: %v", err)
+	}
+	if filepath.Dir(settings) != filepath.Dir(got) {
+		t.Errorf("shared dir %q is not alongside the settings file %q", got, settings)
 	}
 }
 
