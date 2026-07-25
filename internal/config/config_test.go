@@ -185,7 +185,7 @@ func TestResolve(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			name, root, err := tt.session.Resolve()
+			name, root, err := tt.session.Resolve("")
 			if err != nil {
 				t.Fatal(err)
 			}

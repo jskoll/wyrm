@@ -18,18 +18,23 @@ name = "editor"
 # Run nvm setup in all panes before their commands (useful with Node, Python, Ruby, etc)
 pre_window = "nvm use 18"
 
+  # The first entry has no type, so it lands in the window's own first pane.
+  # Give the first entry a type and it would split that pane instead, leaving
+  # it as an empty shell — wyrm warns when a config does that.
   [[windows.splits]]
-  type = "h"
-  size = 70
   command = "nvim"
 
+  [[windows.splits]]
+  type = "h"          # split right: this pane gets 30% of the width
+  size = 30
+
+    # children subdivide the pane above, so these two share that 30% column.
     [[windows.splits.children]]
-    type = "v"
-    size = 50
     command = "npm test -- --watch"
 
     [[windows.splits.children]]
     type = "v"
+    size = 50
     command = "# logs"
 
 [[windows]]
@@ -37,22 +42,20 @@ name = "server"
 pre_window = "nvm use 18"
 
   [[windows.splits]]
-  type = "h"
-  size = 60
   command = "npm run dev"
 
-    [[windows.splits.children]]
-    type = "v"
-    command = "# monitoring"
+  [[windows.splits]]
+  type = "h"
+  size = 40
+  command = "# monitoring"
 
 [[windows]]
 name = "git"
 
   [[windows.splits]]
-  type = "v"
-  size = 40
   command = "lazygit"
 
-    [[windows.splits.children]]
-    type = "h"
-    command = "git log --oneline"
+  [[windows.splits]]
+  type = "v"          # split below: 40% of the height
+  size = 40
+  command = "git log --oneline"

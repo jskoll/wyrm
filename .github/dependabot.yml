@@ -1,0 +1,30 @@
+version: 2
+updates:
+  # Go module dependencies (bubbletea/lipgloss/x, go-toml, golang.org/x/...).
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: monthly
+    groups:
+      # One PR per month for the whole dependency set rather than a swarm of
+      # single-module bumps; wyrm's deps move together (the Charm stack in
+      # particular).
+      go-dependencies:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: chore
+      include: scope
+
+  # GitHub Actions used by the CI, release, and docs workflows.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: chore
+      include: scope

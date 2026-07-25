@@ -5,26 +5,28 @@ root = "."
 
 [[windows]]
 name = "dev"
-layout = "main-vertical"
 
-[[windows.panes]]
-command = "nvim"
+  [[windows.splits]]
+  command = "nvim"
 
-[[windows.panes]]
-command = "# watch: npm run build -- --watch"
+  [[windows.splits]]
+  type = "h"          # split right: the watcher gets 35% of the width
+  size = 35
+  command = "# watch: npm run build -- --watch"
 
 [[windows]]
 name = "server"
 
-[[windows.panes]]
-command = "npm run dev"
+  [[windows.splits]]
+  command = "npm run dev"
 
 [[windows]]
 name = "tests"
-layout = "even-horizontal"
 
-[[windows.panes]]
-command = "npm test -- --watch"
+  [[windows.splits]]
+  command = "npm test -- --watch"
 
-[[windows.panes]]
-command = "# lint check"
+  [[windows.splits]]
+  type = "h"
+  size = 50
+  command = "# lint check"

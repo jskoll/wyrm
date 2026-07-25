@@ -5,8 +5,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -28,10 +26,9 @@ type Project struct {
 	SessionID string
 }
 
-// listProjects enumerates the configs wyrm can see — the local .wyrm.toml/
-// .tmuxconfig in the cwd, plus every "<folder>.wyrm.toml" in the shared config
-// directory — mirroring the discovery behind -list-configs. Each is annotated
-// with whether a session by its name is currently running.
+// listProjects annotates config.DiscoverProjects — the shared discovery rules,
+// used identically by `wyrm <name>` and `wyrm list-configs` — with whether a
+// session by each project's name is currently running.
 func listProjects(r tmux.Runner, settings *config.Settings) ([]Project, error) {
 	running := map[string]string{}
 	if sessions, err := picker.ListSessions(r); err == nil {
@@ -40,67 +37,16 @@ func listProjects(r tmux.Runner, settings *config.Settings) ([]Project, error) {
 		}
 	}
 
-	var projects []Project
-	seen := map[string]bool{}
-	add := func(path string, shared bool) {
-		abs, err := filepath.Abs(path)
-		if err != nil {
-			abs = path
-		}
-		if seen[abs] {
-			return
-		}
-		seen[abs] = true
-		name := projectName(path, shared)
-		if name == "" {
-			return
-		}
-		p := Project{Name: name, Path: path, Shared: shared}
-		if id, ok := running[name]; ok {
+	discovered := config.DiscoverProjects(settings)
+	projects := make([]Project, 0, len(discovered))
+	for _, d := range discovered {
+		p := Project{Name: d.Name, Path: d.Path, Shared: d.Shared}
+		if id, ok := running[d.Name]; ok {
 			p.Running, p.SessionID = true, id
 		}
 		projects = append(projects, p)
 	}
-
-	for _, name := range []string{config.DefaultFileName, config.LegacyFileName} {
-		if _, err := os.Stat(name); err == nil {
-			add(name, false)
-		}
-	}
-	if settings != nil {
-		if dir, err := settings.ResolvedSharedDir(); err == nil {
-			matches, _ := filepath.Glob(filepath.Join(dir, "*"+config.DefaultFileName))
-			sort.Strings(matches)
-			for _, m := range matches {
-				add(m, true)
-			}
-		}
-	}
 	return projects, nil
-}
-
-// projectName is the session name a config produces: its explicit session.name,
-// else (for a local config) the resolved root basename, else the filename with
-// the .wyrm.toml suffix stripped.
-func projectName(path string, shared bool) string {
-	if cfg, err := config.Load(path); err == nil {
-		if cfg.Session.Name != "" {
-			return cfg.Session.Name
-		}
-		if !shared {
-			if name, _, err := cfg.Session.Resolve(); err == nil {
-				return name
-			}
-		}
-	}
-	base := filepath.Base(path)
-	if shared {
-		return strings.TrimSuffix(base, config.DefaultFileName)
-	}
-	if cwd, err := os.Getwd(); err == nil {
-		return filepath.Base(cwd)
-	}
-	return base
 }
 
 // --- messages ---
@@ -170,7 +116,7 @@ func killProjectCmd(r tmux.Runner, settings *config.Settings, path string) tea.C
 
 // editConfigCmd opens the config in $EDITOR (suspending the TUI via
 // tea.ExecProcess and resuming after), then re-lists projects. Editor
-// resolution mirrors `wyrm -edit`.
+// resolution mirrors `wyrm edit`.
 func editConfigCmd(r tmux.Runner, settings *config.Settings, path string) tea.Cmd {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {

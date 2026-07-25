@@ -87,7 +87,7 @@ func TestStartProjectAttaches(t *testing.T) {
 		case "list-sessions":
 			return "", nil // nothing running yet
 		case "new-session":
-			return "$9|@1|%1", nil
+			return "$9|proj|@1|%1", nil
 		}
 		return "", nil
 	}}

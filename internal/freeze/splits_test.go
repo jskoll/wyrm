@@ -39,7 +39,7 @@ func TestSplitsFromNode(t *testing.T) {
 				{Command: "nvim"},
 				{Type: "h", Size: 30, Children: []config.Split{
 					{Command: "htop"},
-					{Type: "v", Size: 51, Command: "bash"},
+					{Type: "v", Size: 51}, // idle shell: no command recorded
 				}},
 			},
 		},

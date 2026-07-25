@@ -23,6 +23,17 @@ type PaneInfo struct {
 	Command string // #{pane_current_command}: the pane's foreground process
 }
 
+// SessionPath returns a session's working directory (#{session_path}) — the
+// directory tmux opens new windows in, and the closest thing tmux records to
+// "where this project lives".
+func SessionPath(r Runner, sessionID string) (string, error) {
+	out, err := r.Run("display-message", "-p", "-t", sessionID, "-F", "#{session_path}")
+	if err != nil {
+		return "", fmt.Errorf("reading session path: %v (%s)", err, out)
+	}
+	return strings.TrimSpace(out), nil
+}
+
 const windowListFormat = "#{window_index}|#{window_id}|#{?window_active,1,0}|#{window_layout}|#{window_name}"
 
 // ListWindows returns the windows of sessionID (a tmux session ID such as
@@ -45,6 +56,9 @@ func ListWindows(r Runner, sessionID string) ([]WindowInfo, error) {
 		index, err := strconv.Atoi(parts[0])
 		if err != nil {
 			return nil, fmt.Errorf("unexpected window index %q", parts[0])
+		}
+		if err := CheckID(WindowSigil, "window", parts[1]); err != nil {
+			return nil, fmt.Errorf("listing windows: %w", err)
 		}
 		windows = append(windows, WindowInfo{
 			Index:  index,
@@ -79,6 +93,9 @@ func ListPanes(r Runner, target string) ([]PaneInfo, error) {
 		index, err := strconv.Atoi(parts[1])
 		if err != nil {
 			return nil, fmt.Errorf("unexpected pane index %q", parts[1])
+		}
+		if err := CheckID(PaneSigil, "pane", parts[0]); err != nil {
+			return nil, fmt.Errorf("listing panes: %w", err)
 		}
 		panes = append(panes, PaneInfo{
 			ID:      parts[0],

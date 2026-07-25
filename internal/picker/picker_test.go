@@ -329,7 +329,7 @@ func TestRunLoopFilterAndSelect(t *testing.T) {
 	}
 	br := bufio.NewReader(strings.NewReader("be\r")) // type "be", Enter
 	var out bytes.Buffer
-	id, err := runLoop(&stubRunner{}, sessions, br, &renderer{w: &out}, fixedHeight)
+	id, err := runLoop(&stubRunner{}, sessions, br, &renderer{w: &out}, fixedHeight, nil)
 	if err != nil {
 		t.Fatalf("runLoop: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestRunLoopFilterAndSelect(t *testing.T) {
 func TestRunLoopAbortAtTopLevelReturnsEmpty(t *testing.T) {
 	sessions := []Session{{ID: "$1", Name: "alpha"}}
 	br := bufio.NewReader(strings.NewReader("\x1b")) // lone Escape
-	id, err := runLoop(&stubRunner{}, sessions, br, &renderer{w: &bytes.Buffer{}}, fixedHeight)
+	id, err := runLoop(&stubRunner{}, sessions, br, &renderer{w: &bytes.Buffer{}}, fixedHeight, nil)
 	if err != nil || id != "" {
 		t.Errorf("runLoop(Esc) = %q, %v; want empty, nil", id, err)
 	}
@@ -353,7 +353,7 @@ func TestRunLoopAbortAtTopLevelReturnsEmpty(t *testing.T) {
 func TestRunLoopQuitReturnsEmpty(t *testing.T) {
 	sessions := []Session{{ID: "$1", Name: "alpha"}}
 	br := bufio.NewReader(strings.NewReader("\x03")) // Ctrl-C
-	id, err := runLoop(&stubRunner{}, sessions, br, &renderer{w: &bytes.Buffer{}}, fixedHeight)
+	id, err := runLoop(&stubRunner{}, sessions, br, &renderer{w: &bytes.Buffer{}}, fixedHeight, nil)
 	if err != nil || id != "" {
 		t.Errorf("runLoop(Ctrl-C) = %q, %v; want empty, nil", id, err)
 	}
@@ -365,7 +365,7 @@ func TestRunLoopWindowsDrilldownSelectsWindow(t *testing.T) {
 		"list-windows": "0|@1|1|abcd,80x24,0,0,0|code\n1|@2|0|abcd,80x24,0,0,1|logs",
 	}}
 	br := bufio.NewReader(strings.NewReader("\x17\r")) // Ctrl-W, Enter (first window: code)
-	id, err := runLoop(r, sessions, br, &renderer{w: &bytes.Buffer{}}, fixedHeight)
+	id, err := runLoop(r, sessions, br, &renderer{w: &bytes.Buffer{}}, fixedHeight, nil)
 	if err != nil {
 		t.Fatalf("runLoop: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestRunLoopEscBacksOutOfWindowsThenQuits(t *testing.T) {
 	}}
 	// Ctrl-W into the window list, Esc back to the session list, Esc to quit.
 	br := bufio.NewReader(&stepReader{data: []byte("\x17\x1b\x1b")})
-	id, err := runLoop(r, sessions, br, &renderer{w: &bytes.Buffer{}}, fixedHeight)
+	id, err := runLoop(r, sessions, br, &renderer{w: &bytes.Buffer{}}, fixedHeight, nil)
 	if err != nil || id != "" {
 		t.Errorf("runLoop = %q, %v; want empty, nil", id, err)
 	}
@@ -415,9 +415,9 @@ func TestRunLoopKillSession(t *testing.T) {
 	r := &scriptedRunner{out: map[string]string{
 		"list-sessions": "$2|1|0|1000|beta",
 	}}
-	// Ctrl-X kills the selected (first, alpha) session, then Esc quits.
-	br := bufio.NewReader(strings.NewReader("\x18\x1b"))
-	id, err := runLoop(r, sessions, br, &renderer{w: &bytes.Buffer{}}, fixedHeight)
+	// Ctrl-X asks to confirm, "y" goes through with it, then Esc quits.
+	br := bufio.NewReader(strings.NewReader("\x18y\x1b"))
+	id, err := runLoop(r, sessions, br, &renderer{w: &bytes.Buffer{}}, fixedHeight, nil)
 	if err != nil || id != "" {
 		t.Errorf("runLoop = %q, %v; want empty, nil", id, err)
 	}
@@ -441,7 +441,7 @@ func TestRunLoopReservesBottomRow(t *testing.T) {
 	rn := &renderer{w: &bytes.Buffer{}}
 	// Ctrl-C quits right after the first frame is drawn.
 	br := bufio.NewReader(strings.NewReader("\x03"))
-	if _, err := runLoop(&stubRunner{}, sessions, br, rn, fixedHeight); err != nil {
+	if _, err := runLoop(&stubRunner{}, sessions, br, rn, fixedHeight, nil); err != nil {
 		t.Fatalf("runLoop: %v", err)
 	}
 	if h := fixedHeight(); rn.prevLines > h-1 {

@@ -3,27 +3,40 @@
 # Install: copy to ~/.config/fish/completions/wyrm.fish (fish auto-loads
 # anything there). `brew install jskoll/tap/wyrm` installs it automatically.
 #
-# Dynamic completions shell out to wyrm itself, reusing its own config
-# discovery and tmux session listing rather than reimplementing them here:
-#   -config  -> `wyrm -list-configs`       (local + shared config file paths)
-#   -format  -> static: table json toml names
-#   bare arg -> `wyrm -list -format names` (running session names, for
-#                `wyrm <name>` — see the wyrm(1) usage for what that does)
+# wyrm uses git-style subcommands (`wyrm kill`, `wyrm list`, ...). Dynamic
+# completions shell out to wyrm itself, reusing its own config discovery and
+# tmux session listing rather than reimplementing them here:
+#   -config      -> `wyrm list-configs`      (local + shared config file paths)
+#   -format      -> static: table json toml names
+#   first token  -> subcommands + `wyrm list -format names` (running session
+#                   names, since a bare `wyrm <name>` attaches by name)
 #
-# wyrm's flags are single-dash (Go's flag package convention, e.g.
-# "-config", not "--config"), hence "-o" (old-style option) below rather
-# than fish's usual "-l" (GNU-style long option).
+# wyrm's flags are single-dash (Go's flag package convention, e.g. "-config",
+# not "--config"), hence "-o" (old-style option) below rather than fish's
+# usual "-l" (GNU-style long option).
 
-complete -c wyrm -o config -d 'config file path' -r -a '(wyrm -list-configs 2>/dev/null)'
-complete -c wyrm -o kill -d 'kill the session (runs on_project_exit)'
-complete -c wyrm -o pick -d 'fuzzy-pick a running session to attach to'
-complete -c wyrm -o tui -d 'open the full-screen session-management TUI'
-complete -c wyrm -o save -d 'save the running session layout as a config for this folder'
-complete -c wyrm -o version -d 'print version and exit'
-complete -c wyrm -o migrate-config -d 'move the local config into the shared config directory'
-complete -c wyrm -o validate -d 'check the effective config without building a session'
-complete -c wyrm -o list -d 'list running tmux sessions non-interactively'
-complete -c wyrm -o format -d 'output format for -list' -x -a 'table json toml names'
-complete -c wyrm -o edit -d 'open the resolved config in $EDITOR'
-complete -c wyrm -o list-configs -d 'list candidate config file paths'
-complete -c wyrm -n 'test (count (commandline -opc)) -eq 1' -x -a '(wyrm -list -format names 2>/dev/null)' -d 'running session'
+set -l subcommands up restart kill pick tui save edit validate list list-configs migrate-config version help
+
+# Don't fall back to filename completion.
+complete -c wyrm -f
+
+# First token: subcommands...
+complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a up -d 'build or attach the current folder'\''s session'
+complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a restart -d 'stop the session and build it again'
+complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a kill -d 'destroy the session (runs on_project_exit)'
+complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a pick -d 'fuzzy-pick a running session to attach to'
+complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a tui -d 'full-screen session-management TUI'
+complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a save -d 'save the running session layout as a config'
+complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a edit -d 'open the resolved config in $EDITOR'
+complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a validate -d 'check the effective config'
+complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a list -d 'list running tmux sessions'
+complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a list-configs -d 'list candidate config file paths'
+complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a migrate-config -d 'move the local config into the shared dir'
+complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a version -d 'print version and exit'
+complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a help -d 'show help'
+# ...and running session names (bare `wyrm <name>` attaches by name).
+complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a '(wyrm list -format names 2>/dev/null)' -d 'running session'
+
+# Subcommand flags.
+complete -c wyrm -n '__fish_seen_subcommand_from up restart kill edit validate' -o config -d 'config file path' -r -a '(wyrm list-configs 2>/dev/null)'
+complete -c wyrm -n '__fish_seen_subcommand_from list' -o format -d 'output format' -x -a 'table json toml names'

@@ -14,7 +14,7 @@ create a global settings file at `~/.config/wyrm/config.toml`
 
 In `shared` mode, wyrm looks for `<folderName>.wyrm.toml` (the current
 directory's basename) inside `shared_dir` first, falling back to the normal
-local search if it's missing. Run `wyrm -migrate-config` to move an existing
+local search if it's missing. Run `wyrm migrate-config` to move an existing
 local config into the shared directory under the right name.
 
 ## Custom default config
@@ -30,9 +30,9 @@ file uses the same `[session]` / `[[windows]]` format documented below.
 |---|---|---|---|
 | `name` | string | basename of `root` | tmux session name |
 | `root` | string | `.` | Working directory for every window; `$VAR` is expanded |
-| `on_project_start` | string | — | Shell command run (via `bash -c`, in `root`) before the session is created |
-| `on_project_exit` | string | — | Shell command run before `wyrm -kill` destroys the session |
-| `startup_window` | string | first window | Window (name or index) to focus after creation |
+| `on_project_start` | string | — | Shell command run (via your $SHELL, or sh, in `root`) before the session is created |
+| `on_project_exit` | string | — | Shell command run before `wyrm kill` destroys the session |
+| `startup_window` | string | first window | Window (name or index) to focus after creation. Without it the session opens on the first window, focused on its first pane |
 | `startup_pane` | int | — | Pane to focus within `startup_window` (uses your `pane-base-index`) |
 
 At least one of `name` / `root` is required.
@@ -42,10 +42,10 @@ At least one of `name` / `root` is required.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `name` | string | — | Window name |
-| `pre_window` | string | — | Command typed into **every pane** before its own command (e.g. `nvm use 18`) |
+| `pre_window` | string | — | Command typed once into **every pane of the window**, before that pane's own command (e.g. `nvm use 18`) |
 | `splits` | list | — | Split tree (below) — the recommended layout format |
 | `panes` | list | — | Legacy flat pane list (below); ignored when `splits` is set |
-| `layout` | string | `tiled` | tmux layout applied after legacy `panes` (`even-horizontal`, `main-vertical`, ...) |
+| `layout` | string | `tiled` | tmux layout applied after legacy `panes` (`even-horizontal`, `main-vertical`, ...). Ignored when `splits` is set — a named layout would discard the tree's sizes — and wyrm warns if you set both |
 
 ## `[[windows.splits]]` — the split tree
 
@@ -59,6 +59,16 @@ At least one of `name` / `root` is required.
 How the tree is walked: each entry with a `type` splits the pane of the
 previous entry at the same level (the window's initial pane for the first
 entry). `children` do the same, starting from their parent's pane.
+
+Every entry at a level is created before wyrm descends into any of their
+`children`, so a `size` is always a share of the space its own level was given
+— not of whatever an earlier sibling's children happened to leave behind. This
+is what lets `wyrm save` capture a nested layout and rebuild it unchanged.
+
+Give the *first* entry at a level a `type` and it splits the pane it was handed
+rather than filling it, leaving that pane an empty shell; wyrm warns when a
+config does that. Omit the `type` on the first entry to put it in the pane
+itself.
 
 ```toml
 [[windows]]
@@ -79,6 +89,12 @@ name = "dev"
 ```
 
 ## `[[windows.panes]]` — legacy flat list
+
+!!! warning "Deprecated"
+    The flat `panes` list (and the `.tmuxconfig` filename) are retained for
+    backward compatibility but are slated for removal in 1.0. New configs
+    should use the `splits` tree, which is strictly more expressive.
+    `wyrm save` only ever emits `splits`.
 
 ```toml
 [[windows]]

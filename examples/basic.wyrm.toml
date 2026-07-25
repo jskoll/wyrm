@@ -1,5 +1,11 @@
 # Example .wyrm.toml file
 # Place this in your project root as .wyrm.toml and run: wyrm
+#
+# NOTE: this example deliberately shows the LEGACY flat [[windows.panes]]
+# format, which is deprecated and will be removed in 1.0 (wyrm warns when it
+# loads a config using it). It's kept so existing configs have a reference.
+# For new configs use the splits tree — see minimal.wyrm.toml and
+# nested-splits.wyrm.toml.
 
 [session]
 name = "myproject"

@@ -140,29 +140,31 @@ func TestIntegrationDottedSessionName(t *testing.T) {
 
 	name, sessionID, created, err := session.Create(r, cfg, os.Stdout, os.Stderr)
 	if err != nil {
-		// Whether a "." in a session name is preserved, silently sanitized
-		// to "_", or rejected outright at creation time varies across tmux
-		// builds (observed all three across local, Ubuntu CI, and macOS CI
-		// runners, even nominally the same tmux version) — when it's
-		// rejected, this build never lets the ambiguous name exist in the
-		// first place, so the bug this test guards against can't occur.
+		// A few tmux builds reject "." in a session name outright rather than
+		// preserving or rewriting it. Such a build never lets the ambiguous
+		// name exist, so there's nothing here to guard against.
 		if strings.Contains(err.Error(), "invalid session name") {
 			t.Skip(`this tmux build rejects "." in session names outright; the bug this test guards against doesn't apply here`)
 		}
 		t.Fatalf("Create: %v", err)
 	}
-	if name != "wyrm.vim" || sessionID == "" || !created {
-		t.Fatalf("Create = %q, %q, %v; want wyrm.vim, non-empty ID, true", name, sessionID, created)
+	if sessionID == "" || !created {
+		t.Fatalf("Create = %q, %q, %v; want a non-empty ID and created=true", name, sessionID, created)
 	}
 
-	// Some tmux builds (observed with the apt-packaged tmux on Ubuntu CI
-	// runners) silently sanitize "." to "_" in session names at creation
-	// time, unlike newer builds which preserve them literally — that's the
-	// precondition this test needs, so skip cleanly if it doesn't hold here.
-	if _, ok, err := tmux.FindSessionID(r, "wyrm.vim"); err != nil {
+	// Create reports the name tmux *actually* assigned, which is either
+	// "wyrm.vim" (builds that preserve the dot) or "wyrm_vim" (builds that
+	// rewrite "." and ":" to "_"). Both are fine; what matters is that every
+	// later lookup uses that name, so a second run reattaches instead of
+	// trying to create a duplicate. This used to be skipped on the rewriting
+	// builds, leaving the bug uncovered on exactly the platforms that had it.
+	if name != "wyrm.vim" && name != "wyrm_vim" {
+		t.Fatalf("Create name = %q, want wyrm.vim or wyrm_vim", name)
+	}
+	if _, ok, err := tmux.FindSessionID(r, name); err != nil {
 		t.Fatalf("FindSessionID: %v", err)
 	} else if !ok {
-		t.Skip(`this tmux build sanitizes "." in session names; the bug this test guards against doesn't apply here`)
+		t.Fatalf("the session Create reported as %q cannot be found by that name", name)
 	}
 
 	// Reattach (second Create) must find the running session rather than

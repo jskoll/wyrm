@@ -71,6 +71,12 @@ func NewWindow(r Runner, sessionID, name, root string) (windowID, paneID string,
 	if !ok {
 		return "", "", fmt.Errorf("unexpected new-window output %q", out)
 	}
+	if err := CheckID(WindowSigil, "window", win); err != nil {
+		return "", "", fmt.Errorf("creating window in %q: %w", sessionID, err)
+	}
+	if err := CheckID(PaneSigil, "pane", pane); err != nil {
+		return "", "", fmt.Errorf("creating window in %q: %w", sessionID, err)
+	}
 	return win, pane, nil
 }
 

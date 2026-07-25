@@ -6,39 +6,57 @@
 #   autoload -U compinit && compinit
 # `brew install jskoll/tap/wyrm` installs it automatically.
 #
-# Dynamic completions shell out to wyrm itself, reusing its own config
-# discovery and tmux session listing rather than reimplementing them here:
-#   -config  -> `wyrm -list-configs`       (local + shared config file paths)
-#   -format  -> static: table json toml names
-#   bare arg -> `wyrm -list -format names` (running session names, for
-#                `wyrm <name>` — see the wyrm(1) usage for what that does)
+# wyrm uses git-style subcommands (`wyrm kill`, `wyrm list`, ...). Dynamic
+# completions shell out to wyrm itself, reusing its own config discovery and
+# tmux session listing rather than reimplementing them here:
+#   -config      -> `wyrm list-configs`      (local + shared config file paths)
+#   -format      -> static: table json toml names
+#   first token  -> subcommands + `wyrm list -format names` (running session
+#                   names, since a bare `wyrm <name>` attaches by name)
 
 _wyrm() {
-    _arguments \
-        '-config[config file path]:config file:->configs' \
-        '-kill[kill the session (runs on_project_exit)]' \
-        '-pick[fuzzy-pick a running session to attach to]' \
-        '-tui[open the full-screen session-management TUI]' \
-        '-save[save the running session layout as a config for this folder]' \
-        '-version[print version and exit]' \
-        '-migrate-config[move the local config into the shared config directory]' \
-        '-validate[check the effective config without building a session]' \
-        '-list[list running tmux sessions non-interactively]' \
-        '-format[output format for -list]:format:(table json toml names)' \
-        '-edit[open the resolved config in $EDITOR]' \
-        '-list-configs[list candidate config file paths]' \
-        '1:session name:->sessions'
+    local -a subcommands
+    subcommands=(
+        'up:build or attach the current folder'\''s session'
+        'restart:stop the session and build it again from the config'
+        'kill:destroy the session (runs on_project_exit)'
+        'pick:fuzzy-pick a running session to attach to'
+        'tui:full-screen session-management TUI'
+        'save:save the running session layout as a config for this folder'
+        'edit:open the resolved config in $EDITOR'
+        'validate:check the effective config without building a session'
+        'list:list running tmux sessions non-interactively'
+        'list-configs:list candidate config file paths'
+        'migrate-config:move the local config into the shared config directory'
+        'version:print version and exit'
+        'help:show help'
+    )
+
+    _arguments -C \
+        '1: :->command' \
+        '*:: :->args'
 
     case "$state" in
-        configs)
-            local -a configs
-            configs=(${(f)"$(wyrm -list-configs 2>/dev/null)"})
-            _describe 'config file' configs
-            ;;
-        sessions)
+        command)
             local -a sessions
-            sessions=(${(f)"$(wyrm -list -format names 2>/dev/null)"})
-            _describe 'running session' sessions
+            sessions=(${(f)"$(wyrm list -format names 2>/dev/null)"})
+            _describe -t commands 'subcommand' subcommands
+            _describe -t sessions 'running session' sessions
+            ;;
+        args)
+            case "$words[1]" in
+                up|restart|kill|edit|validate)
+                    _arguments '-config[config file path]:config file:->configs'
+                    ;;
+                list)
+                    _arguments '-format[output format]:format:(table json toml names)'
+                    ;;
+            esac
+            if [[ "$state" == configs ]]; then
+                local -a configs
+                configs=(${(f)"$(wyrm list-configs 2>/dev/null)"})
+                _describe 'config file' configs
+            fi
             ;;
     esac
 }

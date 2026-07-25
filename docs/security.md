@@ -1,7 +1,7 @@
 # Security
 
 A wyrm config **executes shell commands by design** — hooks run via
-`bash -c`, and pane commands are typed into your shell. Treat config files
+your `$SHELL` (falling back to `sh`), and pane commands are typed into your shell. Treat config files
 with the same trust as a `Makefile` or `.envrc`: don't run one you haven't
 read.
 

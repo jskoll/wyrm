@@ -2,6 +2,7 @@
 package tmux
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,13 +23,76 @@ type Exec struct {
 	SocketName string
 }
 
-// Run implements Runner.
+// Run implements Runner. It captures stdout only, deliberately: the first
+// command to start the tmux server (new-session) makes it source the user's
+// ~/.tmux.conf, and any parse error in that file goes to stderr. Folding
+// stderr into stdout — as CombinedOutput does — prepends that diagnostic to
+// the output of exactly the commands whose "-F" format string is parsed
+// positionally, silently poisoning the session/window/pane ID wyrm then
+// targets everything else by.
+//
+// On failure the stderr text is returned in place of stdout, because that's
+// where tmux puts its diagnostics and callers match on them (see
+// FindSessionID's "no server running" handling).
 func (e Exec) Run(args ...string) (string, error) {
 	if e.SocketName != "" {
 		args = append([]string{"-L", e.SocketName}, args...)
 	}
-	out, err := exec.Command("tmux", args...).CombinedOutput()
-	return strings.TrimSpace(string(out)), err
+	out, err := exec.Command("tmux", args...).Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+			return strings.TrimSpace(string(exitErr.Stderr)), err
+		}
+		return strings.TrimSpace(string(out)), err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// Sigils prefixing tmux's object IDs.
+const (
+	SessionSigil = '$'
+	WindowSigil  = '@'
+	PaneSigil    = '%'
+)
+
+// ValidID reports whether s is a well-formed tmux object ID for sigil: the
+// sigil followed by at least one digit and nothing else.
+func ValidID(sigil byte, s string) bool {
+	if len(s) < 2 || s[0] != sigil {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// NoServerRunning reports whether a failed tmux invocation failed only
+// because no server is up — which tmux signals by failing rather than by
+// printing an empty list. The wording varies: "no server running on <socket>"
+// for the default server, "error connecting to <socket> (No such file or
+// directory)" for an -L socket that was never created. Both mean "nothing is
+// running", not "something went wrong".
+//
+// Shared by every caller that lists sessions (tmux.FindSessionID,
+// picker.ListSessions) so the two can't drift apart.
+func NoServerRunning(out string) bool {
+	msg := strings.ToLower(out)
+	return strings.Contains(msg, "no server running") || strings.Contains(msg, "error connecting")
+}
+
+// CheckID validates an ID parsed out of tmux's output. wyrm targets every
+// command by ID rather than by name, so a malformed one doesn't fail loudly —
+// it silently misdirects every subsequent command. Catching it at the parse
+// site turns that into one clear error.
+func CheckID(sigil byte, kind, s string) error {
+	if ValidID(sigil, s) {
+		return nil
+	}
+	return fmt.Errorf("expected a tmux %s id (like %c1), got %q", kind, sigil, s)
 }
 
 // InsideTmux reports whether the current process runs inside a tmux client.
@@ -60,6 +124,9 @@ func CurrentSession(r Runner) (id, name string, err error) {
 	if !ok {
 		return "", "", fmt.Errorf("unexpected tmux output %q", out)
 	}
+	if err := CheckID(SessionSigil, "session", id); err != nil {
+		return "", "", fmt.Errorf("finding current session: %w", err)
+	}
 	return id, name, nil
 }
 
@@ -75,25 +142,43 @@ func CurrentSession(r Runner) (id, name string, err error) {
 func FindSessionID(r Runner, name string) (id string, ok bool, err error) {
 	out, err := r.Run("list-sessions", "-F", "#{session_id}|#{session_name}")
 	if err != nil {
-		// With no server up, tmux fails rather than printing an empty list.
-		// The wording varies: "no server running on <socket>" for the default
-		// server, "error connecting to <socket> (No such file or directory)"
-		// for an -L socket that was never created. Treat both as "no such
-		// session" rather than an error.
-		msg := strings.ToLower(out)
-		if strings.Contains(msg, "no server running") || strings.Contains(msg, "error connecting") {
+		if NoServerRunning(out) {
 			return "", false, nil
 		}
 		return "", false, fmt.Errorf("listing sessions: %v (%s)", err, out)
 	}
+	type entry struct{ id, name string }
+	var sessions []entry
 	for _, line := range strings.Split(out, "\n") {
 		sessID, sessName, found := strings.Cut(strings.TrimRight(line, "\r"), "|")
 		if !found {
 			continue
 		}
-		if sessName == name {
-			return sessID, true, nil
+		sessions = append(sessions, entry{sessID, sessName})
+	}
+	// Exact match first, then the sanitized form. Some tmux builds rewrite "."
+	// and ":" to "_" when a session is created, so a project in a directory
+	// called "example.com" ends up as the session "example_com". Matching only
+	// exactly meant the second `wyrm` run never found it, tried to create a
+	// duplicate, and failed — and `wyrm kill` could never find it at all.
+	for _, want := range []string{name, SanitizeName(name)} {
+		for _, s := range sessions {
+			if s.name != want {
+				continue
+			}
+			if err := CheckID(SessionSigil, "session", s.id); err != nil {
+				return "", false, fmt.Errorf("listing sessions: %w", err)
+			}
+			return s.id, true, nil
 		}
 	}
 	return "", false, nil
 }
+
+// nameSanitizer mirrors the substitution those tmux builds apply.
+var nameSanitizer = strings.NewReplacer(".", "_", ":", "_")
+
+// SanitizeName returns the session name tmux would use for name on the builds
+// that rewrite "." and ":" — the characters its own -t target syntax reserves
+// as the session:window.pane separators.
+func SanitizeName(name string) string { return nameSanitizer.Replace(name) }

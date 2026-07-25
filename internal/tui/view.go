@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Layout constants. The left column holds the three stacked list panels; the
+// Layout constants. The left column holds the four stacked list panels; the
 // rest of the width is the preview. Each bordered box costs 2 columns/rows of
 // border plus one interior title row.
 const (
@@ -17,6 +17,19 @@ const (
 	helpHeight   = 1
 	borderSize   = 2 // left+right or top+bottom border
 	titleRows    = 1
+
+	// minPanelHeight is the smallest a list panel can be and still show
+	// anything: both borders, its title, and one row.
+	minPanelHeight = borderSize + titleRows + 1
+)
+
+// minWidth/minHeight are the smallest terminal the four-panel layout fits in.
+// Below minHeight the panels would render more lines than the screen has —
+// lipgloss's Height() pads but never clips — and Bubble Tea keeps only the
+// last screenful, silently slicing the top panels away.
+var (
+	minWidth  = minLeftWidth + 20
+	minHeight = int(numPanels)*minPanelHeight + helpHeight
 )
 
 var (
@@ -24,6 +37,7 @@ var (
 	subtleColor = lipgloss.Color("240") // dim gray: blurred borders, hints
 	activeColor = lipgloss.Color("2")   // green: running/attached status dots
 	indexColor  = lipgloss.Color("4")   // blue: window indices and pane IDs
+	errorColor  = lipgloss.Color("1")   // red: failed actions
 
 	focusedBorder = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accentColor)
 	blurredBorder = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(subtleColor)
@@ -32,23 +46,85 @@ var (
 	blurredTitle = lipgloss.NewStyle().Bold(true).Foreground(subtleColor)
 
 	selectedRow = lipgloss.NewStyle().Reverse(true)
-	hintStyle   = lipgloss.NewStyle().Foreground(subtleColor)
-	helpStyle   = lipgloss.NewStyle().Foreground(subtleColor)
-	modalStyle  = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
-	keyStyle    = lipgloss.NewStyle().Bold(true)
+	// unfocusedRow marks the selection in a panel that doesn't have focus.
+	// Without it the cascade loses its point: while the cursor is in Panes you
+	// can't see which session or window you drilled through to get there.
+	// Bold rather than reverse, so the focused panel still stands out.
+	unfocusedRow = lipgloss.NewStyle().Bold(true)
+	hintStyle    = lipgloss.NewStyle().Foreground(subtleColor)
+	helpStyle    = lipgloss.NewStyle().Foreground(subtleColor)
+	errorStyle   = lipgloss.NewStyle().Bold(true).Foreground(errorColor)
+	modalStyle   = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
+	keyStyle     = lipgloss.NewStyle().Bold(true)
 
 	activeMark = lipgloss.NewStyle().Foreground(activeColor) // "●" running/attached
 	indexMark  = lipgloss.NewStyle().Foreground(indexColor)  // window/pane identifiers
 )
 
+// span is one styled run of text within a list row. Rows are assembled as
+// spans rather than as pre-rendered strings so the selection highlight can be
+// folded into each run's own style — see renderRow.
+type span struct {
+	style lipgloss.Style
+	text  string
+}
+
+func plain(text string) span { return span{text: text} }
+
+// renderRow lays a row's spans into exactly w columns, folding the selection
+// style into each span rather than wrapping the finished string.
+//
+// Wrapping is what the obvious implementation does and it does not work:
+// lipgloss renders every styled run with a trailing *full* SGR reset (termenv's
+// Style.Styled always appends ESC[0m) and does not re-apply the outer style
+// afterward. An outer reverse-video wrap therefore switches itself off at the
+// first colored span — which left the window index highlighted and the window
+// name plain, on every row of the Windows and Panes panels.
+func renderRow(spans []span, w int, sel lipgloss.Style, selected bool) string {
+	if w <= 0 {
+		return ""
+	}
+	var b strings.Builder
+	used := 0
+	for _, s := range spans {
+		if used >= w {
+			break
+		}
+		text := s.text
+		if used+ansi.StringWidth(text) > w {
+			text = ansi.Truncate(text, w-used, "…")
+		}
+		used += ansi.StringWidth(text)
+		style := s.style
+		if selected {
+			style = style.Inherit(sel)
+		}
+		b.WriteString(style.Render(text))
+	}
+	if used < w {
+		pad := strings.Repeat(" ", w-used)
+		if selected {
+			b.WriteString(sel.Render(pad))
+		} else {
+			b.WriteString(pad)
+		}
+	}
+	return b.String()
+}
+
 // View renders the whole TUI frame.
 func (m Model) View() string {
-	if !m.ready || m.width < minLeftWidth+20 || m.height < 8 {
-		return "wyrm: terminal too small"
+	// The help overlay is checked before the size guard: it scrolls and
+	// truncates to whatever room it has, so it stays readable in a terminal
+	// too small for the four-panel layout — which is exactly where someone is
+	// most likely to be looking for the key that gets them out.
+	if m.ready && m.mode == modeHelp {
+		return m.renderHelpOverlay()
 	}
 
-	if m.mode == modeHelp {
-		return m.renderHelpOverlay()
+	if !m.ready || m.width < minWidth || m.height < minHeight {
+		return fmt.Sprintf("wyrm: terminal too small (need at least %dx%d, have %dx%d)",
+			minWidth, minHeight, m.width, m.height)
 	}
 
 	leftW := m.width * 30 / 100
@@ -61,16 +137,17 @@ func (m Model) View() string {
 	rightW := m.width - leftW
 
 	bodyH := m.height - helpHeight
-	// Distribute body height across the left panels, remainder to the last.
-	panelH := bodyH / int(numPanels)
-	heights := []int{panelH, panelH, panelH, bodyH - 3*panelH}
+	heights := panelHeights(bodyH, []int{
+		m.panelLen(panelProjects), m.panelLen(panelSessions),
+		m.panelLen(panelWindows), m.panelLen(panelPanes),
+	})
 
 	left := lipgloss.JoinVertical(
 		lipgloss.Left,
-		m.renderProjects(leftW, heights[0]),
-		m.renderSessions(leftW, heights[1]),
-		m.renderWindows(leftW, heights[2]),
-		m.renderPanes(leftW, heights[3]),
+		m.renderProjects(leftW, heights[panelProjects]),
+		m.renderSessions(leftW, heights[panelSessions]),
+		m.renderWindows(leftW, heights[panelWindows]),
+		m.renderPanes(leftW, heights[panelPanes]),
 	)
 	right := m.renderPreview(rightW, bodyH)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
@@ -78,53 +155,112 @@ func (m Model) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderHelp())
 }
 
-func (m Model) renderProjects(outerW, outerH int) string {
-	rows := make([]string, len(m.projects))
-	for i, p := range m.projects {
-		mark := " "
-		if p.Running {
-			mark = activeMark.Render("●")
+// panelHeights distributes the body's rows across the four left panels. Each
+// gets at least minPanelHeight, no more than its own fair share while it has
+// content to show, and all remaining slack goes to Sessions.
+//
+// Splitting into equal quarters — the previous behavior — gave the Panes panel
+// (typically one to three entries) exactly as much room as Sessions, and at
+// 80x24 left every list showing two rows at a time.
+func panelHeights(bodyH int, counts []int) []int {
+	n := len(counts)
+	heights := make([]int, n)
+	if bodyH < n*minPanelHeight {
+		// View refuses to render this small; stay total-preserving anyway so
+		// nothing overflows if that guard is ever loosened.
+		base := bodyH / n
+		for i := range heights {
+			heights[i] = base
 		}
-		rows[i] = fmt.Sprintf("%s %s", mark, p.Name)
+		heights[n-1] += bodyH - base*n
+		return heights
+	}
+
+	left := bodyH
+	for i := range heights {
+		heights[i] = minPanelHeight
+		left -= minPanelHeight
+	}
+	fair := bodyH / n
+	for i, c := range counts {
+		want := borderSize + titleRows + c
+		if want > fair {
+			want = fair
+		}
+		grow := want - heights[i]
+		if grow > left {
+			grow = left
+		}
+		if grow > 0 {
+			heights[i] += grow
+			left -= grow
+		}
+	}
+	heights[panelSessions] += left
+	return heights
+}
+
+func (m Model) renderProjects(outerW, outerH int) string {
+	projects := m.visibleProjects()
+	rows := make([][]span, len(projects))
+	for i, p := range projects {
+		mark := plain(" ")
+		if p.Running {
+			mark = span{activeMark, "●"}
+		}
+		rows[i] = []span{mark, plain(" " + p.Name)}
 	}
 	return m.renderPanel(panelProjects, "Projects", rows, m.projectCur, outerW, outerH, "no wyrm configs found")
 }
 
 func (m Model) renderSessions(outerW, outerH int) string {
-	rows := make([]string, len(m.sessions))
-	for i, s := range m.sessions {
-		mark := " "
+	sessions := m.visibleSessions()
+	rows := make([][]span, len(sessions))
+	for i, s := range sessions {
+		mark := plain(" ")
 		if s.Attached {
-			mark = activeMark.Render("●")
+			mark = span{activeMark, "●"}
 		}
-		rows[i] = fmt.Sprintf("%s %s %s", mark, s.Name, hintStyle.Render(fmt.Sprintf("(%dw)", s.Windows)))
+		rows[i] = []span{
+			mark,
+			plain(" " + s.Name + " "),
+			{hintStyle, fmt.Sprintf("(%dw)", s.Windows)},
+		}
 	}
 	return m.renderPanel(panelSessions, "Sessions", rows, m.sessionCur, outerW, outerH, "no running sessions")
 }
 
 func (m Model) renderWindows(outerW, outerH int) string {
-	rows := make([]string, len(m.windows))
-	for i, w := range m.windows {
+	windows := m.visibleWindows()
+	rows := make([][]span, len(windows))
+	for i, w := range windows {
 		name := w.Name
 		if name == "" {
 			name = fmt.Sprintf("window %d", w.Index)
 		}
-		rows[i] = fmt.Sprintf("%s %s", indexMark.Render(fmt.Sprintf("%d:", w.Index)), name)
+		rows[i] = []span{
+			{indexMark, fmt.Sprintf("%d:", w.Index)},
+			plain(" " + name),
+		}
 	}
 	return m.renderPanel(panelWindows, "Windows", rows, m.windowCur, outerW, outerH, "")
 }
 
 func (m Model) renderPanes(outerW, outerH int) string {
-	rows := make([]string, len(m.panes))
-	for i, p := range m.panes {
-		rows[i] = fmt.Sprintf("%s %s", indexMark.Render(p.ID), p.Command)
+	panes := m.visiblePanes()
+	rows := make([][]span, len(panes))
+	for i, p := range panes {
+		rows[i] = []span{
+			{indexMark, p.ID},
+			plain(" " + p.Command),
+		}
 	}
 	return m.renderPanel(panelPanes, "Panes", rows, m.paneCur, outerW, outerH, "")
 }
 
 // renderPanel draws one bordered list box with a title, a cursor-tracking
 // viewport, and an empty-state hint.
-func (m Model) renderPanel(p panel, title string, rows []string, cursor, outerW, outerH int, empty string) string {
+func (m Model) renderPanel(p panel, title string, rows [][]span, cursor, outerW, outerH int, empty string) string {
 	focused := m.focus == p
 	innerW := outerW - borderSize
 	innerH := outerH - borderSize
@@ -133,12 +269,19 @@ func (m Model) renderPanel(p panel, title string, rows []string, cursor, outerW,
 		listH = 1
 	}
 
-	var b strings.Builder
+	titleStyle := blurredTitle
 	if focused {
-		b.WriteString(focusedTitle.Render(truncate(title, innerW)))
-	} else {
-		b.WriteString(blurredTitle.Render(truncate(title, innerW)))
+		titleStyle = focusedTitle
 	}
+	// Show where the viewport sits when the list is taller than the panel, so
+	// scrolling isn't invisible.
+	label := title
+	if len(rows) > listH {
+		label = fmt.Sprintf("%s %d/%d", title, cursor+1, len(rows))
+	}
+
+	var b strings.Builder
+	b.WriteString(titleStyle.Render(truncate(label, innerW)))
 	b.WriteByte('\n')
 
 	if len(rows) == 0 {
@@ -147,13 +290,13 @@ func (m Model) renderPanel(p panel, title string, rows []string, cursor, outerW,
 			b.WriteByte('\n')
 		}
 	} else {
+		selStyle := unfocusedRow
+		if focused {
+			selStyle = selectedRow
+		}
 		start, end := viewport(cursor, len(rows), listH)
 		for i := start; i < end; i++ {
-			line := truncate(rows[i], innerW)
-			if i == cursor && focused {
-				line = selectedRow.Render(padRight(line, innerW))
-			}
-			b.WriteString(line)
+			b.WriteString(renderRow(rows[i], innerW, selStyle, i == cursor))
 			if i < end-1 {
 				b.WriteByte('\n')
 			}
@@ -167,7 +310,9 @@ func (m Model) renderPanel(p panel, title string, rows []string, cursor, outerW,
 	if focused {
 		box = focusedBorder
 	}
-	return box.Width(innerW).Height(innerH).Render(b.String())
+	// MaxHeight as well as Height: Height only pads, so without the cap a box
+	// whose content overran its budget would push the layout off-screen.
+	return box.Width(innerW).Height(innerH).MaxHeight(outerH).Render(b.String())
 }
 
 func (m Model) renderPreview(outerW, outerH int) string {
@@ -195,15 +340,21 @@ func (m Model) renderPreview(outerW, outerH int) string {
 	b.WriteByte('\n')
 
 	content := m.preview
-	if content == "" && m.err != nil {
-		content = "error: " + m.err.Error()
-	}
 	// Pane captures carry SGR escapes (capture-pane -e); reset after every line
 	// so an unterminated color can't bleed into the padding or the border.
 	colored := m.previewSrc == previewPane
 	lines := strings.Split(content, "\n")
 	if len(lines) > bodyH {
-		lines = lines[:bodyH]
+		// Keep the *end* of a pane capture. capture-pane returns the pane's
+		// visible region top-to-bottom, so taking the first rows showed the
+		// oldest scrollback and permanently hid the prompt and latest output —
+		// the part a live preview exists to show. A config preview reads from
+		// the top, so only trim the tail there.
+		if colored {
+			lines = lines[len(lines)-bodyH:]
+		} else {
+			lines = lines[:bodyH]
+		}
 	}
 	for i := 0; i < bodyH; i++ {
 		if i < len(lines) {
@@ -217,7 +368,7 @@ func (m Model) renderPreview(outerW, outerH int) string {
 		}
 	}
 
-	return blurredBorder.Width(innerW).Height(innerH).Render(b.String())
+	return blurredBorder.Width(innerW).Height(innerH).MaxHeight(outerH).Render(b.String())
 }
 
 func (m Model) renderHelp() string {
@@ -228,8 +379,32 @@ func (m Model) renderHelp() string {
 		line := m.promptTitle + " " + m.textInput.View()
 		return modalStyle.Render(truncate(line, m.width))
 	}
+	// A failed action takes the footer until the next keypress. Errors used to
+	// render only when the preview happened to be empty — which in normal use
+	// it never is — so a failed kill, rename, or new-window looked exactly like
+	// a successful one.
+	if m.err != nil {
+		return errorStyle.Render(truncate("error: "+m.err.Error()+"  (any key dismisses)", m.width))
+	}
+	if m.filtering || m.filter != "" {
+		return m.renderFilterLine()
+	}
 	keys := m.helpKeys()
 	return helpStyle.Render(truncate(keys, m.width))
+}
+
+// renderFilterLine shows the active filter, with a trailing cursor while it's
+// being typed.
+func (m Model) renderFilterLine() string {
+	cursor := ""
+	if m.filtering {
+		cursor = "_"
+	}
+	line := "/" + m.filter + cursor
+	if !m.filtering {
+		line += "  (esc clears)"
+	}
+	return modalStyle.Render(truncate(line, m.width))
 }
 
 // helpSection is one titled group of key bindings in the full help overlay.
@@ -244,6 +419,10 @@ var helpSections = []helpSection{
 		{"Tab / Shift-Tab", "cycle focus between panels"},
 		{"1 / 2 / 3 / 4", "jump to Projects / Sessions / Windows / Panes"},
 		{"↑ ↓  or  j k", "move the selection"},
+		{"PgUp / PgDn", "move the selection a screenful"},
+		{"g / G", "jump to the first / last entry"},
+		{"/", "filter the focused panel"},
+		{"Esc", "clear the filter"},
 		{"R", "reload the project and session lists"},
 		{"?", "toggle this help"},
 		{"q / Ctrl-C", "quit"},
@@ -257,6 +436,7 @@ var helpSections = []helpSection{
 		{"Enter", "attach (or switch-client inside tmux)"},
 		{"x", "kill the session"},
 		{"r", "rename the session"},
+		{"n", "new window in this session"},
 	}},
 	{"Windows panel", [][2]string{
 		{"Enter", "attach, landing on this window"},
@@ -271,7 +451,7 @@ var helpSections = []helpSection{
 		{"z", "toggle zoom"},
 	}},
 	{"Confirm / prompt", [][2]string{
-		{"y / Enter", "confirm"},
+		{"y", "confirm"},
 		{"n / Esc", "cancel"},
 	}},
 }
@@ -303,15 +483,23 @@ func helpColumn(sections []helpSection) string {
 
 // helpLines returns the body of the help overlay as individual lines (so it can
 // be scrolled). It lays the sections out in two side-by-side columns when the
-// terminal is wide enough, and falls back to a single column otherwise.
+// terminal is wide enough, and falls back to a single column otherwise. Lines
+// are clipped to the available width so a narrow terminal doesn't cut the box's
+// right border off mid-word.
 func (m Model) helpLines() []string {
+	avail := m.width - helpChrome
 	half := (len(helpSections) + 1) / 2
 	two := lipgloss.JoinHorizontal(lipgloss.Top,
 		helpColumn(helpSections[:half]), "    ", helpColumn(helpSections[half:]))
-	if lipgloss.Width(two) <= m.width-helpChrome {
-		return strings.Split(two, "\n")
+	block := two
+	if lipgloss.Width(two) > avail {
+		block = helpColumn(helpSections)
 	}
-	return strings.Split(helpColumn(helpSections), "\n")
+	lines := strings.Split(block, "\n")
+	for i, l := range lines {
+		lines[i] = truncate(l, avail)
+	}
+	return lines
 }
 
 // helpChrome is the horizontal space the overlay's border + padding consume.
@@ -374,12 +562,12 @@ func (m Model) renderHelpOverlay() string {
 
 // helpKeys returns the contextual key hints for the focused panel.
 func (m Model) helpKeys() string {
-	const nav = "tab/1-4: focus  jk: move  R: reload  ?: help  q: quit"
+	const nav = "tab/1-4: focus  jk: move  /: filter  R: reload  ?: help  q: quit"
 	switch m.focus {
 	case panelProjects:
 		return "↵: start/attach  e: edit  x: stop  " + nav
 	case panelSessions:
-		return "↵: attach  x: kill  r: rename  " + nav
+		return "↵: attach  x: kill  r: rename  n: new-win  " + nav
 	case panelWindows:
 		return "↵: attach  x: kill  r: rename  n: new-win  L: layout  " + nav
 	case panelPanes:

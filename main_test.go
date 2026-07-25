@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"testing"
 
@@ -58,9 +59,27 @@ func (f *fakeRunner) Run(args ...string) (string, error) {
 		return "boom", errors.New("exit status 1")
 	}
 	switch args[0] {
+	case "kill-session":
+		// Reflect the kill in what list-sessions reports next, so a sequence
+		// like kill-then-create behaves the way it would against real tmux
+		// rather than still finding the session it just destroyed.
+		f.listOutput = ""
+		return "", nil
 	case "new-session":
 		f.seq++
-		return fmt.Sprintf("$%d|@%d|%%%d", f.seq, f.seq, f.seq), nil
+		name := ""
+		for i, a := range args {
+			if a == "-s" && i+1 < len(args) {
+				name = args[i+1]
+			}
+		}
+		return fmt.Sprintf("$%d|%s|@%d|%%%d", f.seq, name, f.seq, f.seq), nil
+	case "new-window":
+		f.seq++
+		return fmt.Sprintf("@%d|%%%d", f.seq, f.seq), nil
+	case "split-window":
+		f.seq++
+		return fmt.Sprintf("%%%d", f.seq), nil
 	case "list-sessions":
 		return f.listOutput, nil
 	case "display-message":
@@ -121,7 +140,7 @@ name = "w"
 
 func TestRunVersion(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-version"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	code := run([]string{"version"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
@@ -130,11 +149,203 @@ func TestRunVersion(t *testing.T) {
 	}
 }
 
+func TestRunVersionAlias(t *testing.T) {
+	for _, arg := range []string{"version", "--version", "-version", "-v"} {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{arg}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+		if code != 0 {
+			t.Fatalf("%s: exit code = %d, want 0", arg, code)
+		}
+		if !strings.Contains(stdout.String(), "wyrm "+version) {
+			t.Errorf("%s: stdout = %q, want the version string", arg, stdout.String())
+		}
+	}
+}
+
+func TestRunHelp(t *testing.T) {
+	for _, arg := range []string{"help", "--help", "-h"} {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{arg}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+		if code != 0 {
+			t.Fatalf("%s: exit code = %d, want 0", arg, code)
+		}
+		if !strings.Contains(stdout.String(), "Usage:") || !strings.Contains(stdout.String(), "wyrm kill") {
+			t.Errorf("%s: stdout = %q, want the usage overview", arg, stdout.String())
+		}
+	}
+}
+
+func TestSubcommandHelpShowsSynopsisAndFlags(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"kill", "-h"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if !strings.Contains(stderr.String(), "wyrm kill [name]") {
+		t.Errorf("stderr = %q, want the subcommand's usage-line synopsis", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "Flags:") || !strings.Contains(stderr.String(), "-config") {
+		t.Errorf("stderr = %q, want a Flags section listing -config", stderr.String())
+	}
+}
+
+func TestSubcommandHelpOmitsFlagsSectionWhenNone(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"pick", "-h"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if !strings.Contains(stderr.String(), "wyrm pick") {
+		t.Errorf("stderr = %q, want the subcommand's usage-line synopsis", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "Flags:") {
+		t.Errorf("stderr = %q, want no Flags section for a flagless subcommand", stderr.String())
+	}
+}
+
+func TestRunUpExplicit(t *testing.T) {
+	path := writeConfig(t, validConfig)
+
+	var stdout, stderr bytes.Buffer
+	attachCalled := ""
+	code := run([]string{"up", "-config", path}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, func(name string) error { attachCalled = name; return nil })
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "created session proj") {
+		t.Errorf("stdout = %q, want a created-session message", stdout.String())
+	}
+	if attachCalled != "$1" {
+		t.Errorf("attach called with %q, want $1", attachCalled)
+	}
+}
+
+func TestRunUpRejectsExtraArg(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"up", "somename"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "unexpected argument") {
+		t.Errorf("stderr = %q, want an unexpected-argument error", stderr.String())
+	}
+}
+
+func TestRunSubcommandRejectsUnknownFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"list", "-bogus"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
+	}
+}
+
 func TestRunFlagParseError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"-bogus-flag"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
 	if code != 2 {
 		t.Errorf("exit code = %d, want 2", code)
+	}
+}
+
+func TestLoadSettingsError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	settingsDir := filepath.Join(home, ".config", "wyrm")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(settingsDir, config.SettingsFileName), []byte("storage = \"bogus\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	settings, code, ok := loadSettings(&stderr)
+	if ok {
+		t.Fatal("ok = true, want false for an invalid global settings file")
+	}
+	if settings != nil {
+		t.Errorf("settings = %v, want nil on error", settings)
+	}
+	if code != 1 {
+		t.Errorf("code = %d, want 1", code)
+	}
+	if !strings.HasPrefix(stderr.String(), "wyrm: ") {
+		t.Errorf("stderr = %q, want a wyrm-prefixed error", stderr.String())
+	}
+}
+
+func TestRunUpSettingsLoadError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	settingsDir := filepath.Join(home, ".config", "wyrm")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(settingsDir, config.SettingsFileName), []byte("storage = \"bogus\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"up"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "storage must be") {
+		t.Errorf("stderr = %q, want the settings load error surfaced", stderr.String())
+	}
+}
+
+func TestComputeVersionStringStamped(t *testing.T) {
+	got := computeVersionString("1.2.3", func() (*debug.BuildInfo, bool) {
+		t.Fatal("readBuildInfo should not be called when version is already stamped")
+		return nil, false
+	})
+	if got != "1.2.3" {
+		t.Errorf("got %q, want %q", got, "1.2.3")
+	}
+}
+
+func TestComputeVersionStringNoBuildInfo(t *testing.T) {
+	got := computeVersionString("dev", func() (*debug.BuildInfo, bool) {
+		return nil, false
+	})
+	if got != "dev" {
+		t.Errorf("got %q, want %q", got, "dev")
+	}
+}
+
+func TestComputeVersionStringNoRevision(t *testing.T) {
+	got := computeVersionString("dev", func() (*debug.BuildInfo, bool) {
+		return &debug.BuildInfo{}, true
+	})
+	if got != "dev" {
+		t.Errorf("got %q, want %q", got, "dev")
+	}
+}
+
+func TestComputeVersionStringWithRevision(t *testing.T) {
+	got := computeVersionString("dev", func() (*debug.BuildInfo, bool) {
+		return &debug.BuildInfo{Settings: []debug.BuildSetting{
+			{Key: "vcs.revision", Value: "abcdef0123456789"},
+		}}, true
+	})
+	if got != "dev+abcdef012345" {
+		t.Errorf("got %q, want %q", got, "dev+abcdef012345")
+	}
+}
+
+func TestComputeVersionStringDirty(t *testing.T) {
+	got := computeVersionString("dev", func() (*debug.BuildInfo, bool) {
+		return &debug.BuildInfo{Settings: []debug.BuildSetting{
+			{Key: "vcs.revision", Value: "abc123"},
+			{Key: "vcs.modified", Value: "true"},
+		}}, true
+	})
+	if got != "dev+abc123-dirty" {
+		t.Errorf("got %q, want %q", got, "dev+abc123-dirty")
 	}
 }
 
@@ -154,7 +365,7 @@ func TestRunValidateValid(t *testing.T) {
 	path := writeConfig(t, validConfig)
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-validate", "-config", path}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	code := run([]string{"validate", "-config", path}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -167,7 +378,7 @@ func TestRunValidateInvalid(t *testing.T) {
 	path := writeConfig(t, "not valid toml [[[")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-validate", "-config", path}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	code := run([]string{"validate", "-config", path}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}
@@ -180,7 +391,7 @@ func TestRunValidateFallsBackToBuiltInDefault(t *testing.T) {
 	chdir(t, t.TempDir())
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-validate"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	code := run([]string{"validate"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -197,7 +408,7 @@ func TestRunEditExisting(t *testing.T) {
 	t.Setenv("EDITOR", writeFakeEditor(t, validConfig))
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-edit"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	code := run([]string{"edit"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -218,7 +429,7 @@ func TestRunEditCreatesLocal(t *testing.T) {
 	t.Setenv("EDITOR", writeFakeEditor(t, validConfig))
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-edit"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	code := run([]string{"edit"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -246,7 +457,7 @@ func TestRunEditCreatesShared(t *testing.T) {
 	t.Setenv("EDITOR", writeFakeEditor(t, validConfig))
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-edit"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	code := run([]string{"edit"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -261,7 +472,7 @@ func TestRunEditWarnsOnInvalidSave(t *testing.T) {
 	t.Setenv("EDITOR", writeFakeEditor(t, "not valid toml [[["))
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-edit"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	code := run([]string{"edit"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (warn, don't fail): stderr = %q", code, stderr.String())
 	}
@@ -279,7 +490,7 @@ func TestRunSaveInsideTmux(t *testing.T) {
 		listWindowsOutput:    "0|@1|1|abcd,80x24,0,0,0|main",
 		listPanesOutput:      map[string]string{"@1": "%0|0|1|nvim"},
 	}
-	code := run([]string{"-save"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	code := run([]string{"save"}, &stdout, &stderr, r, func() bool { return true }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -306,7 +517,7 @@ func TestRunSaveOutsideTmux(t *testing.T) {
 		listWindowsOutput: "0|@2|1|abcd,80x24,0,0,3|shell",
 		listPanesOutput:   map[string]string{"@2": "%3|0|1|zsh"},
 	}
-	code := run([]string{"-save"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	code := run([]string{"save"}, &stdout, &stderr, r, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -323,7 +534,7 @@ func TestRunSaveOutsideTmuxNoRunningSession(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	r := &fakeRunner{} // no sessions running
-	code := run([]string{"-save"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	code := run([]string{"save"}, &stdout, &stderr, r, func() bool { return false }, nil)
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}
@@ -347,7 +558,7 @@ func TestRunSaveRefusesExistingConfig(t *testing.T) {
 		listWindowsOutput:    "0|@1|1|abcd,80x24,0,0,0|main",
 		listPanesOutput:      map[string]string{"@1": "%0|0|1|nvim"},
 	}
-	code := run([]string{"-save"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	code := run([]string{"save"}, &stdout, &stderr, r, func() bool { return true }, nil)
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}
@@ -363,12 +574,57 @@ func TestRunSaveRefusesExistingConfig(t *testing.T) {
 	}
 }
 
+func TestRunSaveWithConfigFlag(t *testing.T) {
+	chdir(t, t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		displayMessageOutput: "$3|myproj",
+		listWindowsOutput:    "0|@1|1|abcd,80x24,0,0,0|main",
+		listPanesOutput:      map[string]string{"@1": "%0|0|1|nvim"},
+	}
+	code := run([]string{"save", "-config", "custom.toml"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "saved session myproj to custom.toml") {
+		t.Errorf("stdout = %q, want a saved-session message naming custom.toml", stdout.String())
+	}
+	if _, err := os.Stat("custom.toml"); err != nil {
+		t.Errorf("expected custom.toml to be created: %v", err)
+	}
+	if _, err := os.Stat(config.DefaultFileName); err == nil {
+		t.Errorf("expected %s not to be created when -config overrides the destination", config.DefaultFileName)
+	}
+}
+
+func TestRunSaveWithConfigFlagRefusesExisting(t *testing.T) {
+	chdir(t, t.TempDir())
+	if err := os.WriteFile("custom.toml", []byte(validConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		displayMessageOutput: "$3|myproj",
+		listWindowsOutput:    "0|@1|1|abcd,80x24,0,0,0|main",
+		listPanesOutput:      map[string]string{"@1": "%0|0|1|nvim"},
+	}
+	code := run([]string{"save", "-config", "custom.toml"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "already exists") {
+		t.Errorf("stderr = %q, want an already-exists message", stderr.String())
+	}
+}
+
 func TestRunSaveCurrentSessionError(t *testing.T) {
 	chdir(t, t.TempDir())
 
 	var stdout, stderr bytes.Buffer
 	r := &fakeRunner{fail: map[string]bool{"display-message": true}}
-	code := run([]string{"-save"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	code := run([]string{"save"}, &stdout, &stderr, r, func() bool { return true }, nil)
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}
@@ -384,7 +640,7 @@ func TestRunListTable(t *testing.T) {
 	}, "\n")}
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-list"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	code := run([]string{"list"}, &stdout, &stderr, r, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -404,7 +660,7 @@ func TestRunListTableEmpty(t *testing.T) {
 	r := &fakeRunner{listOutput: "no server running on /tmp/tmux-1000/default"}
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-list"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	code := run([]string{"list"}, &stdout, &stderr, r, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -420,7 +676,7 @@ func TestRunListJSON(t *testing.T) {
 	r := &fakeRunner{listOutput: "$1|2|1|1000|alpha"}
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-list", "-format", "json"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	code := run([]string{"list", "-format", "json"}, &stdout, &stderr, r, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -441,7 +697,7 @@ func TestRunListJSONEmpty(t *testing.T) {
 	r := &fakeRunner{listOutput: "no server running on /tmp/tmux-1000/default"}
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-list", "-format", "json"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	code := run([]string{"list", "-format", "json"}, &stdout, &stderr, r, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -454,7 +710,7 @@ func TestRunListTOML(t *testing.T) {
 	r := &fakeRunner{listOutput: "$1|2|0|1000|alpha"}
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-list", "-format", "toml"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	code := run([]string{"list", "-format", "toml"}, &stdout, &stderr, r, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -470,7 +726,7 @@ func TestRunListNames(t *testing.T) {
 	}, "\n")}
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-list", "-format", "names"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	code := run([]string{"list", "-format", "names"}, &stdout, &stderr, r, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -483,7 +739,7 @@ func TestRunListNamesEmpty(t *testing.T) {
 	r := &fakeRunner{listOutput: "no server running on /tmp/tmux-1000/default"}
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-list", "-format", "names"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	code := run([]string{"list", "-format", "names"}, &stdout, &stderr, r, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -496,9 +752,11 @@ func TestRunListUnknownFormat(t *testing.T) {
 	r := &fakeRunner{listOutput: "$1|2|0|1000|alpha"}
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-list", "-format", "yaml"}, &stdout, &stderr, r, func() bool { return false }, nil)
-	if code != 1 {
-		t.Errorf("exit code = %d, want 1", code)
+	// An unknown -format is a usage error, so it exits 2 like any other bad
+	// flag rather than 1.
+	code := run([]string{"list", "-format", "yaml"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
 	}
 	if !strings.Contains(stderr.String(), "unknown -format") {
 		t.Errorf("stderr = %q, want an unknown-format error", stderr.String())
@@ -766,8 +1024,58 @@ func TestRunAttachByNameNotFound(t *testing.T) {
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}
-	if !strings.Contains(stderr.String(), `no running session named "nonexistent"`) {
+	if !strings.Contains(stderr.String(), `no running session or known project named "nonexistent"`) {
 		t.Errorf("stderr = %q, want a not-found message", stderr.String())
+	}
+}
+
+func TestRunAttachByNameTypoHint(t *testing.T) {
+	r := &fakeRunner{}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"klil"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), `no running session or known project named "klil"`) {
+		t.Errorf("stderr = %q, want a not-found message", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `did you mean the subcommand "kill"?`) {
+		t.Errorf("stderr = %q, want a did-you-mean hint for %q", stderr.String(), "kill")
+	}
+}
+
+func TestRunAttachByNameNoHintForUnrelatedName(t *testing.T) {
+	r := &fakeRunner{}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"my-project-session"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if strings.Contains(stderr.String(), "did you mean") {
+		t.Errorf("stderr = %q, want no did-you-mean hint for an unrelated name", stderr.String())
+	}
+}
+
+func TestRunPickNoSessions(t *testing.T) {
+	// With no running sessions, picker.Run returns ("", nil) without ever
+	// touching a real tty, so this is safe and deterministic to test.
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"pick"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+	if !strings.Contains(stderr.String(), "no running tmux sessions") {
+		t.Errorf("stderr = %q, want a no-sessions message", stderr.String())
+	}
+}
+
+func TestRunPickRejectsExtraArg(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"pick", "-bogus"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
 	}
 }
 
@@ -778,7 +1086,7 @@ func TestRunListConfigsLocal(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-list-configs"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	code := run([]string{"list-configs"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -803,7 +1111,7 @@ func TestRunListConfigsShared(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-list-configs"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	code := run([]string{"list-configs"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -819,7 +1127,7 @@ func TestRunListConfigsNone(t *testing.T) {
 	chdir(t, t.TempDir())
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-list-configs"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	code := run([]string{"list-configs"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -841,7 +1149,7 @@ func TestRunMigrateConfig(t *testing.T) {
 		}
 
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"-migrate-config"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+		code := run([]string{"migrate-config"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
 		if code != 0 {
 			t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 		}
@@ -868,7 +1176,7 @@ func TestRunMigrateConfig(t *testing.T) {
 		chdir(t, t.TempDir())
 
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"-migrate-config"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+		code := run([]string{"migrate-config"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
 		if code != 1 {
 			t.Errorf("exit code = %d, want 1", code)
 		}
@@ -898,7 +1206,7 @@ func TestRunMigrateConfig(t *testing.T) {
 		}
 
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"-migrate-config"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+		code := run([]string{"migrate-config"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
 		if code != 1 {
 			t.Errorf("exit code = %d, want 1", code)
 		}
@@ -914,7 +1222,7 @@ func TestRunKill(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		r := &fakeRunner{listOutput: "$5|proj"}
-		code := run([]string{"-config", path, "-kill"}, &stdout, &stderr, r, func() bool { return false }, nil)
+		code := run([]string{"kill", "-config", path}, &stdout, &stderr, r, func() bool { return false }, nil)
 		if code != 0 {
 			t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 		}
@@ -926,7 +1234,7 @@ func TestRunKill(t *testing.T) {
 	t.Run("not running", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		r := &fakeRunner{}
-		code := run([]string{"-config", path, "-kill"}, &stdout, &stderr, r, func() bool { return false }, nil)
+		code := run([]string{"kill", "-config", path}, &stdout, &stderr, r, func() bool { return false }, nil)
 		if code != 1 {
 			t.Errorf("exit code = %d, want 1", code)
 		}

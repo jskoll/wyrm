@@ -5,26 +5,28 @@ root = "."
 
 [[windows]]
 name = "editor"
-layout = "main-vertical"
 
-[[windows.panes]]
-command = "nvim"
+  [[windows.splits]]
+  command = "nvim"
 
-[[windows.panes]]
-command = "# venv: source venv/bin/activate"
+  [[windows.splits]]
+  type = "h"          # split right: a shell for one-off commands, 30%
+  size = 30
+  command = "# venv: source venv/bin/activate"
 
 [[windows]]
 name = "test"
-layout = "tiled"
 
-[[windows.panes]]
-command = "pytest -v --tb=short"
+  [[windows.splits]]
+  command = "pytest -v --tb=short"
 
-[[windows.panes]]
-command = "# coverage or lint"
+  [[windows.splits]]
+  type = "v"          # split below: half the height
+  size = 50
+  command = "# coverage or lint"
 
 [[windows]]
 name = "repl"
 
-[[windows.panes]]
-command = "python"
+  [[windows.splits]]
+  command = "python"

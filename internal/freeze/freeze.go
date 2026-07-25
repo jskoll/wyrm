@@ -8,10 +8,45 @@ package freeze
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/jskoll/wyrm/internal/config"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
+
+// shells are the pane commands treated as "no command": a pane sitting at an
+// idle prompt. Writing the shell's own name as the pane's command would type
+// "zsh"↵ into a shell on every rebuild, nesting a second one in every idle
+// pane — so leaving the session then took two exits per pane.
+var shells = map[string]bool{
+	"bash": true, "zsh": true, "sh": true, "fish": true,
+	"dash": true, "ksh": true, "tcsh": true, "csh": true, "nu": true,
+	"elvish": true, "xonsh": true, "ash": true,
+}
+
+// isShell reports whether a pane's foreground command is just a shell prompt.
+// $SHELL is honored too, for a shell not in the list above.
+func isShell(command string) bool {
+	name := strings.TrimPrefix(strings.TrimSpace(command), "-") // login shells appear as "-zsh"
+	if name == "" {
+		return true
+	}
+	if shells[name] {
+		return true
+	}
+	return filepath.Base(os.Getenv("SHELL")) == name
+}
+
+// paneCommand is the command to record for a pane, blank for an idle shell.
+func paneCommand(commands map[string]string, paneID string) string {
+	cmd := commands[paneID]
+	if isShell(cmd) {
+		return ""
+	}
+	return cmd
+}
 
 // Config builds a wyrm config.Config snapshotting the live layout of the
 // tmux session identified by sessionID (a tmux session ID, e.g. "$3").

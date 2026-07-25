@@ -4,3 +4,5 @@ coverage.out
 .DS_Store
 site/
 .venv-docs/
+# wyrm's own dogfood session config; not part of the shipped project.
+.wyrm.toml

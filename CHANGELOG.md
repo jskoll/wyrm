@@ -6,6 +6,193 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `wyrm restart` stops the session and builds it again from the current
+  config — previously `wyrm kill && wyrm`.
+- `wyrm <name>` now falls back to *starting* a known project when no session
+  by that name is running, looking through the local and shared configs. This
+  is what makes `storage = "shared"` useful: any project can be started from
+  anywhere, without `cd`-ing to it first.
+- `wyrm kill <name>` kills a session by name, running its `on_project_exit`
+  hook when wyrm can find the matching config. Previously `kill` could only
+  target the current folder's session.
+- `wyrm up -n` prints the tmux commands a build would issue, without running
+  any of them or consulting a running session.
+- `wyrm` reports which config it resolved (on stderr) before building.
+  Discovery has five layers; an unexpected session was otherwise unexplainable.
+- Config validation now emits warnings for config that builds but probably
+  doesn't do what was meant: `layout` set alongside `splits` (it's ignored),
+  `splits` and `panes` both set, a first split entry with a `type` (it leaves
+  the window's initial pane empty), and use of the deprecated flat `panes`
+  list or the `.tmuxconfig` filename.
+- The TUI gained `/` to filter the focused panel, `PgUp`/`PgDn`/`g`/`G`
+  navigation, and a 3-second refresh of the project and session lists.
+- `wyrm save -config PATH` writes to PATH instead of the resolved location,
+  for symmetry with `up`/`kill`/`validate`/`edit`.
+- A mistyped subcommand that falls through to attach-by-name and finds no
+  matching session now hints at the nearest real subcommand, e.g.
+  `wyrm klil` suggests `kill`.
+
+### Changed
+- **BREAKING:** nested splits are now created breadth-first — every entry at a
+  level is created before wyrm descends into any of their `children`. A
+  `size` is therefore a share of the space its own level was given, rather
+  than of whatever an earlier sibling's children happened to leave behind.
+  This makes `wyrm save` → `wyrm` a faithful round trip for nested layouts,
+  which it was not: a container that wasn't the last sibling rebuilt to a
+  visibly different window. Hand-written configs that were tuned against the
+  old sequential behavior may need their `size` values revisited.
+- **BREAKING:** `session.root` now expands a leading `~`, and errors on an
+  undefined `$VAR` instead of silently expanding it to an empty string.
+  `root = "~/code/app"` previously produced a literal directory named `~`,
+  and `root = "$UNSET/api"` silently became `/api`.
+- **BREAKING:** a relative `session.root` resolves against the directory the
+  config was loaded from, not the process's working directory. Starting a
+  project from the TUI (or now `wyrm <name>`) rooted the session wherever the
+  user happened to be standing rather than at the project.
+- **BREAKING:** a config with no `[[windows]]` is now a validation error.
+  `wyrm validate` used to bless configs that `wyrm` would then refuse.
+- **BREAKING:** `wyrm list` with an unknown `-format` exits 2, like any other
+  bad flag value, rather than 1.
+- Subcommands now reject stray positional arguments. `wyrm list json` — which
+  looks like it should work — silently printed the default table format.
+- `wyrm pick`: `Ctrl-X` now asks for confirmation before killing a session,
+  matching the TUI. `Delete` no longer kills a session at all: it was
+  unconfirmed, undocumented, and sat one key away from Home and End.
+- **BREAKING:** the CLI moved from top-level flags to git-style subcommands.
+  `wyrm -kill` → `wyrm kill`, `-pick` → `pick`, `-tui` → `tui`, `-save` →
+  `save`, `-edit` → `edit`, `-validate` → `validate`, `-list` → `list`,
+  `-list-configs` → `list-configs`, `-migrate-config` → `migrate-config`,
+  `-version` → `version`. Per-mode flags now sit on their subcommand
+  (`wyrm kill -config PATH`, `wyrm list -format json`). Bare `wyrm`,
+  `wyrm <name>`, and `wyrm -config PATH` are unchanged, and a new `wyrm up`
+  spells out the default build/attach. As a side effect, modes can no longer
+  be combined or silently ignored — each subcommand parses only its own flags,
+  and `wyrm help` / `wyrm <cmd> -h` document them.
+- Lifecycle hooks (`on_project_start` / `on_project_exit`) now run via `$SHELL`
+  (falling back to `sh`) instead of a hardcoded `bash`, so they work on systems
+  without bash and honor the user's shell.
+- Each subcommand's `-h` now prints its one-line synopsis before its flags,
+  instead of a bare stdlib flag dump with no context.
+- `wyrm version`'s unstamped-build format changed from `dev (rev)` to
+  `dev+rev`, matching semver's `+build-metadata` convention so tooling that
+  greps for a semver-ish token isn't thrown by the parentheses.
+
+### Fixed
+- A parse error in the user's `~/.tmux.conf` no longer corrupts the session.
+  `new-session` is the command that starts the tmux server, so the server's
+  config errors landed on stderr at exactly the moment wyrm was parsing that
+  command's `-F` output — and the field count still matched, so the check
+  passed and every later command targeted a session ID with a diagnostic glued
+  to the front of it. wyrm now reads stdout only, and validates every tmux
+  object ID it parses.
+- A freshly built session opens on its **first** window, focused on that
+  window's first pane, as documented. Windows and splits were created without
+  `-d`, so tmux made each new one current and the session landed on the *last*
+  window in the config.
+- `pre_window` now runs exactly once in every pane of the window, as
+  documented. It was emitted per split-tree *entry*, which both skipped panes
+  (a first entry with a `type` left the window's initial pane untouched) and
+  repeated itself (a nested container reuses its parent's pane, so a two-level
+  nest typed it twice).
+- Pane commands are sent with `send-keys -l --`, so a command that happens to
+  be a tmux key name is typed rather than pressed. `command = "up"` used to
+  press the Up arrow and Enter, re-running the previous shell history entry;
+  a command starting with `-` was parsed as a flag.
+- A build that fails partway through now tears the half-built session down.
+  It used to be left running, so the next `wyrm` found it, reported "already
+  running, attaching", and handed over a session missing most of its windows
+  with no sign anything had gone wrong.
+- wyrm now reports the session name tmux actually assigned. Some tmux builds
+  rewrite `.` and `:` to `_`, so a project in a directory called `example.com`
+  became the session `example_com` — after which the next run couldn't find
+  it, tried to create a duplicate, and failed, and `wyrm kill` could never
+  find it at all. Session lookup also falls back to the sanitized form.
+- `wyrm save` no longer records an idle shell as a pane's command. Replaying
+  `zsh` into a shell nested a second one in every idle pane, so leaving the
+  session took two exits per pane.
+- `wyrm save` writes an absolute `session.root` (and says so) when the
+  session's own directory isn't where the config is being written, instead of
+  always writing `.`.
+- The shared config directory now honors `$XDG_CONFIG_HOME`, like the settings
+  file next to it. The default was hardcoded to `~/.config/wyrm/settings`, so
+  a user with `XDG_CONFIG_HOME` set had wyrm read settings from one place and
+  look for shared configs in another.
+- `wyrm tui`: the selected row is highlighted across its whole width. lipgloss
+  ends every styled run with a full SGR reset and doesn't restore the outer
+  style, so wrapping a row in reverse-video switched it off at the first
+  colored span — the window index was highlighted and the name next to it
+  wasn't, on every row of the Windows and Panes panels.
+- `wyrm tui`: failed actions are reported in the footer. Errors rendered only
+  when the preview happened to be empty — which in normal use it never is — so
+  a failed kill, rename, or new-window looked identical to a successful one.
+- `wyrm tui`: the pane preview shows the *end* of the pane's visible region
+  rather than the beginning, so the prompt and latest output are visible.
+- `wyrm tui`: terminals between 8 and 16 rows no longer render more lines than
+  the screen has, which silently sliced the top panels away — including in the
+  `display-popup -h 80%` recipe the README suggests. The minimum size is now
+  enforced and reported accurately.
+- `wyrm tui`: panel heights are allocated by content instead of in equal
+  quarters, which gave the Panes panel as much room as Sessions and left every
+  list showing two rows at a time in an 80x24 terminal.
+- `wyrm tui`: the selection is visible in unfocused panels, so the session and
+  window a pane belongs to stay readable while the cursor is elsewhere.
+- `wyrm tui`: `n`, `z`, and `L` only act on the panels whose footer advertises
+  them; they previously fired from any panel, acting on a selection in a panel
+  that didn't have focus.
+- `wyrm tui`: `Enter` no longer confirms a kill — `x` followed by a reflexive
+  `Enter` destroyed a session. Only `y` confirms.
+- `wyrm tui`: the layout cycle (`L`) restarts per window, so the first press
+  on a window always changes something. The rename prompt has a width, so a
+  long name no longer scrolls the cursor off the screen.
+- `wyrm pick`: `SIGTERM`/`SIGHUP` restore the terminal instead of leaving it in
+  raw mode with the cursor hidden — reachable via `pkill wyrm`, closing the
+  terminal, or killing the tmux pane it ran in. `SIGWINCH` now redraws.
+- `wyrm pick`: navigation keys no longer leak into the fuzzy filter. Only the
+  first byte of an escape sequence was consumed, so Home, End, PgUp, and PgDn
+  each typed a `~`, and a shifted arrow typed `;2A`.
+- `wyrm pick`: session names are padded and truncated by display width rather
+  than rune count, so a CJK or emoji name doesn't break the column alignment
+  and a long name no longer runs over the window count and attached marker.
+- `wyrm edit -config new/dir/x.toml` creates the parent directory, as the
+  flagless form already did, instead of handing the editor an unwritable path.
+- `wyrm edit` returns 1 rather than 255 when the editor is killed by a signal.
+- Lifecycle hook output is streamed to stderr and the hook is announced before
+  it runs. Output was captured and discarded unless the hook failed, so a slow
+  `on_project_start` blocked wyrm behind a blank screen.
+- `startup_window` / `startup_pane` are now resolved to tmux object IDs
+  (`@window`, `%pane`) via `list-windows`/`list-panes` before being targeted,
+  instead of being interpolated into a `session:window.pane` string. A window
+  name containing `.` (e.g. `app.web`) was previously misparsed by tmux's `-t`
+  syntax — the same hazard already guarded against for session names.
+- `wyrm tui`: pane-preview colors are preserved (`capture-pane -e`), so the
+  live preview reflects the pane's real colors instead of flattening them.
+
+### Deprecated
+- The flat `[[windows.panes]]` list and the `.tmuxconfig` filename are slated
+  for removal in 1.0. Use the `splits` tree and `.wyrm.toml`; `wyrm save` only
+  emits `splits`.
+
+### Internal
+- Project discovery moved into `internal/config` and is now shared by the TUI's
+  Projects panel and `wyrm <name>` instead of living only in the TUI.
+- The "no server running" probe and the tmux ID shapes are defined once in
+  `internal/tmux`, rather than duplicated between it and `internal/picker`.
+- CI runs `-race`, reports coverage, and builds the release artifacts on every
+  PR so a broken `.goreleaser.yaml` is caught before tag time.
+- New tests cover the areas that couldn't previously fail: pane *geometry* for
+  nested splits (including a `save` → `up` round trip against a real tmux),
+  the selection highlight (rendered with a forced color profile, since lipgloss
+  degrades to plain text in a non-TTY test process), and the session-level
+  kill/rename actions, which had no coverage anywhere.
+- The three shipped examples that taught the deprecated flat `panes` format
+  now use the `splits` tree; `basic.wyrm.toml` keeps it as a labelled
+  reference. A test loads every shipped example so they can't rot.
+- Shell completions (bash/zsh/fish) rewritten for the subcommand surface.
+- Added Dependabot (Go modules + GitHub Actions, monthly, grouped).
+- `wyrm version` on an unstamped `go install` now reports the VCS revision from
+  the build info instead of a bare `dev`.
+
 ## [0.2.1] - 2026-07-24
 
 ### Fixed

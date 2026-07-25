@@ -57,26 +57,34 @@ Or build from a clone: `make install` (uses `go install` with a stamped version)
 
 ```sh
 wyrm                       # use .wyrm.toml (or legacy .tmuxconfig) in the cwd
-wyrm <name>                # attach/switch directly to a running session by name (tab-completable)
+wyrm up -n                 # dry run: print the tmux commands, touch nothing
+wyrm <name>                # attach to a running session, or start a known project, by name
 wyrm -config path/to/file  # explicit config
-wyrm -kill                 # destroy the session (runs on_project_exit first)
-wyrm -pick                 # fuzzy-pick a running session and attach to it
-wyrm -tui                  # full-screen session manager (browse, preview, kill, rename, start)
-wyrm -save                 # save the running session's layout as this folder's config
-wyrm -edit                 # open the resolved config in $EDITOR, creating one if needed
-wyrm -validate             # check the effective config parses and validates, without building a session
-wyrm -list                 # list running tmux sessions non-interactively
-wyrm -list-configs         # list candidate config file paths (used by shell completion)
-wyrm -migrate-config       # move the local config into the shared config directory
-wyrm -version
+wyrm restart              # stop the session and build it again from the config
+wyrm kill [name]          # destroy the session (runs on_project_exit first)
+wyrm pick                 # fuzzy-pick a running session and attach to it
+wyrm tui                  # full-screen session manager (browse, preview, kill, rename, start)
+wyrm save                 # save the running session's layout as this folder's config
+wyrm edit                 # open the resolved config in $EDITOR, creating one if needed
+wyrm validate             # check the effective config parses and validates, without building a session
+wyrm list                 # list running tmux sessions non-interactively
+wyrm list-configs         # list candidate config file paths (used by shell completion)
+wyrm migrate-config       # move the local config into the shared config directory
+wyrm version
 ```
+
+`wyrm <name>` first looks for a *running* session by that exact name and
+attaches to it. Failing that, it looks for a *config* by that name — local or
+in the shared directory — and builds it, so any project can be started from
+anywhere without `cd`-ing to it first. wyrm always reports which config it
+resolved on stderr.
 
 If neither `.wyrm.toml` nor `.tmuxconfig` is found, wyrm falls back to
 `~/.config/wyrm/default.wyrm.toml` if you've created one, otherwise a
 built-in default: a single unnamed window rooted at the current directory.
 This always builds (or attaches to) a session for the current folder, even
 if unrelated sessions are already running elsewhere — the interactive
-picker (below) is only ever shown when you ask for it with `-pick`.
+picker (below) is only ever shown when you ask for it with `pick`.
 
 If a session with the same name is already running, wyrm **reattaches** to
 it instead of rebuilding it. Otherwise it builds the session fresh, then
@@ -87,31 +95,31 @@ session instead of nesting one tmux inside another.
 
 ## Editing, validating, and listing
 
-`wyrm -edit` opens the config wyrm would actually use — wherever discovery
+`wyrm edit` opens the config wyrm would actually use — wherever discovery
 (local, shared, or `-config`) finds it — in `$EDITOR` (falling back to
 `vi`). If none exists yet, it creates one at the right spot for your
-`storage` setting (a local `.wyrm.toml`, or the shared path `-migrate-config`
+`storage` setting (a local `.wyrm.toml`, or the shared path `migrate-config`
 would use) before opening it. After you save, wyrm re-parses the file and
 prints a warning (not an error) if it doesn't validate — you're free to save
 a work-in-progress and fix it later.
 
-`wyrm -validate` runs that same parse-and-validate check non-interactively,
+`wyrm validate` runs that same parse-and-validate check non-interactively,
 without opening an editor or building a session — handy in a pre-commit hook
 or CI for a repo that versions its `.wyrm.toml`.
 
-`wyrm -list` prints the running tmux sessions non-interactively (unlike
-`-pick`, no interactive UI) for scripts and status bars. Add `-format json`
+`wyrm list` prints the running tmux sessions non-interactively (unlike
+`pick`, no interactive UI) for scripts and status bars. Add `-format json`
 or `-format toml` for machine-readable output, or `-format names` for a bare
 newline-separated list (handy for piping into `fzf` or another tool),
 instead of the default aligned table:
 
 ```sh
-wyrm -list                  # name / window count / attached marker, one per line
-wyrm -list -format json | jq .
-wyrm -list -format names | fzf | xargs wyrm
+wyrm list                  # name / window count / attached marker, one per line
+wyrm list -format json | jq .
+wyrm list -format names | fzf | xargs wyrm
 ```
 
-`wyrm -list-configs` prints the config file paths wyrm knows about — the
+`wyrm list-configs` prints the config file paths wyrm knows about — the
 local file (if present) and every config in the shared directory (see the
 [configuration reference](configuration.md)) — regardless of the current
 `storage` setting. It exists mainly to back shell completion for `-config`,
@@ -119,7 +127,7 @@ but works standalone too.
 
 ## Picking a running session
 
-`wyrm -pick` opens an interactive, fuzzy list of the running tmux sessions
+`wyrm pick` opens an interactive, fuzzy list of the running tmux sessions
 (most-recently-active first) and attaches to the one you choose — handy from a
 plain shell, where tmux's own `choose-tree` isn't available because you aren't
 attached to a client yet.
@@ -154,7 +162,7 @@ to bind it to a key while attached to a session:
 
 ```tmux
 # ~/.tmux.conf — prefix + y opens the session picker in a popup
-bind y display-popup -d "#{pane_current_path}" -w 50% -h 50% -E "wyrm -pick"
+bind y display-popup -d "#{pane_current_path}" -w 50% -h 50% -E "wyrm pick"
 ```
 
 The picker redraws in place and clips over-long rows to the popup's width, so
@@ -187,8 +195,8 @@ tab-completes to real running session names.
 
 ## The session manager TUI
 
-`wyrm -tui` opens a full-screen, keyboard-driven session manager in the spirit
-of lazygit. Where `-pick` is a one-shot "choose and attach", the TUI is for
+`wyrm tui` opens a full-screen, keyboard-driven session manager in the spirit
+of lazygit. Where `pick` is a one-shot "choose and attach", the TUI is for
 _browsing and managing_ everything at once — your project configs, the running
 sessions, and the windows and panes inside them — with a live preview of the
 selected pane.
@@ -235,7 +243,7 @@ session panels, or the config file's contents on the Projects panel.
 Press `?` at any time for a full-screen cheat sheet of every binding — laid out
 in two columns, or one on a narrow terminal, and scrollable (`↑`/`↓` or `j`/`k`,
 `Esc` to close) when it's taller than the screen. Like
-`-pick`, attaching from the TUI uses `switch-client` when you're already inside
+`pick`, attaching from the TUI uses `switch-client` when you're already inside
 tmux and `attach-session` otherwise. When run inside tmux, the pane the TUI
 itself occupies shows a placeholder instead of a preview, to avoid capturing the
 TUI into its own view. It also pairs well with tmux's `display-popup` for a
@@ -243,23 +251,24 @@ floating session manager over your current work:
 
 ```sh
 # ~/.tmux.conf — prefix + g opens the session manager in a popup
-bind g display-popup -d "#{pane_current_path}" -w 80% -h 80% -E "wyrm -tui"
+bind g display-popup -d "#{pane_current_path}" -w 80% -h 80% -E "wyrm tui"
 ```
 
 The TUI is the one part of wyrm built on the [Charm](https://charm.sh) stack
-(Bubble Tea / Lipgloss); the core build/attach path and `-pick` remain
+(Bubble Tea / Lipgloss); the core build/attach path and `pick` remain
 dependency-free.
 
 ## Saving a running session
 
-`wyrm -save` snapshots a running tmux session's windows, split layout, and
+`wyrm save` snapshots a running tmux session's windows, split layout, and
 sizes into a new config for the current folder — the reverse of building a
 session from one. Run it from inside the session you want to capture, or
 from a plain shell in the session's folder (it looks up the session the same
 way a bare `wyrm` would).
 
 ```sh
-wyrm -save                  # writes .wyrm.toml (or the shared-storage path)
+wyrm save                  # writes .wyrm.toml (or the shared-storage path)
+wyrm save -config PATH     # write to PATH instead of the resolved location
 ```
 
 tmux keeps no record of what was originally typed into a pane, so each
@@ -268,9 +277,9 @@ that pane's foreground (`nvim`, `npm`, ...) — the same approach tools like
 tmuxp's `freeze` use. That's usually enough to relaunch the same programs,
 but it won't recover one-off shell commands that have already finished, and
 it can't capture `pre_window`, `on_project_start`/`on_project_exit`, or
-comments — those are yours to add by hand afterward, e.g. with `wyrm -edit`.
+comments — those are yours to add by hand afterward, e.g. with `wyrm edit`.
 
-Like `-migrate-config`, `-save` refuses to overwrite an existing config
+Like `migrate-config`, `save` refuses to overwrite an existing config
 rather than silently discarding hooks or comments you've already written —
 remove or rename the file first if you want to re-save over it.
 
@@ -279,8 +288,8 @@ remove or rename the file first if you want to re-save over it.
 Completion scripts for bash, zsh, and fish live in
 [`completions/`](https://github.com/jskoll/wyrm/tree/main/completions).
 They complete flag names, `-format`'s values, `-config` (to the local file
-and every config in the shared directory, via `wyrm -list-configs`), and a
-bare argument (to running session names, via `wyrm -list -format names`) —
+and every config in the shared directory, via `wyrm list-configs`), and a
+bare argument (to running session names, via `wyrm list -format names`) —
 so any completion involving live state shells back out to wyrm itself
 rather than guessing.
 

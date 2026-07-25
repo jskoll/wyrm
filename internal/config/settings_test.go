@@ -138,7 +138,7 @@ func TestLoadUserDefaultPresent(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	content := "[session]\nname = \"my-default\"\nroot = \".\"\n"
+	content := "[session]\nname = \"my-default\"\nroot = \".\"\n\n[[windows]]\nname = \"main\"\n"
 	if err := os.WriteFile(filepath.Join(dir, UserDefaultFileName), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}

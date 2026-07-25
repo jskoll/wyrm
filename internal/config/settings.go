@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -17,9 +16,23 @@ const SettingsFileName = "config.toml"
 // default config, stored alongside SettingsFileName.
 const UserDefaultFileName = "default.wyrm.toml"
 
-// DefaultSharedDir is used as the shared config directory when Settings.SharedDir
-// is unset.
+// DefaultSharedDir is the shared config directory used when
+// Settings.SharedDir is unset, for documentation and error messages. The
+// resolved path comes from defaultSharedDir, which honors $XDG_CONFIG_HOME.
 const DefaultSharedDir = "~/.config/wyrm/settings"
+
+// defaultSharedDir returns the shared config directory to use when none is
+// configured: alongside the settings file, so it follows $XDG_CONFIG_HOME the
+// same way SettingsPath does. Hardcoding "~/.config" meant a user with
+// XDG_CONFIG_HOME set had their settings read from one place and their shared
+// configs looked for in another.
+func defaultSharedDir() (string, error) {
+	dir, err := configDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "wyrm", "settings"), nil
+}
 
 // Storage selects where wyrm looks for a project's config file.
 type Storage string
@@ -115,17 +128,16 @@ func LoadSettings() (*Settings, error) {
 // ResolvedSharedDir returns the absolute shared config directory, expanding
 // "~" and $VARS and defaulting to DefaultSharedDir when unset.
 func (s *Settings) ResolvedSharedDir() (string, error) {
-	dir := s.SharedDir
-	if dir == "" {
-		dir = DefaultSharedDir
-	}
-	dir = os.ExpandEnv(dir)
-	if dir == "~" || strings.HasPrefix(dir, "~/") {
-		home, err := os.UserHomeDir()
+	if s.SharedDir == "" {
+		dir, err := defaultSharedDir()
 		if err != nil {
 			return "", err
 		}
-		dir = filepath.Join(home, strings.TrimPrefix(dir, "~"))
+		return filepath.Abs(dir)
+	}
+	dir, err := ExpandPath(s.SharedDir)
+	if err != nil {
+		return "", fmt.Errorf("resolving shared_dir: %w", err)
 	}
 	return filepath.Abs(dir)
 }
@@ -145,7 +157,7 @@ func (s *Settings) SharedConfigPath(dir string) (string, error) {
 	return filepath.Join(sharedDir, filepath.Base(abs)+DefaultFileName), nil
 }
 
-// EditTarget returns the path wyrm -edit should open: the discovered config
+// EditTarget returns the path wyrm edit should open: the discovered config
 // if one exists, otherwise the path a new one should be created at per
 // settings.Storage — the shared path (mirroring -migrate-config's
 // destination) in shared mode, DefaultFileName in the cwd otherwise.

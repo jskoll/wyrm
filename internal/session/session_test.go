@@ -21,6 +21,11 @@ type fakeRunner struct {
 	winSeq  int
 	paneSeq int
 
+	// sessionName is what new-session reports back as #{session_name}. Empty
+	// means "whatever was asked for", i.e. the -s argument — the normal case.
+	// Setting it simulates the tmux builds that rewrite "." and ":" to "_".
+	sessionName string
+
 	// fail forces the named command (args[0]) to return an error.
 	fail map[string]bool
 	// badNewSessionOutput makes new-session/new-window return output with
@@ -28,6 +33,12 @@ type fakeRunner struct {
 	badNewSessionOutput bool
 	// listOutput is returned verbatim for "list-sessions" calls.
 	listOutput string
+	// listWindowsOutput backs "list-windows" (selectStartup's window lookup),
+	// in the id-ordered "index|@id|active|layout|name" format ListWindows parses.
+	listWindowsOutput string
+	// listPanesOutput backs "list-panes", keyed by the -t target (a window ID
+	// such as "@2"), in the "%id|index|active|command" format ListPanes parses.
+	listPanesOutput map[string]string
 }
 
 func (f *fakeRunner) Run(args ...string) (string, error) {
@@ -42,7 +53,15 @@ func (f *fakeRunner) Run(args ...string) (string, error) {
 		if f.badNewSessionOutput {
 			return "malformed", nil
 		}
-		return fmt.Sprintf("$1|@%d|%%%d", f.winSeq, f.paneSeq), nil
+		name := f.sessionName
+		if name == "" {
+			for i, a := range args {
+				if a == "-s" && i+1 < len(args) {
+					name = args[i+1]
+				}
+			}
+		}
+		return fmt.Sprintf("$1|%s|@%d|%%%d", name, f.winSeq, f.paneSeq), nil
 	case "new-window":
 		f.winSeq++
 		f.paneSeq++
@@ -55,6 +74,10 @@ func (f *fakeRunner) Run(args ...string) (string, error) {
 		return fmt.Sprintf("%%%d", f.paneSeq), nil
 	case "list-sessions":
 		return f.listOutput, nil
+	case "list-windows":
+		return f.listWindowsOutput, nil
+	case "list-panes":
+		return f.listPanesOutput[args[2]], nil
 	}
 	return "", nil
 }
@@ -98,20 +121,33 @@ func TestCreateSplitTree(t *testing.T) {
 		t.Error("created = false, want true")
 	}
 
+	// Note the ordering: both siblings at the top level are created before
+	// the nested child, so the child splits %2 at its full size rather than
+	// after a later sibling has already carved it up. pre_window is typed once
+	// per pane, and every command goes through "send-keys -l --" plus a
+	// separate Enter so a command that looks like a key name is still typed.
 	want := []string{
 		"list-sessions -F #{session_id}|#{session_name}",
-		"new-session -d -P -F #{session_id}|#{window_id}|#{pane_id} -s proj -n editor -c /tmp/proj",
+		"new-session -d -P -F #{session_id}|#{session_name}|#{window_id}|#{pane_id} -s proj -n editor -c /tmp/proj",
+		// second entry splits the initial pane %1 -> %2 (breadth first)
+		"split-window -d -t %1 -h -P -F #{pane_id} -l 30%",
 		// first split entry: no type, reuses initial pane %1
-		"send-keys -t %1 nvm use 18 Enter",
-		"send-keys -t %1 nvim Enter",
-		// second entry splits %1 -> %2, gets pre_window + command
-		"split-window -t %1 -h -P -F #{pane_id} -l 30%",
-		"send-keys -t %2 nvm use 18 Enter",
-		"send-keys -t %2 npm run dev Enter",
+		"send-keys -t %1 -l -- nvm use 18",
+		"send-keys -t %1 Enter",
+		"send-keys -t %1 -l -- nvim",
+		"send-keys -t %1 Enter",
+		"send-keys -t %2 -l -- nvm use 18",
+		"send-keys -t %2 Enter",
+		"send-keys -t %2 -l -- npm run dev",
+		"send-keys -t %2 Enter",
 		// child splits its parent %2 -> %3
-		"split-window -t %2 -v -P -F #{pane_id}",
-		"send-keys -t %3 nvm use 18 Enter",
-		"send-keys -t %3 npm test Enter",
+		"split-window -d -t %2 -v -P -F #{pane_id}",
+		"send-keys -t %3 -l -- nvm use 18",
+		"send-keys -t %3 Enter",
+		"send-keys -t %3 -l -- npm test",
+		"send-keys -t %3 Enter",
+		// no startup_window: land on the first window explicitly
+		"select-window -t @1",
 	}
 	got := r.joined()
 	if len(got) != len(want) {
@@ -144,10 +180,10 @@ func TestCreateLegacyPanes(t *testing.T) {
 
 	got := strings.Join(r.joined(), "\n")
 	for _, want := range []string{
-		"send-keys -t %1 npm test Enter",
-		"split-window -t %1 -h -P -F #{pane_id}",
-		"send-keys -t %2 npm run lint Enter",
-		"split-window -t %2 -v -P -F #{pane_id}",
+		"send-keys -t %1 -l -- npm test",
+		"split-window -d -t %1 -h -P -F #{pane_id}",
+		"send-keys -t %2 -l -- npm run lint",
+		"split-window -d -t %2 -v -P -F #{pane_id}",
 		"select-layout -t @1 tiled",
 	} {
 		if !strings.Contains(got, want) {
@@ -170,7 +206,13 @@ func TestCreateMultipleWindowsAndStartup(t *testing.T) {
 		},
 	}
 
-	r := &fakeRunner{}
+	// selectStartup resolves the window/pane to their tmux IDs via
+	// list-windows/list-panes: window "second" is @2, and its pane at index 1
+	// is %2.
+	r := &fakeRunner{
+		listWindowsOutput: "0|@1|0|layout|first\n1|@2|1|layout|second",
+		listPanesOutput:   map[string]string{"@2": "%2|1|1|zsh"},
+	}
 	_, sessionID, _, err := Create(r, cfg, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -178,13 +220,38 @@ func TestCreateMultipleWindowsAndStartup(t *testing.T) {
 
 	got := strings.Join(r.joined(), "\n")
 	for _, want := range []string{
-		"new-session -d -P -F #{session_id}|#{window_id}|#{pane_id} -s proj -n first -c /tmp/proj",
-		"new-window -P -F #{window_id}|#{pane_id} -t " + sessionID + " -n second -c /tmp/proj",
-		"select-window -t " + sessionID + ":second",
-		"select-pane -t " + sessionID + ":second.1",
+		"new-session -d -P -F #{session_id}|#{session_name}|#{window_id}|#{pane_id} -s proj -n first -c /tmp/proj",
+		"new-window -d -P -F #{window_id}|#{pane_id} -t " + sessionID + " -n second -c /tmp/proj",
+		"select-window -t @2",
+		"select-pane -t %2",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing call %q in:\n%s", want, got)
+		}
+	}
+}
+
+// TestCreateStartupWindowWithDot guards against the "." misparse: a window
+// named "app.web" must be targeted by its @id, never by "session:app.web"
+// (which tmux would read as window "app", pane "web").
+func TestCreateStartupWindowWithDot(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj", StartupWindow: "app.web"},
+		Windows: []config.Window{{Name: "app.web"}},
+	}
+	r := &fakeRunner{listWindowsOutput: "0|@1|1|layout|app.web"}
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got := strings.Join(r.joined(), "\n")
+	if !strings.Contains(got, "select-window -t @1") {
+		t.Errorf("want select-window targeting the window ID @1, got:\n%s", got)
+	}
+	for _, c := range r.calls {
+		for i, arg := range c {
+			if i > 0 && c[i-1] == "-t" && strings.Contains(arg, "app.web") {
+				t.Errorf("call %v targets the raw dotted window name instead of an ID", c)
+			}
 		}
 	}
 }
@@ -381,7 +448,7 @@ func TestCreatePreWindowOnly(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	got := r.joined()
-	want := "send-keys -t %1 echo hi Enter"
+	want := "send-keys -t %1 -l -- echo hi"
 	count := 0
 	for _, c := range got {
 		if c == want {
@@ -434,7 +501,7 @@ func TestApplyPanesSplitError(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	got := strings.Join(r.joined(), "\n")
-	if !strings.Contains(got, "send-keys -t %1 first Enter") {
+	if !strings.Contains(got, "send-keys -t %1 -l -- first") {
 		t.Errorf("missing first pane command:\n%s", got)
 	}
 	if strings.Contains(got, "should-not-run") {
@@ -467,18 +534,19 @@ func TestSendKeysError(t *testing.T) {
 	}
 }
 
-func TestSelectStartupInvalidWindowName(t *testing.T) {
+func TestSelectStartupWindowNotFound(t *testing.T) {
 	cfg := &config.Config{
-		Session: config.Session{Name: "proj", Root: "/tmp/proj", StartupWindow: "bad;window"},
+		Session: config.Session{Name: "proj", Root: "/tmp/proj", StartupWindow: "missing"},
 		Windows: []config.Window{{Name: "w"}},
 	}
-	r := &fakeRunner{}
+	// The live window list has "w" but not "missing", so no select-window fires.
+	r := &fakeRunner{listWindowsOutput: "0|@1|1|layout|w"}
 	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	got := strings.Join(r.joined(), "\n")
 	if strings.Contains(got, "select-window") {
-		t.Errorf("select-window called for invalid startup_window:\n%s", got)
+		t.Errorf("select-window called for a startup_window that isn't in the window list:\n%s", got)
 	}
 }
 
@@ -487,7 +555,10 @@ func TestSelectStartupSelectWindowError(t *testing.T) {
 		Session: config.Session{Name: "proj", Root: "/tmp/proj", StartupWindow: "w"},
 		Windows: []config.Window{{Name: "w"}},
 	}
-	r := &fakeRunner{fail: map[string]bool{"select-window": true}}
+	r := &fakeRunner{
+		listWindowsOutput: "0|@1|1|layout|w",
+		fail:              map[string]bool{"select-window": true},
+	}
 	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -503,7 +574,11 @@ func TestSelectStartupSelectPaneError(t *testing.T) {
 		Session: config.Session{Name: "proj", Root: "/tmp/proj", StartupWindow: "w", StartupPane: &pane},
 		Windows: []config.Window{{Name: "w"}},
 	}
-	r := &fakeRunner{fail: map[string]bool{"select-pane": true}}
+	r := &fakeRunner{
+		listWindowsOutput: "0|@1|1|layout|w",
+		listPanesOutput:   map[string]string{"@1": "%1|0|1|zsh"},
+		fail:              map[string]bool{"select-pane": true},
+	}
 	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
 		t.Fatalf("Create: %v", err)
 	}

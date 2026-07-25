@@ -5,8 +5,9 @@ are welcome.
 
 ## Development setup
 
-Requirements: Go 1.21+, tmux (for integration tests), and optionally
-[golangci-lint](https://golangci-lint.run/).
+Requirements: the Go version in `go.mod` (currently 1.24) or newer, tmux 3.1+
+(for integration tests; 3.1 is the floor for `split-window -l N%`), and
+optionally [golangci-lint](https://golangci-lint.run/).
 
 ```sh
 git clone https://github.com/jskoll/wyrm && cd wyrm
@@ -22,11 +23,19 @@ The integration tests run a real tmux server on an isolated socket
 ## Layout
 
 ```
-main.go            flags + wiring only
-internal/config/   TOML types, parsing, validation
-internal/tmux/     Runner interface + real exec implementation
-internal/session/  session creation/teardown logic (tested against a mock Runner)
+main.go            subcommand dispatch + wiring only
+internal/config/   TOML types, parsing, validation, settings, project discovery
+internal/tmux/     Runner interface, real exec implementation, dry-run recorder
+internal/session/  session creation/teardown (tested against a mock Runner)
+internal/freeze/   the reverse of session: a live tmux layout -> a config
+internal/picker/   the dependency-free raw-terminal fuzzy picker (wyrm pick)
+internal/tui/      the Bubble Tea session manager (wyrm tui)
 ```
+
+Everything that talks to tmux goes through `tmux.Runner`, so it can be driven
+by a recording mock in tests. `main.run` takes its stdio, runner, and attach
+function as parameters for the same reason — the whole CLI is testable without
+a tmux server.
 
 New behavior should come with a unit test against the mocked `tmux.Runner`
 (assert the exact command sequence) and, where it changes real tmux

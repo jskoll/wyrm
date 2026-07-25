@@ -5,21 +5,24 @@
 # Homebrew's bash-completion, /etc/bash_completion.d/ on most Linux distros).
 # `brew install jskoll/tap/wyrm` installs it automatically.
 #
-# Dynamic completions shell out to wyrm itself, reusing its own config
-# discovery and tmux session listing rather than reimplementing them here:
-#   -config  -> `wyrm -list-configs`       (local + shared config file paths)
-#   -format  -> static: table json toml names
-#   bare arg -> `wyrm -list -format names` (running session names, for
-#                `wyrm <name>` — see the wyrm(1) usage for what that does)
+# wyrm uses git-style subcommands (`wyrm kill`, `wyrm list`, ...). Dynamic
+# completions shell out to wyrm itself, reusing its own config discovery and
+# tmux session listing rather than reimplementing them here:
+#   -config      -> `wyrm list-configs`      (local + shared config file paths)
+#   -format      -> static: table json toml names
+#   first token  -> subcommands + `wyrm list -format names` (running session
+#                   names, since a bare `wyrm <name>` attaches by name)
 
 _wyrm_complete() {
-    local cur prev
+    local cur prev cmd
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
+    cmd="${COMP_WORDS[1]}"
 
+    # Flag-value completions, wherever the flag appears.
     case "$prev" in
         -config)
-            COMPREPLY=($(compgen -W "$(wyrm -list-configs 2>/dev/null)" -- "$cur"))
+            COMPREPLY=($(compgen -W "$(wyrm list-configs 2>/dev/null)" -- "$cur"))
             return
             ;;
         -format)
@@ -28,12 +31,27 @@ _wyrm_complete() {
             ;;
     esac
 
-    if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "-config -kill -pick -tui -save -version -migrate-config -validate -list -format -edit -list-configs" -- "$cur"))
+    local subcommands="up restart kill pick tui save edit validate list list-configs migrate-config version help"
+
+    # First token: a subcommand, or a running session name to attach to.
+    if [[ "$COMP_CWORD" -eq 1 ]]; then
+        if [[ "$cur" == -* ]]; then
+            COMPREPLY=($(compgen -W "-config -h -help -version" -- "$cur"))
+        else
+            COMPREPLY=($(compgen -W "$subcommands $(wyrm list -format names 2>/dev/null)" -- "$cur"))
+        fi
         return
     fi
 
-    COMPREPLY=($(compgen -W "$(wyrm -list -format names 2>/dev/null)" -- "$cur"))
+    # Subcommand-specific flags.
+    if [[ "$cur" == -* ]]; then
+        case "$cmd" in
+            up|restart|kill|edit|validate) COMPREPLY=($(compgen -W "-config" -- "$cur")) ;;
+            list) COMPREPLY=($(compgen -W "-format" -- "$cur")) ;;
+            *) COMPREPLY=() ;;
+        esac
+        return
+    fi
 }
 
 complete -F _wyrm_complete wyrm

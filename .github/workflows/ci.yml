@@ -27,7 +27,31 @@ jobs:
             brew install tmux
           fi
       - run: go build ./...
-      - run: go test -v ./...
+      # -race on top of the normal run: the TUI and picker both fan work out to
+      # goroutines (tea.Cmd closures, the picker's key reader), so a data race
+      # is a real possibility rather than a theoretical one.
+      - run: go test -race -v ./...
+      - name: Coverage
+        run: |
+          go test -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out | tail -1
+
+  # Build the release artifacts on every PR, so a broken .goreleaser.yaml is
+  # caught here instead of at tag time when it is most expensive to discover.
+  release-dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> 2"
+          args: release --snapshot --clean --skip=publish
 
   lint:
     runs-on: ubuntu-latest

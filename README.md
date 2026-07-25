@@ -59,56 +59,79 @@ Or build from a clone: `make install` (uses `go install` with a stamped version)
 
 ## Usage
 
+wyrm uses git-style subcommands:
+
 ```sh
-wyrm                       # use .wyrm.toml (or legacy .tmuxconfig) in the cwd
-wyrm <name>                # attach/switch directly to a running session by name (tab-completable)
-wyrm -config path/to/file  # explicit config
-wyrm -kill                 # destroy the session (runs on_project_exit first)
-wyrm -pick                 # fuzzy-pick a running session and attach to it
-wyrm -tui                  # full-screen session manager (browse, preview, kill, rename, start)
-wyrm -save                 # save the running session's layout as this folder's config
-wyrm -edit                 # open the resolved config in $EDITOR, creating one if needed
-wyrm -validate             # check the effective config parses and validates, without building a session
-wyrm -list                 # list running tmux sessions non-interactively
-wyrm -list-configs         # list candidate config file paths (used by shell completion)
-wyrm -migrate-config       # move the local config into the shared config directory
-wyrm -version
+wyrm                        # use .wyrm.toml (or legacy .tmuxconfig) in the cwd
+wyrm up                     # same as bare wyrm, spelled explicitly
+wyrm up -n                  # dry run: print the tmux commands, touch nothing
+wyrm <name>                 # attach to a running session, or start a known project, by name
+wyrm -config path/to/file   # explicit config for the default build
+wyrm restart                # stop the session and build it again from the config
+wyrm kill [name]            # destroy the session (runs on_project_exit first)
+wyrm pick                   # fuzzy-pick a running session and attach to it
+wyrm tui                    # full-screen session manager (browse, preview, kill, rename, start)
+wyrm save                   # save the running session's layout as this folder's config
+wyrm edit                   # open the resolved config in $EDITOR, creating one if needed
+wyrm validate               # check the effective config parses and validates, without building a session
+wyrm list                   # list running tmux sessions non-interactively
+wyrm list-configs           # list candidate config file paths (used by shell completion)
+wyrm migrate-config         # move the local config into the shared config directory
+wyrm version                # print version
+wyrm help                   # usage overview
 ```
+
+Each subcommand takes its own flags — e.g. `wyrm kill -config path`,
+`wyrm list -format json`. Run `wyrm <cmd> -h` to see them.
+
+> **Note (breaking change in 0.3.0):** modes moved from top-level flags to
+> subcommands — `wyrm -kill` is now `wyrm kill`, `wyrm -list` is now
+> `wyrm list`, and so on. Bare `wyrm`, `wyrm <name>`, and `wyrm -config PATH`
+> are unchanged.
+
+`wyrm <name>` first looks for a *running* session by that exact name and
+attaches to it. If there isn't one, it looks for a *config* by that name —
+local or in the shared directory — and builds it. That's what makes shared
+storage worth using: you can start any project from anywhere, without `cd`-ing
+to it first.
+
+`wyrm` always reports which config it resolved (on stderr), since discovery has
+several layers and an unexpected session is otherwise hard to explain.
 
 If neither `.wyrm.toml` nor `.tmuxconfig` is found, wyrm falls back to
 `~/.config/wyrm/default.wyrm.toml` if you've created one, otherwise a
 built-in default: a single unnamed window rooted at the current directory.
 This always builds (or attaches to) a session for the current folder, even
 if unrelated sessions are already running elsewhere — the interactive
-picker (below) is only ever shown when you ask for it with `-pick`.
+picker (below) is only ever shown when you ask for it with `pick`.
 
 ## Editing, validating, and listing
 
-`wyrm -edit` opens the config wyrm would actually use — wherever discovery
+`wyrm edit` opens the config wyrm would actually use — wherever discovery
 (local, shared, or `-config`) finds it — in `$EDITOR` (falling back to
 `vi`). If none exists yet, it creates one at the right spot for your
-`storage` setting (a local `.wyrm.toml`, or the shared path `-migrate-config`
+`storage` setting (a local `.wyrm.toml`, or the shared path `migrate-config`
 would use) before opening it. After you save, wyrm re-parses the file and
 prints a warning (not an error) if it doesn't validate — you're free to save
 a work-in-progress and fix it later.
 
-`wyrm -validate` runs that same parse-and-validate check non-interactively,
+`wyrm validate` runs that same parse-and-validate check non-interactively,
 without opening an editor or building a session — handy in a pre-commit hook
 or CI for a repo that versions its `.wyrm.toml`.
 
-`wyrm -list` prints the running tmux sessions non-interactively (unlike
-`-pick`, no interactive UI) for scripts and status bars. Add `-format json`
+`wyrm list` prints the running tmux sessions non-interactively (unlike
+`pick`, no interactive UI) for scripts and status bars. Add `-format json`
 or `-format toml` for machine-readable output, or `-format names` for a bare
 newline-separated list (handy for piping into `fzf` or another tool),
 instead of the default aligned table:
 
 ```sh
-wyrm -list                  # name / window count / attached marker, one per line
-wyrm -list -format json | jq .
-wyrm -list -format names | fzf | xargs wyrm
+wyrm list                  # name / window count / attached marker, one per line
+wyrm list -format json | jq .
+wyrm list -format names | fzf | xargs wyrm
 ```
 
-`wyrm -list-configs` prints the config file paths wyrm knows about — the
+`wyrm list-configs` prints the config file paths wyrm knows about — the
 local file (if present) and every config in the shared directory (see
 below) — regardless of the current `storage` setting. It exists mainly to
 back shell completion for `-config`, but works standalone too.
@@ -128,7 +151,7 @@ storage = "shared"
 
 In shared mode, running `wyrm` in a directory named `myproject` looks for
 `myproject.wyrm.toml` in the shared directory first, falling back to the
-usual local search if it isn't there. `wyrm -migrate-config` moves the
+usual local search if it isn't there. `wyrm migrate-config` moves the
 current directory's local config into the shared directory under the right
 name for you.
 
@@ -143,7 +166,7 @@ as any project config.
 
 ## Picking a running session
 
-`wyrm -pick` opens an interactive, fuzzy list of the tmux sessions currently
+`wyrm pick` opens an interactive, fuzzy list of the tmux sessions currently
 running (most-recently-active first) and attaches to the one you choose. It's
 handy from a plain shell, where tmux's own `choose-tree` isn't available
 because you aren't attached to a client yet.
@@ -154,7 +177,8 @@ because you aren't attached to a client yet.
 | ↑ / ↓, `Ctrl-P` / `Ctrl-N` | move the selection |
 | `Enter` | attach to the selected session (or `switch-client` if you're already in tmux) |
 | `Ctrl-W` | show the selected session's windows, to jump straight to one (below) |
-| `Ctrl-X` | kill the selected session (no `on_project_exit` hook — it's a plain tmux kill) |
+| `Ctrl-U` | clear the filter |
+| `Ctrl-X` | kill the selected session, after a `y`/`n` confirm (no `on_project_exit` hook — it's a plain tmux kill) |
 | `Esc` | cancel |
 | `Ctrl-C` | quit outright, from either view |
 
@@ -199,8 +223,8 @@ tab-completes to real running session names.
 
 ## The session manager TUI
 
-`wyrm -tui` opens a full-screen, keyboard-driven session manager in the spirit
-of lazygit. Where `-pick` is a one-shot "choose and attach", the TUI is for
+`wyrm tui` opens a full-screen, keyboard-driven session manager in the spirit
+of lazygit. Where `pick` is a one-shot "choose and attach", the TUI is for
 _browsing and managing_ everything at once — your project configs, the running
 sessions, and the windows and panes inside them — with a live preview of the
 selected pane.
@@ -233,12 +257,15 @@ session panels, or the config file's contents on the Projects panel.
 |---|---|
 | `Tab` / `Shift-Tab`, `1`–`4` | move focus between panels |
 | `↑` / `↓`, `j` / `k` | move the selection in the focused panel |
+| `PgUp` / `PgDn`, `g` / `G` | move a screenful / jump to the first or last entry |
+| `/` | filter the focused panel (`Esc` clears it) |
 | `Enter` | attach — lands on the exact window/pane under the cursor (or, on Projects, starts/attaches the config's session) |
 | `x` | kill the focused session / window / pane (or, on Projects, stop the session running `on_project_exit`) — with a confirm |
 | `r` | rename the focused session or window |
 | `n` | new window in the current session |
 | `L` | cycle the focused window through tmux's standard layouts |
 | `z` | toggle zoom on the focused pane |
+
 | `e` | edit the selected project's config in `$EDITOR` |
 | `R` | reload the project and session lists |
 | `?` | show the full keyboard-shortcut help overlay (scrollable) |
@@ -247,7 +274,7 @@ session panels, or the config file's contents on the Projects panel.
 Press `?` at any time for a full-screen cheat sheet of every binding — laid out
 in two columns, or one on a narrow terminal, and scrollable (`↑`/`↓` or `j`/`k`,
 `Esc` to close) when it's taller than the screen. Like
-`-pick`, attaching from the TUI uses `switch-client` when you're already
+`pick`, attaching from the TUI uses `switch-client` when you're already
 inside tmux and `attach-session` otherwise. When run inside tmux, the pane the
 TUI itself occupies shows a placeholder instead of a preview, to avoid capturing
 the TUI into its own view. It also pairs well with tmux's `display-popup` for a
@@ -255,34 +282,37 @@ floating session manager over your current work:
 
 ```sh
 # ~/.tmux.conf — prefix + g opens the session manager in a popup
-bind g display-popup -d "#{pane_current_path}" -w 80% -h 80% -E "wyrm -tui"
+bind g display-popup -d "#{pane_current_path}" -w 80% -h 80% -E "wyrm tui"
 ```
 
 The TUI is the one part of wyrm built on the [Charm](https://charm.sh) stack
-(Bubble Tea / Lipgloss); the core build/attach path and `-pick` remain
+(Bubble Tea / Lipgloss); the core build/attach path and `pick` remain
 dependency-free.
 
 ## Saving a running session
 
-`wyrm -save` snapshots a running tmux session's windows, split layout, and
+`wyrm save` snapshots a running tmux session's windows, split layout, and
 sizes into a new config for the current folder — the reverse of building a
 session from one. Run it from inside the session you want to capture, or
 from a plain shell in the session's folder (it looks up the session the same
 way a bare `wyrm` would).
 
 ```sh
-wyrm -save                  # writes .wyrm.toml (or the shared-storage path)
+wyrm save                  # writes .wyrm.toml (or the shared-storage path)
+wyrm save -config PATH     # write to PATH instead of the resolved location
 ```
 
 tmux keeps no record of what was originally typed into a pane, so each
 split's `command` is captured as whatever program is currently running in
 that pane's foreground (`nvim`, `npm`, ...) — the same approach tools like
-tmuxp's `freeze` use. That's usually enough to relaunch the same programs,
+tmuxp's `freeze` use. A pane sitting at an idle shell prompt is captured as
+having no command, rather than as running your shell — replaying `zsh` into a
+shell would just nest a second one. That's usually enough to relaunch the same programs,
 but it won't recover one-off shell commands that have already finished, and
 it can't capture `pre_window`, `on_project_start`/`on_project_exit`, or
-comments — those are yours to add by hand afterward, e.g. with `wyrm -edit`.
+comments — those are yours to add by hand afterward, e.g. with `wyrm edit`.
 
-Like `-migrate-config`, `-save` refuses to overwrite an existing config
+Like `migrate-config`, `save` refuses to overwrite an existing config
 rather than silently discarding hooks or comments you've already written —
 remove or rename the file first if you want to re-save over it.
 
@@ -290,11 +320,11 @@ remove or rename the file first if you want to re-save over it.
 
 Completion scripts for bash, zsh, and fish live in
 [`completions/`](https://github.com/jskoll/wyrm/tree/main/completions).
-They complete flag names, `-format`'s values, `-config` (to the local file
-and every config in the shared directory, via `wyrm -list-configs`), and a
-bare argument (to running session names, via `wyrm -list -format names`) —
-so any completion involving live state shells back out to wyrm itself
-rather than guessing.
+They complete the first token (subcommand names, plus running session names
+for `wyrm <name>`, via `wyrm list -format names`), `-format`'s values, and
+`-config` (to the local file and every config in the shared directory, via
+`wyrm list-configs`) — so any completion involving live state shells back
+out to wyrm itself rather than guessing.
 
 `brew install jskoll/tap/wyrm` installs all three automatically. Installing
 some other way:
@@ -327,9 +357,9 @@ session instead of nesting one tmux inside another.
 |---|---|---|---|
 | `name` | string | basename of `root` | tmux session name |
 | `root` | string | `.` | Working directory for every window; `$VAR` is expanded |
-| `on_project_start` | string | — | Shell command run (via `bash -c`, in `root`) before the session is created |
-| `on_project_exit` | string | — | Shell command run before `wyrm -kill` destroys the session |
-| `startup_window` | string | first window | Window (name or index) to focus after creation |
+| `on_project_start` | string | — | Shell command run (via your $SHELL, or sh, in `root`) before the session is created |
+| `on_project_exit` | string | — | Shell command run before `wyrm kill` destroys the session |
+| `startup_window` | string | first window | Window (name or index) to focus after creation. Without it the session opens on the first window, focused on its first pane |
 | `startup_pane` | int | — | Pane to focus within `startup_window` (uses your `pane-base-index`) |
 
 At least one of `name` / `root` is required.
@@ -339,10 +369,10 @@ At least one of `name` / `root` is required.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `name` | string | — | Window name |
-| `pre_window` | string | — | Command typed into **every pane** before its own command (e.g. `nvm use 18`) |
+| `pre_window` | string | — | Command typed once into **every pane of the window**, before that pane's own command (e.g. `nvm use 18`) |
 | `splits` | list | — | Split tree (below) — the recommended layout format |
 | `panes` | list | — | Legacy flat pane list (below); ignored when `splits` is set |
-| `layout` | string | `tiled` | tmux layout applied after legacy `panes` (`even-horizontal`, `main-vertical`, ...) |
+| `layout` | string | `tiled` | tmux layout applied after legacy `panes` (`even-horizontal`, `main-vertical`, ...). Ignored when `splits` is set — a named layout would discard the tree's sizes — and wyrm warns if you set both |
 
 ### `[[windows.splits]]` — the split tree
 
@@ -356,6 +386,16 @@ At least one of `name` / `root` is required.
 How the tree is walked: each entry with a `type` splits the pane of the
 previous entry at the same level (the window's initial pane for the first
 entry). `children` do the same, starting from their parent's pane.
+
+Every entry at a level is created before wyrm descends into any of their
+`children`, so a `size` is always a share of the space its own level was given
+— not of whatever an earlier sibling's children happened to leave behind. This
+is what lets `wyrm save` capture a nested layout and rebuild it unchanged.
+
+Give the *first* entry at a level a `type` and it splits the pane it was handed
+rather than filling it, leaving that pane an empty shell; wyrm warns when a
+config does that. Omit the `type` on the first entry to put it in the pane
+itself.
 
 ```toml
 [[windows]]
@@ -377,6 +417,11 @@ name = "dev"
 
 ### `[[windows.panes]]` — legacy flat list
 
+> **Deprecated.** The flat `panes` list (and the `.tmuxconfig` filename) are
+> retained for backward compatibility but are slated for removal in 1.0. New
+> configs should use the `splits` tree, which is strictly more expressive.
+> `wyrm save` only ever emits `splits`.
+
 ```toml
 [[windows]]
 name = "tests"
@@ -397,7 +442,7 @@ minimal, Node.js, PHP/Symfony, Python, nested splits.
 ## Security
 
 A wyrm config **executes shell commands by design** — hooks run via
-`bash -c`, and pane commands are typed into your shell. Treat config files
+your `$SHELL` (falling back to `sh`), and pane commands are typed into your shell. Treat config files
 with the same trust as a `Makefile` or `.envrc`: don't run one you haven't
 read.
 

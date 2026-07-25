@@ -22,7 +22,7 @@ import (
 // before moving on.
 func splitsFromNode(n *layoutNode, commands map[string]string) []config.Split {
 	if n.Type == 0 {
-		return []config.Split{{Command: commands[n.PaneID]}}
+		return []config.Split{{Command: paneCommand(commands, n.PaneID)}}
 	}
 
 	splitType := "h"
@@ -53,7 +53,7 @@ func splitsFromNode(n *layoutNode, commands map[string]string) []config.Split {
 			remaining -= dims[i-1]
 		}
 		if c.Type == 0 {
-			entry.Command = commands[c.PaneID]
+			entry.Command = paneCommand(commands, c.PaneID)
 		} else {
 			entry.Children = splitsFromNode(c, commands)
 		}

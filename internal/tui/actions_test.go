@@ -202,12 +202,15 @@ func TestCycleLayoutAdvances(t *testing.T) {
 	}}
 	m := modelWithData(r)
 	m.focus = panelWindows
+	// The cycle restarts per window, so the first L on a window always applies
+	// cycleLayouts[0] — otherwise a shared index could re-apply the layout the
+	// window already had and look like it did nothing.
 	m, cmd := update(m, key("L"))
-	if m.layoutIdx != 1 {
-		t.Errorf("layoutIdx = %d, want 1 after one L", m.layoutIdx)
+	if m.layoutIdx != 0 {
+		t.Errorf("layoutIdx = %d, want 0 after the first L on this window", m.layoutIdx)
 	}
 	run(cmd)
-	want := "select-layout -t @1 " + cycleLayouts[1]
+	want := "select-layout -t @1 " + cycleLayouts[0]
 	found := false
 	for _, c := range calls {
 		if c == want {

@@ -14,11 +14,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/jskoll/wyrm/internal/tmux"
 	"golang.org/x/term"
 )
@@ -47,13 +50,8 @@ const listFormat = "#{session_id}|#{session_windows}|#{?session_attached,1,0}|#{
 func ListSessions(r tmux.Runner) ([]Session, error) {
 	out, err := r.Run("list-sessions", "-F", listFormat)
 	if err != nil {
-		// With no server up, tmux fails rather than printing an empty list.
-		// The wording varies: "no server running on <socket>" for the default
-		// server, "error connecting to <socket> (No such file or directory)"
-		// for an -L socket that was never created. Treat both as "nothing to
-		// pick" rather than an error.
-		msg := strings.ToLower(out)
-		if strings.Contains(msg, "no server running") || strings.Contains(msg, "error connecting") {
+		// No server up isn't an error here — it just means nothing to pick.
+		if tmux.NoServerRunning(out) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("listing sessions: %v (%s)", err, out)
@@ -75,6 +73,9 @@ func parseSession(line string) (Session, bool) {
 	// SplitN with n=5 so a "|" in the name (the last field) is preserved.
 	f := strings.SplitN(line, "|", 5)
 	if len(f) < 5 {
+		return Session{}, false
+	}
+	if !tmux.ValidID(tmux.SessionSigil, f[0]) {
 		return Session{}, false
 	}
 	windows, _ := strconv.Atoi(f[1])
@@ -109,6 +110,11 @@ func KillSession(r tmux.Runner, id string) error {
 	}
 	return nil
 }
+
+// FuzzyMatch exposes the picker's matcher to the TUI, so its panel filter
+// ranks the same way the picker's does rather than reimplementing subsequence
+// matching a second time.
+func FuzzyMatch(query, target string) (int, bool) { return fuzzyMatch(query, target) }
 
 // fuzzyMatch reports whether query is a subsequence of target (case-insensitive)
 // along with a score; higher is better. Contiguous runs and matches at a word
@@ -171,6 +177,9 @@ type model struct {
 	windowSession  Session
 	windows        []tmux.WindowInfo
 	windowCursor   int
+
+	// confirmKill is set while a Ctrl-X is awaiting a y/n answer.
+	confirmKill bool
 }
 
 func newModel(sessions []Session) *model {
@@ -317,9 +326,43 @@ func Run(r tmux.Runner, stderr io.Writer) (string, error) {
 	}
 	defer func() { _ = term.Restore(fd, oldState) }()
 
+	// Restore the terminal on the signals that would otherwise kill the process
+	// outright. term.Restore is deferred, but a deferred call doesn't run for
+	// SIGTERM or SIGHUP — and the picker has by then disabled echo and line
+	// editing and hidden the cursor, so the user is left with an unusable shell
+	// they have to type "stty sane" into blind. Reachable from `pkill wyrm`,
+	// closing the terminal emulator, or killing the tmux pane it runs in.
+	fatal := make(chan os.Signal, 1)
+	signal.Notify(fatal, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(fatal)
+
 	rn := &renderer{w: tty}
 	rn.enter()
 	defer rn.clear()
+
+	go func() {
+		sig, ok := <-fatal
+		if !ok {
+			return
+		}
+		rn.clear()
+		_ = term.Restore(fd, oldState)
+		// Re-raise with the handler removed, so the process still dies of the
+		// signal rather than exiting 0.
+		signal.Reset(sig)
+		if s, ok := sig.(syscall.Signal); ok {
+			_ = syscall.Kill(os.Getpid(), s)
+		}
+		os.Exit(1)
+	}()
+
+	// SIGWINCH redraws at the new size. Without it a resize did nothing until
+	// the next keypress, and the renderer's idea of how many physical lines it
+	// had written was already wrong by then — so its cursor-up reposition
+	// undershot and smeared stale frames down the screen.
+	resize := make(chan os.Signal, 1)
+	signal.Notify(resize, syscall.SIGWINCH)
+	defer signal.Stop(resize)
 
 	height := func() int {
 		_, h, err := term.GetSize(fd)
@@ -328,7 +371,7 @@ func Run(r tmux.Runner, stderr io.Writer) (string, error) {
 		}
 		return h
 	}
-	return runLoop(r, sessions, bufio.NewReader(tty), rn, height)
+	return runLoop(r, sessions, bufio.NewReader(tty), rn, height, resize)
 }
 
 // runLoop drives the picker's read-key/update/redraw cycle until the user
@@ -338,8 +381,9 @@ func Run(r tmux.Runner, stderr io.Writer) (string, error) {
 // value below 3, e.g. 0, when it can't be determined), letting the pure
 // filtering/model logic and the terminal plumbing in Run be tested
 // independently.
-func runLoop(r tmux.Runner, sessions []Session, br *bufio.Reader, rn *renderer, height func() int) (string, error) {
+func runLoop(r tmux.Runner, sessions []Session, br *bufio.Reader, rn *renderer, height func() int, resize <-chan os.Signal) (string, error) {
 	m := newModel(sessions)
+	keys := readKeys(br)
 
 	for {
 		h := height()
@@ -354,10 +398,44 @@ func runLoop(r tmux.Runner, sessions []Session, br *bufio.Reader, rn *renderer, 
 		// as jitter once the list overflows the viewport.
 		rn.draw(m, h-3)
 
-		key, ch, err := readKey(br)
-		if err != nil {
-			return "", err
+		// A nil resize channel (tests) blocks forever in select, leaving this
+		// a plain blocking read.
+		var key keyCode
+		var ch rune
+		select {
+		case ev, ok := <-keys:
+			if !ok {
+				return "", nil
+			}
+			if ev.err != nil {
+				return "", ev.err
+			}
+			key, ch = ev.key, ev.ch
+		case <-resize:
+			rn.invalidate()
+			continue
 		}
+
+		// A pending kill confirmation swallows everything else: y goes through
+		// with it, anything else cancels.
+		if m.confirmKill {
+			m.confirmKill = false
+			if key == keyRune && (ch == 'y' || ch == 'Y') {
+				if s, ok := m.selected(); ok {
+					_ = KillSession(r, s.ID) // it may already be gone
+					remaining, listErr := ListSessions(r)
+					if listErr != nil || len(remaining) == 0 {
+						return "", listErr
+					}
+					q := m.query
+					m = newModel(remaining)
+					m.query = q
+					m.filter()
+				}
+			}
+			continue
+		}
+
 		switch key {
 		case keyEnter:
 			if m.viewingWindows {
@@ -410,19 +488,17 @@ func runLoop(r tmux.Runner, sessions []Session, br *bufio.Reader, rn *renderer, 
 			if m.viewingWindows {
 				break
 			}
-			s, ok := m.selected()
-			if !ok {
+			if _, ok := m.selected(); !ok {
 				break
 			}
-			_ = KillSession(r, s.ID) // ignore: it may already be gone
-			remaining, listErr := ListSessions(r)
-			if listErr != nil || len(remaining) == 0 {
-				return "", listErr
+			// Ask first. Destroying a session takes every running process in
+			// it with it, and the TUI already confirms the same operation.
+			m.confirmKill = true
+		case keyClearQuery:
+			if !m.viewingWindows {
+				m.query = ""
+				m.filter()
 			}
-			q := m.query
-			m = newModel(remaining)
-			m.query = q
-			m.filter()
 		case keyBackspace:
 			if !m.viewingWindows {
 				m.backspace()
@@ -446,11 +522,11 @@ func selectWindow(r tmux.Runner, windowID string) error {
 	return nil
 }
 
-// key classifies a decoded key press.
-type key int
+// keyCode classifies a decoded key press.
+type keyCode int
 
 const (
-	keyNone key = iota
+	keyNone keyCode = iota
 	keyRune
 	keyEnter
 	keyAbort
@@ -460,12 +536,41 @@ const (
 	keyBackspace
 	keyKill
 	keyWindows
+	keyClearQuery
 )
 
+// keyEvent is one decoded key press, delivered over a channel so the loop can
+// wait on a terminal resize at the same time as on input.
+type keyEvent struct {
+	key keyCode
+	ch  rune
+	err error
+}
+
+// readKeys decodes key presses on a goroutine so runLoop can select between
+// input and SIGWINCH. The goroutine ends when the reader errors; on any other
+// exit it is left blocked on the buffered send, which is fine for a
+// short-lived CLI that is about to attach or exit.
+func readKeys(br *bufio.Reader) <-chan keyEvent {
+	out := make(chan keyEvent, 1)
+	go func() {
+		for {
+			k, ch, err := readKey(br)
+			out <- keyEvent{k, ch, err}
+			if err != nil {
+				close(out)
+				return
+			}
+		}
+	}()
+	return out
+}
+
 // readKey decodes one key press, resolving the common escape sequences for
-// arrow and delete keys. A lone Escape (no bytes queued behind it) backs out
-// one level (or quits, at the top level); Ctrl-C always quits outright.
-func readKey(br *bufio.Reader) (key, rune, error) {
+// arrow, navigation, and delete keys. A lone Escape (no bytes queued behind
+// it) backs out one level (or quits, at the top level); Ctrl-C always quits
+// outright.
+func readKey(br *bufio.Reader) (keyCode, rune, error) {
 	b, err := br.ReadByte()
 	if err != nil {
 		return keyNone, 0, err
@@ -479,12 +584,16 @@ func readKey(br *bufio.Reader) (key, rune, error) {
 		return keyUp, 0, nil
 	case 14: // Ctrl-N
 		return keyDown, 0, nil
+	case 21: // Ctrl-U: clear the query, as in readline
+		return keyClearQuery, 0, nil
 	case 23: // Ctrl-W
 		return keyWindows, 0, nil
 	case 24: // Ctrl-X
 		return keyKill, 0, nil
 	case 8, 127: // Backspace / Ctrl-H
 		return keyBackspace, 0, nil
+	case 9: // Tab: drill into the selected session's windows
+		return keyWindows, 0, nil
 	case 27: // Escape or an escape sequence
 		if br.Buffered() == 0 {
 			return keyAbort, 0, nil
@@ -493,17 +602,7 @@ func readKey(br *bufio.Reader) (key, rune, error) {
 		if b2 != '[' && b2 != 'O' {
 			return keyNone, 0, nil
 		}
-		b3, _ := br.ReadByte()
-		switch b3 {
-		case 'A':
-			return keyUp, 0, nil
-		case 'B':
-			return keyDown, 0, nil
-		case '3': // Delete: ESC [ 3 ~
-			_, _ = br.ReadByte() // consume the trailing '~'
-			return keyKill, 0, nil
-		}
-		return keyNone, 0, nil
+		return readCSI(br)
 	}
 	if b >= 0x80 { // start of a multi-byte UTF-8 rune
 		_ = br.UnreadByte()
@@ -517,6 +616,47 @@ func readKey(br *bufio.Reader) (key, rune, error) {
 		return keyRune, rune(b), nil
 	}
 	return keyNone, 0, nil
+}
+
+// readCSI decodes the body of an "ESC [" / "ESC O" sequence, having already
+// consumed the introducer.
+//
+// It consumes the *whole* sequence even when the result is keyNone. The
+// previous version read a single byte and gave up, leaving the rest in the
+// buffer to be re-read as literal text — so pressing Home (ESC [ 1 ~) or PgUp
+// (ESC [ 5 ~) silently typed a "~" into the fuzzy filter, and a shifted arrow
+// typed ";2A".
+func readCSI(br *bufio.Reader) (keyCode, rune, error) {
+	// Parameter and intermediate bytes, then one final byte in @-~.
+	var params []byte
+	for {
+		b, err := br.ReadByte()
+		if err != nil {
+			return keyNone, 0, err
+		}
+		if b >= 0x40 && b <= 0x7e {
+			return csiKey(params, b), 0, nil
+		}
+		params = append(params, b)
+	}
+}
+
+// csiKey maps a decoded CSI sequence to a picker key. Unrecognized sequences
+// (mouse reports, function keys) are ignored rather than typed.
+func csiKey(params []byte, final byte) keyCode {
+	switch final {
+	case 'A':
+		return keyUp
+	case 'B':
+		return keyDown
+	}
+	// Everything else — Home/End ('H'/'F'), Delete and the PgUp/PgDn family
+	// ('~' with a numeric parameter), function keys, mouse reports — is
+	// ignored. Delete used to map to "kill session", unconfirmed and
+	// undocumented, sitting one key away from Home and End; those in turn
+	// leaked their trailing "~" into the fuzzy filter.
+	_ = params
+	return keyNone
 }
 
 // ANSI control sequences used by the renderer. bold/dim/reverse are text
@@ -574,6 +714,11 @@ type renderer struct {
 // autowrap off (see wrapOff). clear reverses both when the picker exits.
 func (rn *renderer) enter() { _, _ = io.WriteString(rn.w, hideCur+wrapOff) }
 
+// invalidate forgets how many lines the last frame occupied, so the next draw
+// starts where the cursor is instead of moving up by a count that a terminal
+// resize has just made wrong.
+func (rn *renderer) invalidate() { rn.prevLines = 0 }
+
 func (rn *renderer) draw(m *model, maxRows int) {
 	if maxRows < 1 {
 		maxRows = 1
@@ -616,6 +761,15 @@ func drawSessions(m *model, maxRows int, writeLine func(string)) {
 	}
 	if len(m.filtered) == 0 {
 		writeLine(dim + "  (no matching sessions)" + reset)
+	}
+
+	if m.confirmKill {
+		name := ""
+		if s, ok := m.selected(); ok {
+			name = s.Name
+		}
+		writeLine(bold + "  kill session '" + name + "'? (y/n)" + reset)
+		return
 	}
 
 	writeLine(fmt.Sprintf("%s  %d/%d · up/down move · enter attach · ctrl-x kill · ctrl-w windows · esc quit%s",
@@ -690,7 +844,29 @@ func FormatRow(s Session, colored bool) string {
 	} else if s.Attached {
 		att = "  (attached)"
 	}
-	return fmt.Sprintf("%-24s %s%s", s.Name, count, att)
+	return padName(s.Name, nameColumn) + " " + count + att
+}
+
+// nameColumn is the width the session-name column is padded to.
+const nameColumn = 24
+
+// padName fits a session name into a fixed display-width column, truncating
+// with an ellipsis when it doesn't fit.
+//
+// fmt's "%-24s" pads by *rune* count, not display width, so a CJK or emoji
+// name — twice as wide on screen as it is long in runes — pushed the window
+// count out of alignment for every row. It also never truncated, so a long
+// name ran over the count and the "(attached)" marker, which autowrap-off then
+// clipped away with no indication anything was missing.
+func padName(name string, w int) string {
+	if width := ansi.StringWidth(name); width <= w {
+		return name + strings.Repeat(" ", w-width)
+	}
+	truncated := ansi.Truncate(name, w, "…")
+	if gap := w - ansi.StringWidth(truncated); gap > 0 {
+		truncated += strings.Repeat(" ", gap)
+	}
+	return truncated
 }
 
 func formatRow(s Session) string { return FormatRow(s, true) }
