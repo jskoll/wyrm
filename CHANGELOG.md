@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-31
+
+### Added
+- `M` opens the context menu on the current selection, from the keyboard. The
+  menu was previously reachable only by right-click, which some terminals never
+  deliver: iTerm2 (among others) keeps the right button for its own context menu
+  and doesn't forward button 3 to the application, so the menu was unreachable
+  there regardless of tmux's settings.
+
 ## [0.5.0] - 2026-07-31
 
 ### Added
@@ -453,7 +462,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/jskoll/wyrm/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/jskoll/wyrm/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/jskoll/wyrm/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/jskoll/wyrm/compare/v0.3.1...v0.4.0
