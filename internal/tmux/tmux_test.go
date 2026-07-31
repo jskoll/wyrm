@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -236,5 +237,44 @@ func TestListPanesMalformedLine(t *testing.T) {
 	r := stubRunner{out: "not-enough-fields"}
 	if _, err := ListPanes(r, "@1"); err == nil {
 		t.Error("ListPanes with a malformed line: want error, got nil")
+	}
+}
+
+// TestNoServerRunningPrefersTheSentinel: "is the server down?" used to be
+// answered only by matching tmux's English diagnostic, because the %v-formatted
+// errors on the way up destroyed the chain. Exec.Run now wraps ErrNoServer, so
+// the typed check answers first and the text match is only a fallback.
+func TestNoServerRunningPrefersTheSentinel(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		out  string
+		want bool
+	}{
+		{"typed sentinel, no text", fmt.Errorf("listing: %w", ErrNoServer), "", true},
+		{"text fallback, untyped error", errors.New("exit status 1"), "no server running on /tmp/x", true},
+		{"text fallback, socket never created", errors.New("exit status 1"), "error connecting to /tmp/x", true},
+		{"a real failure is not 'no server'", errors.New("exit status 1"), "duplicate session: foo", false},
+		{"no error at all", nil, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NoServerRunning(tt.err, tt.out); got != tt.want {
+				t.Errorf("NoServerRunning = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestFindSessionIDTreatsNoServerAsEmpty pins the behaviour the sentinel exists
+// to protect: nothing running is an ordinary outcome, not an error.
+func TestFindSessionIDTreatsNoServerAsEmpty(t *testing.T) {
+	r := &recordingRunner{out: "", err: fmt.Errorf("listing: %w", ErrNoServer)}
+	id, ok, err := FindSessionID(r, "anything")
+	if err != nil {
+		t.Fatalf("FindSessionID with no server = %v, want no error", err)
+	}
+	if ok || id != "" {
+		t.Errorf("FindSessionID = (%q, %v), want empty", id, ok)
 	}
 }

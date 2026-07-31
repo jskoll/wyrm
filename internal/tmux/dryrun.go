@@ -33,7 +33,7 @@ func (d *DryRun) Run(args ...string) (string, error) {
 	if len(args) > 0 && args[0] == "list-sessions" {
 		// Report the same failure a real tmux gives with no server up, so
 		// FindSessionID treats it as "not running" rather than an error.
-		return "no server running on /dev/null", errNoServer{}
+		return "no server running on /dev/null", ErrNoServer
 	}
 	if name, ok := flagValue(args, "-s"); ok {
 		d.sessionNm = name
@@ -64,13 +64,6 @@ func (d *DryRun) fill(format string) string {
 	out = strings.ReplaceAll(out, "#{session_name}", d.sessionNm)
 	return out
 }
-
-// errNoServer stands in for the exit status a real tmux returns with no server
-// running. Only its pairing with the "no server running" output matters — see
-// NoServerRunning.
-type errNoServer struct{}
-
-func (errNoServer) Error() string { return "no server running" }
 
 // flagValue returns the argument following flag, if present.
 func flagValue(args []string, flag string) (string, bool) {

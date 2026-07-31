@@ -29,7 +29,7 @@ type PaneInfo struct {
 func SessionPath(r Runner, sessionID string) (string, error) {
 	out, err := r.Run("display-message", "-p", "-t", sessionID, "-F", "#{session_path}")
 	if err != nil {
-		return "", fmt.Errorf("reading session path: %v (%s)", err, out)
+		return "", fmt.Errorf("reading session path: %w (%s)", err, out)
 	}
 	return strings.TrimSpace(out), nil
 }
@@ -41,7 +41,7 @@ const windowListFormat = "#{window_index}|#{window_id}|#{?window_active,1,0}|#{w
 func ListWindows(r Runner, sessionID string) ([]WindowInfo, error) {
 	out, err := r.Run("list-windows", "-t", sessionID, "-F", windowListFormat)
 	if err != nil {
-		return nil, fmt.Errorf("listing windows: %v (%s)", err, out)
+		return nil, fmt.Errorf("listing windows: %w (%s)", err, out)
 	}
 	var windows []WindowInfo
 	for _, line := range strings.Split(out, "\n") {
@@ -94,10 +94,10 @@ const allPanesFormat = "#{session_id}|#{window_id}|#{pane_id}|#{pane_current_com
 func ListAllPanes(r Runner) ([]PaneRef, error) {
 	out, err := r.Run("list-panes", "-a", "-F", allPanesFormat)
 	if err != nil {
-		if NoServerRunning(out) {
+		if NoServerRunning(err, out) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("listing panes: %v (%s)", err, out)
+		return nil, fmt.Errorf("listing panes: %w (%s)", err, out)
 	}
 	var refs []PaneRef
 	for _, line := range strings.Split(out, "\n") {
@@ -126,7 +126,7 @@ const paneListFormat = "#{pane_id}|#{pane_index}|#{?pane_active,1,0}|#{pane_curr
 func ListPanes(r Runner, target string) ([]PaneInfo, error) {
 	out, err := r.Run("list-panes", "-t", target, "-F", paneListFormat)
 	if err != nil {
-		return nil, fmt.Errorf("listing panes: %v (%s)", err, out)
+		return nil, fmt.Errorf("listing panes: %w (%s)", err, out)
 	}
 	var panes []PaneInfo
 	for _, line := range strings.Split(out, "\n") {

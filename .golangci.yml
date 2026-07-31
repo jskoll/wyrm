@@ -10,9 +10,44 @@ linters:
     - misspell
     - revive
     - gocritic
+    # errorlint catches the %v-on-an-error mistake that left wyrm sniffing
+    # tmux's English output to answer "is the server down?" — see tmux.ErrNoServer.
+    - errorlint
+    # gosec: wyrm shells out to $SHELL and tmux and writes files under paths the
+    # user configures, so the subprocess and file-permission rules earn their keep.
+    - gosec
+    - copyloopvar
+    # nilerr catches "checked err, then returned nil anyway", which in this
+    # codebase would silently turn a failed tmux call into a successful one.
+    - nilerr
+    - usetesting
   exclusions:
     rules:
       # Tests may ignore cleanup errors freely
       - path: _test\.go
         linters:
           - errcheck
+      # Test fixtures build commands from literals; the subprocess rules have
+      # nothing to say about them.
+      - path: _test\.go
+        linters:
+          - gosec
+      # G204 (subprocess from a variable) and G304 (file read from a variable)
+      # describe wyrm's entire purpose: it runs tmux and $EDITOR with arguments
+      # the user supplies, and reads config files from paths the user names.
+      # G702 is the same thing again: running a config's lifecycle hook through
+      # $SHELL is the feature. That is the documented trust model (see
+      # SECURITY.md) rather than a
+      # finding, and `wyrm up -n` is the mitigation. Excluded by rule rather
+      # than by scattered //nolint so the reasoning lives in one place; the rest
+      # of gosec stays on.
+      - linters:
+          - gosec
+        text: "(G204|G304|G702)"
+      # G301/G306 want 0750/0600 on the config directories and files wyrm
+      # creates. 0755/0644 is what every other CLI writes into ~/.config and is
+      # what lets a team share a checked-in .wyrm.toml; neither path holds a
+      # secret. Revisit if wyrm ever stores credentials.
+      - linters:
+          - gosec
+        text: "(G301|G306)"

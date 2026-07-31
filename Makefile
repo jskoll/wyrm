@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test test-unit lint install clean docs-install docs-serve docs-build
+.PHONY: build test test-unit lint vulncheck cover install clean docs-install docs-serve docs-build
 
 build:
 	go build -ldflags '$(LDFLAGS)' -o wyrm .
@@ -16,6 +16,16 @@ test-unit:
 lint:
 	golangci-lint run
 	test -z "$$(gofmt -l .)"
+
+# Same advisory check CI runs, for before you push.
+vulncheck:
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+# Coverage plus the floor CI enforces, so a local run fails the same way.
+cover:
+	go test -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out | tail -1
+	./.github/scripts/check-coverage.sh coverage.out
 
 install:
 	go install -ldflags '$(LDFLAGS)' .

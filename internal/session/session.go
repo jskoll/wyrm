@@ -104,7 +104,7 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 			out, err = r.Run("new-session", "-d", "-P", "-F", "#{session_id}|#{session_name}|#{window_id}|#{pane_id}",
 				"-s", name, "-n", w.Name, "-c", root)
 			if err != nil {
-				return "", "", false, fmt.Errorf("creating session: %v (%s)", err, out)
+				return "", "", false, fmt.Errorf("creating session: %w (%s)", err, out)
 			}
 			parts := strings.SplitN(out, "|", 4)
 			if len(parts) != 4 {
@@ -128,7 +128,7 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 				"-t", id, "-n", w.Name, "-c", root)
 			if err != nil {
 				return "", "", false, rollback(r, id, stderr,
-					fmt.Errorf("creating window %q: %v (%s)", w.Name, err, out))
+					fmt.Errorf("creating window %q: %w (%s)", w.Name, err, out))
 			}
 			var ok bool
 			windowID, paneID, ok = strings.Cut(out, "|")
@@ -222,7 +222,7 @@ func Kill(r tmux.Runner, cfg *config.Config, stderr io.Writer, opts ...Option) (
 		return name, nil
 	}
 	if out, err := r.Run("kill-session", "-t", id); err != nil {
-		return "", fmt.Errorf("killing session %q: %v (%s)", name, err, out)
+		return "", fmt.Errorf("killing session %q: %w (%s)", name, err, out)
 	}
 	return name, nil
 }
@@ -303,7 +303,7 @@ func splitPane(r tmux.Runner, target string, s config.Split) (string, error) {
 	}
 	out, err := r.Run(args...)
 	if err != nil {
-		return "", fmt.Errorf("%v (%s)", err, out)
+		return "", fmt.Errorf("%w (%s)", err, out)
 	}
 	if err := tmux.CheckID(tmux.PaneSigil, "pane", out); err != nil {
 		return "", err

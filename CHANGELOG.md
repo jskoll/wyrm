@@ -31,6 +31,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm validate -strict` exits non-zero when the config has any warnings
   (unknown keys, deprecations), for use in CI.
 
+### Changed
+- Internal: the CLI's verbs moved out of `main.go` into `cmd_session.go`,
+  `cmd_config.go`, and `cmd_ui.go`, and each now returns an error instead of an
+  exit code. One place turns that into a message and a status, replacing the 37
+  hand-written copies of it. No behaviour change; the full CLI test suite is
+  unchanged.
+- Internal: "no tmux server is running" is now carried by a wrapped
+  `tmux.ErrNoServer` sentinel rather than being re-derived by matching tmux's
+  English diagnostic at each call site. The text match remains as a fallback for
+  Runners other than the real one.
+- Internal: errors are wrapped with `%w` rather than formatted with `%v`, so the
+  chain survives; `errorlint` now enforces it.
+- CI additionally runs `go test -short` (the no-tmux path the Makefile
+  advertises), `govulncheck`, and a coverage floor — the coverage number was
+  previously printed and discarded. `gosec`, `errorlint`, `copyloopvar`,
+  `nilerr`, and `usetesting` were added to the linter set.
+
 ## [0.5.1] - 2026-07-31
 
 ### Added

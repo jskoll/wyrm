@@ -513,15 +513,14 @@ func withNoColor(t *testing.T, set bool) {
 		t.Setenv("NO_COLOR", "1")
 		return
 	}
-	orig, had := os.LookupEnv("NO_COLOR")
+	// t.Setenv both sets and restores; unsetting is spelled as an empty value
+	// plus an explicit Unsetenv, since NO_COLOR is honored by presence alone.
+	if orig, had := os.LookupEnv("NO_COLOR"); had {
+		t.Setenv("NO_COLOR", orig)
+	}
 	if err := os.Unsetenv("NO_COLOR"); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if had {
-			os.Setenv("NO_COLOR", orig) //nolint:errcheck
-		}
-	})
 }
 
 func TestFormatRowColor(t *testing.T) {

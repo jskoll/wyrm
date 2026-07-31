@@ -42,7 +42,14 @@ func (e Exec) Run(args ...string) (string, error) {
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
-			return strings.TrimSpace(string(exitErr.Stderr)), err
+			msg := strings.TrimSpace(string(exitErr.Stderr))
+			// Wrap the sentinel here, at the one place that can see tmux's
+			// diagnostic, so callers can errors.Is it rather than each
+			// re-matching the English text — see NoServerRunning.
+			if noServerText(msg) {
+				return msg, fmt.Errorf("%w: %w", ErrNoServer, err)
+			}
+			return msg, err
 		}
 		return strings.TrimSpace(string(out)), err
 	}
@@ -70,16 +77,30 @@ func ValidID(sigil byte, s string) bool {
 	return true
 }
 
+// ErrNoServer marks a tmux invocation that failed only because no server is up.
+// Exec.Run wraps it around such failures so callers can test for the condition
+// with errors.Is instead of re-matching tmux's English diagnostic.
+var ErrNoServer = errors.New("no tmux server running")
+
 // NoServerRunning reports whether a failed tmux invocation failed only
 // because no server is up — which tmux signals by failing rather than by
-// printing an empty list. The wording varies: "no server running on <socket>"
-// for the default server, "error connecting to <socket> (No such file or
-// directory)" for an -L socket that was never created. Both mean "nothing is
-// running", not "something went wrong".
+// printing an empty list. That is an ordinary outcome ("nothing is running"),
+// not a fault, and every caller that lists things has to tell the two apart.
 //
-// Shared by every caller that lists sessions (tmux.FindSessionID,
-// picker.ListSessions) so the two can't drift apart.
-func NoServerRunning(out string) bool {
+// The typed check comes first. The text check remains as a fallback because a
+// Runner other than Exec — the dry-run recorder, a test mock, a future one —
+// may report the condition only in its output, and because the wording is not
+// something tmux promises: "no server running on <socket>" for the default
+// server, "error connecting to <socket> (No such file or directory)" for an -L
+// socket that was never created.
+func NoServerRunning(err error, out string) bool {
+	if errors.Is(err, ErrNoServer) {
+		return true
+	}
+	return noServerText(out)
+}
+
+func noServerText(out string) bool {
 	msg := strings.ToLower(out)
 	return strings.Contains(msg, "no server running") || strings.Contains(msg, "error connecting")
 }
@@ -118,7 +139,7 @@ func Attach(target string) error {
 func CurrentSession(r Runner) (id, name string, err error) {
 	out, err := r.Run("display-message", "-p", "-F", "#{session_id}|#{session_name}")
 	if err != nil {
-		return "", "", fmt.Errorf("finding current session: %v (%s)", err, out)
+		return "", "", fmt.Errorf("finding current session: %w (%s)", err, out)
 	}
 	id, name, ok := strings.Cut(out, "|")
 	if !ok {
@@ -142,10 +163,10 @@ func CurrentSession(r Runner) (id, name string, err error) {
 func FindSessionID(r Runner, name string) (id string, ok bool, err error) {
 	out, err := r.Run("list-sessions", "-F", "#{session_id}|#{session_name}")
 	if err != nil {
-		if NoServerRunning(out) {
+		if NoServerRunning(err, out) {
 			return "", false, nil
 		}
-		return "", false, fmt.Errorf("listing sessions: %v (%s)", err, out)
+		return "", false, fmt.Errorf("listing sessions: %w (%s)", err, out)
 	}
 	type entry struct{ id, name string }
 	var sessions []entry

@@ -31,10 +31,16 @@ jobs:
       # goroutines (tea.Cmd closures, the picker's key reader), so a data race
       # is a real possibility rather than a theoretical one.
       - run: go test -race -v ./...
+      # The Makefile advertises `make test-unit` as the no-tmux path, so prove
+      # it still works: a test that only passes because tmux happens to be
+      # installed is one that fails for the next contributor without it.
+      - name: Unit tests only (-short)
+        run: go test -short ./...
       - name: Coverage
         run: |
           go test -coverprofile=coverage.out ./...
           go tool cover -func=coverage.out | tail -1
+          ./.github/scripts/check-coverage.sh coverage.out
 
   # Build the release artifacts on every PR, so a broken .goreleaser.yaml is
   # caught here instead of at tag time when it is most expensive to discover.
@@ -63,3 +69,16 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
       - name: gofmt
         run: test -z "$(gofmt -l .)"
+
+  # Dependabot bumps modules on a schedule, but a vulnerability disclosed
+  # against a version already pinned here would otherwise go unnoticed until
+  # the next bump. govulncheck reports only advisories that reach code wyrm
+  # actually calls, so it stays quiet unless there is something to do.
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...

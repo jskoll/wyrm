@@ -51,10 +51,10 @@ func ListSessions(r tmux.Runner) ([]Session, error) {
 	out, err := r.Run("list-sessions", "-F", listFormat)
 	if err != nil {
 		// No server up isn't an error here — it just means nothing to pick.
-		if tmux.NoServerRunning(out) {
+		if tmux.NoServerRunning(err, out) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("listing sessions: %v (%s)", err, out)
+		return nil, fmt.Errorf("listing sessions: %w (%s)", err, out)
 	}
 	var sessions []Session
 	for _, line := range strings.Split(out, "\n") {
@@ -106,7 +106,7 @@ func sortSessions(s []Session) {
 // tmux kill.
 func KillSession(r tmux.Runner, id string) error {
 	if out, err := r.Run("kill-session", "-t", id); err != nil {
-		return fmt.Errorf("killing session %q: %v (%s)", id, err, out)
+		return fmt.Errorf("killing session %q: %w (%s)", id, err, out)
 	}
 	return nil
 }
@@ -517,7 +517,7 @@ func runLoop(r tmux.Runner, sessions []Session, br *bufio.Reader, rn *renderer, 
 // KillSession: a raw tmux call with no wyrm-specific bookkeeping.
 func selectWindow(r tmux.Runner, windowID string) error {
 	if out, err := r.Run("select-window", "-t", windowID); err != nil {
-		return fmt.Errorf("selecting window %q: %v (%s)", windowID, err, out)
+		return fmt.Errorf("selecting window %q: %w (%s)", windowID, err, out)
 	}
 	return nil
 }

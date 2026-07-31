@@ -28,14 +28,7 @@ func TestStartProjectUsesConfigDirNotCwd(t *testing.T) {
 
 	// Stand somewhere else entirely — this is the "wyrm tui from ~" case.
 	elsewhere := t.TempDir()
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(elsewhere); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	t.Chdir(elsewhere)
 
 	var calls []string
 	r := funcRunner{fn: func(args ...string) (string, error) {

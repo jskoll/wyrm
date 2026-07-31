@@ -203,18 +203,9 @@ func TestResolve(t *testing.T) {
 // this module supports 1.21).
 func chdir(t *testing.T, dir string) {
 	t.Helper()
-	old, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chdir(old); err != nil {
-			t.Fatal(err)
-		}
-	})
+	// t.Chdir restores the previous directory itself, and refuses to run in a
+	// parallel test — which is the bug the hand-rolled version could not catch.
+	t.Chdir(dir)
 }
 
 func TestResolveEffectiveExplicitPath(t *testing.T) {
@@ -357,6 +348,7 @@ func TestDiscover(t *testing.T) {
 func TestLoadWarnsOnUnknownKeys(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, DefaultFileName)
+	//nolint:misspell // the misspellings are the fixture: this is what the warning must catch.
 	body := "[session]\nnmae = \"x\"\nroot = \".\"\n\n[[windows]]\nname = \"w\"\n\n" +
 		"  [[windows.splits]]\n  comand = \"nvim\"\n"
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {

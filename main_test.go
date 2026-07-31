@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -116,18 +117,9 @@ func writeFakeEditor(t *testing.T, content string) string {
 
 func chdir(t *testing.T, dir string) {
 	t.Helper()
-	old, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chdir(old); err != nil {
-			t.Fatal(err)
-		}
-	})
+	// t.Chdir restores the previous directory itself, and refuses to run in a
+	// parallel test — which is the bug the hand-rolled version could not catch.
+	t.Chdir(dir)
 }
 
 const validConfig = `
@@ -247,31 +239,35 @@ func TestRunFlagParseError(t *testing.T) {
 	}
 }
 
-func TestLoadSettingsError(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", "")
-	settingsDir := filepath.Join(home, ".config", "wyrm")
-	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
-		t.Fatal(err)
+// TestReportExitCodes covers the one place a verb's error becomes an exit code
+// and a message. Every subcommand routes through it, so the prefix and the
+// exit-status policy are pinned here rather than at each of the sites that used
+// to spell them out by hand.
+func TestReportExitCodes(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantCode int
+		wantOut  string
+	}{
+		{"nil is success", nil, 0, ""},
+		{"a plain error exits 1", errors.New("boom"), 1, "wyrm: boom\n"},
+		{"a usage mistake exits 2", usageErrf("bad %s", "flag"), 2, "wyrm: bad flag\n"},
+		{"an already-reported failure prints nothing", silent(2), 2, ""},
+		{"an already-reported help exits 0", silent(0), 0, ""},
+		{"a wrapped exitErr keeps its code", fmt.Errorf("ctx: %w", usageErrf("inner")), 2, "wyrm: inner\n"},
 	}
-	if err := os.WriteFile(filepath.Join(settingsDir, config.SettingsFileName), []byte("storage = \"bogus\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	var stderr bytes.Buffer
-	settings, code, ok := loadSettings(&stderr)
-	if ok {
-		t.Fatal("ok = true, want false for an invalid global settings file")
-	}
-	if settings != nil {
-		t.Errorf("settings = %v, want nil on error", settings)
-	}
-	if code != 1 {
-		t.Errorf("code = %d, want 1", code)
-	}
-	if !strings.HasPrefix(stderr.String(), "wyrm: ") {
-		t.Errorf("stderr = %q, want a wyrm-prefixed error", stderr.String())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			a := &app{stdout: io.Discard, stderr: &stderr}
+			if got := a.report(tt.err); got != tt.wantCode {
+				t.Errorf("report = %d, want %d", got, tt.wantCode)
+			}
+			if got := stderr.String(); got != tt.wantOut {
+				t.Errorf("stderr = %q, want %q", got, tt.wantOut)
+			}
+		})
 	}
 }
 

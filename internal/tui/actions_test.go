@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -225,7 +226,7 @@ func TestCycleLayoutAdvances(t *testing.T) {
 func TestActionErrStored(t *testing.T) {
 	m := New(nopRunner(), nil)
 	m, _ = update(m, actionErrMsg{err: errTest})
-	if m.err != errTest {
+	if !errors.Is(m.err, errTest) {
 		t.Errorf("m.err = %v, want the action error", m.err)
 	}
 }
