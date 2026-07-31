@@ -6,6 +6,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-31
+
+### Added
+- The TUI is now driveable with the mouse, on by default. Click to focus a
+  panel and select a row, double-click to attach (or start a project from the
+  Projects panel), and scroll the panel under the pointer with the wheel.
+- Right-clicking a row opens a context menu of the actions for that panel —
+  attach, rename, new window, cycle layout, zoom, kill — targeting the row
+  under the pointer rather than the previous selection. It takes the keyboard
+  (`↑`/`↓`, `Enter`, `Esc`) as well as the mouse, and shows each action's key
+  binding so it teaches the shortcuts instead of replacing them.
+- `m` toggles mouse capture for the current run, and `[tui] mouse = false` in
+  `~/.config/wyrm/config.toml` disables it permanently — capturing the mouse
+  takes click-drag text selection away from the terminal, so it has to be
+  surrenderable.
+- Sessions, windows, and panes running an AI coding agent are now marked with
+  what that agent needs: `⏸` when it's stopped on a prompt it can't answer
+  itself, `✓` when it has finished its turn and is waiting for the next
+  instruction. A working agent is deliberately unmarked. Windows and sessions
+  take the state of their most urgent pane, so a marker on a session means
+  something inside it wants attention. Configurable through `[tui.agent]`
+  (`enabled`, `commands`); recognises `claude` out of the box.
+- Two new theme roles, `blocked` and `idle`, for those markers.
+
 ## [0.4.1] - 2026-07-25
 
 ### Fixed
@@ -429,7 +453,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/jskoll/wyrm/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/jskoll/wyrm/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/jskoll/wyrm/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/jskoll/wyrm/compare/v0.3.0...v0.3.1
