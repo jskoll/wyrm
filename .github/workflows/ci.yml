@@ -81,4 +81,18 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - name: govulncheck
+        # GOTOOLCHAIN=auto because the scanner's own go directive has run ahead
+        # of wyrm's: x/vuln needs Go 1.25+, setup-go installs exactly the version
+        # in go.mod, and it also sets GOTOOLCHAIN=local — which forbids fetching
+        # the newer toolchain the tool asks for. "auto" lets Go download one just
+        # to run the scanner; wyrm itself stays buildable on the go.mod version,
+        # which is the whole point of not simply bumping it.
+        #
+        # Pinned rather than @latest so a release upstream can't break CI on a
+        # day nobody touched this repo — which is exactly how it broke. The
+        # advisory data is fetched live regardless, so a pinned tool is not a
+        # stale one.
+        env:
+          GOTOOLCHAIN: auto
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...

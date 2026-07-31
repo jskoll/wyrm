@@ -17,9 +17,12 @@ lint:
 	golangci-lint run
 	test -z "$$(gofmt -l .)"
 
-# Same advisory check CI runs, for before you push.
+# Same advisory check CI runs, for before you push. Version and GOTOOLCHAIN are
+# pinned to match .github/workflows/ci.yml — the scanner needs a newer Go than
+# wyrm does, and a local run that quietly used a different one is how the CI
+# failure got missed in the first place.
 vulncheck:
-	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+	GOTOOLCHAIN=auto go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 
 # Coverage plus the floor CI enforces, so a local run fails the same way.
 cover:
