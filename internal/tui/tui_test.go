@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/jskoll/wyrm/internal/picker"
+	"github.com/jskoll/wyrm/internal/sessions"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
@@ -98,7 +98,7 @@ func TestSessionsMsgLoadsWindows(t *testing.T) {
 		return "", nil
 	}}
 	m := New(r, nil)
-	m, cmd := update(m, sessionsMsg{sessions: []picker.Session{{ID: "$1", Name: "alpha", Windows: 1}}})
+	m, cmd := update(m, sessionsMsg{sessions: []sessions.Session{{ID: "$1", Name: "alpha", Windows: 1}}})
 	if len(m.sessions) != 1 || m.sessionCur != 0 {
 		t.Fatalf("sessions not stored: %+v cur=%d", m.sessions, m.sessionCur)
 	}
@@ -114,7 +114,7 @@ func TestSessionsMsgLoadsWindows(t *testing.T) {
 
 func TestWindowsMsgPicksActiveWindow(t *testing.T) {
 	m := New(nopRunner(), nil)
-	m.sessions = []picker.Session{{ID: "$1", Name: "alpha"}}
+	m.sessions = []sessions.Session{{ID: "$1", Name: "alpha"}}
 	m.sessionCur = 0
 	windows := []tmux.WindowInfo{
 		{Index: 0, ID: "@1", Active: false, Name: "one"},
@@ -133,7 +133,7 @@ func TestWindowsMsgPicksActiveWindow(t *testing.T) {
 
 func TestStaleWindowsMsgIgnored(t *testing.T) {
 	m := New(nopRunner(), nil)
-	m.sessions = []picker.Session{{ID: "$1"}, {ID: "$2"}}
+	m.sessions = []sessions.Session{{ID: "$1"}, {ID: "$2"}}
 	m.sessionCur = 0 // current session is $1
 	before := m.windows
 	m, cmd := update(m, windowsMsg{sessionID: "$2", windows: []tmux.WindowInfo{{ID: "@9"}}})
@@ -162,7 +162,7 @@ func TestNavigationResetsChildCursors(t *testing.T) {
 	r := funcRunner{fn: func(_ ...string) (string, error) { return "", nil }}
 	m := New(r, nil)
 	m.focus = panelSessions
-	m.sessions = []picker.Session{{ID: "$1"}, {ID: "$2"}}
+	m.sessions = []sessions.Session{{ID: "$1"}, {ID: "$2"}}
 	m.sessionCur = 0
 	m.windowCur = 3
 	m.paneCur = 2
@@ -181,7 +181,7 @@ func TestNavigationResetsChildCursors(t *testing.T) {
 func TestEnterSetsPendingAttachAndQuits(t *testing.T) {
 	m := New(nopRunner(), nil)
 	m.focus = panelSessions
-	m.sessions = []picker.Session{{ID: "$7", Name: "target"}}
+	m.sessions = []sessions.Session{{ID: "$7", Name: "target"}}
 	m.sessionCur = 0
 	m, cmd := update(m, key("enter"))
 	if m.pendingAttach != "$7" {
@@ -216,5 +216,167 @@ func TestQuitKeys(t *testing.T) {
 	_, cmd := update(m, key("q"))
 	if _, ok := run(cmd).(tea.QuitMsg); !ok {
 		t.Errorf("q did not quit")
+	}
+}
+
+// --- compact (wyrm pick) mode ---
+
+func compactModel() Model {
+	m := New(nopRunner(), nil)
+	m.compact = true
+	m.focus = panelSessions
+	m.sessions = []sessions.Session{{ID: "$1", Name: "alpha"}, {ID: "$2", Name: "beta"}}
+	m.windows = []tmux.WindowInfo{{Index: 0, ID: "@1", Name: "code"}}
+	m.sessionCur, m.windowCur = 0, 0
+	m.width, m.height, m.ready = 100, 40, true
+	return m
+}
+
+// Compact mode shows Sessions over Windows and nothing else — the Projects and
+// Panes panels are browsing tools that `wyrm pick` has no use for.
+func TestCompactShowsOnlySessionsAndWindows(t *testing.T) {
+	m := compactModel()
+	if got := m.panels(); len(got) != 2 || got[0] != panelSessions || got[1] != panelWindows {
+		t.Fatalf("panels() = %v, want [sessions windows]", got)
+	}
+	if m.panelIndex(panelProjects) != -1 || m.panelIndex(panelPanes) != -1 {
+		t.Error("Projects/Panes must not appear in the compact panel set")
+	}
+}
+
+// Tab cycles within the shown panels rather than walking into ones that aren't
+// rendered — the bug a fixed "% numPanels" would reintroduce.
+func TestCompactFocusCyclesOnlyShownPanels(t *testing.T) {
+	m := compactModel()
+	seen := map[panel]bool{}
+	for i := 0; i < 6; i++ {
+		next, _ := m.cycleFocus(1)
+		m = next.(Model)
+		seen[m.focus] = true
+	}
+	if seen[panelProjects] || seen[panelPanes] {
+		t.Errorf("focus reached a hidden panel: %v", seen)
+	}
+	if !seen[panelSessions] || !seen[panelWindows] {
+		t.Errorf("focus did not reach both shown panels: %v", seen)
+	}
+	// And backwards.
+	back, _ := m.cycleFocus(-1)
+	if p := back.(Model).focus; p != panelSessions && p != panelWindows {
+		t.Errorf("shift-tab focus = %v, want a shown panel", p)
+	}
+}
+
+// The digit keys address the shown panels, so "1" is Sessions in compact mode
+// and "3"/"4" do nothing rather than focusing a panel that isn't drawn.
+func TestCompactDigitKeysAddressShownPanels(t *testing.T) {
+	m := compactModel()
+	m, _ = update(m, key("1"))
+	if m.focus != panelSessions {
+		t.Errorf("'1' focused %v, want Sessions", m.focus)
+	}
+	m, _ = update(m, key("2"))
+	if m.focus != panelWindows {
+		t.Errorf("'2' focused %v, want Windows", m.focus)
+	}
+	m, _ = update(m, key("4"))
+	if m.focus != panelWindows {
+		t.Errorf("'4' focused %v, want the focus left alone", m.focus)
+	}
+}
+
+// The full view still maps its four digits, so unifying the two UIs didn't cost
+// the TUI anything.
+func TestFullDigitKeysStillAddressFourPanels(t *testing.T) {
+	m := New(nopRunner(), nil)
+	m.width, m.height, m.ready = 100, 40, true
+	for i, want := range []panel{panelProjects, panelSessions, panelWindows, panelPanes} {
+		m, _ = update(m, key(string(rune('1'+i))))
+		if m.focus != want {
+			t.Errorf("'%d' focused %v, want %v", i+1, m.focus, want)
+		}
+	}
+}
+
+// Compact mode renders two boxes, and fits in a terminal too short for four.
+func TestCompactRendersTwoPanelsAndFitsShorterTerminals(t *testing.T) {
+	m := compactModel()
+	full := New(nopRunner(), nil)
+	if m.minHeight() >= full.minHeight() {
+		t.Errorf("compact minHeight %d should be below the full view's %d", m.minHeight(), full.minHeight())
+	}
+
+	out := m.View()
+	if !strings.Contains(out, "Sessions") || !strings.Contains(out, "Windows") {
+		t.Errorf("compact view missing a panel title:\n%s", out)
+	}
+	if strings.Contains(out, "Projects") || strings.Contains(out, "Panes") {
+		t.Errorf("compact view drew a hidden panel:\n%s", out)
+	}
+}
+
+// The geometry the mouse hit test reads must describe the two boxes actually
+// drawn, or a click lands on the wrong row — the failure layout.go exists to
+// prevent.
+func TestCompactHitTestMatchesRenderedPanels(t *testing.T) {
+	m := compactModel()
+	g := m.geometry()
+	if len(g.panels) != 2 || len(g.boxes) != 2 || len(g.heights) != 2 {
+		t.Fatalf("geometry describes %d panels/%d boxes/%d heights, want 2 each",
+			len(g.panels), len(g.boxes), len(g.heights))
+	}
+	total := 0
+	for _, h := range g.heights {
+		total += h
+	}
+	if total != g.bodyH {
+		t.Errorf("panel heights sum to %d, want the body height %d", total, g.bodyH)
+	}
+	// The first list row of the top panel selects index 0 of that panel.
+	top, _ := g.boxes[0].listRows()
+	h, ok := m.hitTest(1, top)
+	if !ok || h.panel != panelSessions || h.row != 0 {
+		t.Errorf("hitTest at the first Sessions row = %+v (ok=%v), want sessions row 0", h, ok)
+	}
+}
+
+// In the compact picker the filter is the whole interaction, so Enter finishes
+// the job. Requiring a second Enter to attach would be a step backwards from
+// the fzf-style chooser `wyrm pick` replaced.
+func TestCompactFilterEnterAttaches(t *testing.T) {
+	m := compactModel()
+	m.mode, m.filtering = modeFilter, true
+	for _, r := range "bet" {
+		m, _ = update(m, key(string(r)))
+	}
+	if got := m.visibleSessions(); len(got) != 1 || got[0].Name != "beta" {
+		t.Fatalf("filter left %+v, want just beta", got)
+	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.mode != modeNormal {
+		t.Error("enter should close the filter")
+	}
+	if m.pendingAttach != "$2" {
+		t.Errorf("pendingAttach = %q, want beta's $2 — one enter should attach", m.pendingAttach)
+	}
+}
+
+// The full TUI keeps lazygit's behavior: `/` is one tool among several, so
+// Enter commits the search rather than acting on it.
+func TestFullFilterEnterOnlyClosesTheFilter(t *testing.T) {
+	m := New(nopRunner(), nil)
+	m.sessions = []sessions.Session{{ID: "$1", Name: "alpha"}, {ID: "$2", Name: "beta"}}
+	m.sessionCur, m.focus = 0, panelSessions
+	m.width, m.height, m.ready = 100, 40, true
+	m, _ = update(m, key("/"))
+	for _, r := range "bet" {
+		m, _ = update(m, key(string(r)))
+	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.mode != modeNormal {
+		t.Error("enter should close the filter")
+	}
+	if m.pendingAttach != "" {
+		t.Errorf("pendingAttach = %q, want empty — the full TUI needs a second enter", m.pendingAttach)
 	}
 }

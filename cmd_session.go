@@ -8,8 +8,8 @@ import (
 	"io"
 
 	"github.com/jskoll/wyrm/internal/config"
-	"github.com/jskoll/wyrm/internal/picker"
 	"github.com/jskoll/wyrm/internal/session"
+	"github.com/jskoll/wyrm/internal/sessions"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
@@ -222,7 +222,7 @@ func (a *app) killByName(settings *config.Settings, target string, dryRun bool) 
 		_, _ = fmt.Fprintf(a.stdout, "tmux kill-session -t %s\n", id)
 		return nil
 	}
-	if err := picker.KillSession(a.runner, id); err != nil {
+	if err := sessions.Kill(a.runner, id); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(a.stdout, "killed session %s\n", target)

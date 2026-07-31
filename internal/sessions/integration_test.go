@@ -1,4 +1,4 @@
-package picker
+package sessions
 
 import (
 	"fmt"
@@ -13,8 +13,7 @@ import (
 // TestListAndKillIntegration drives a real tmux server on an isolated socket:
 // creates two sessions, verifies ListSessions reports them (most-recently
 // active first), then kills one through KillSession and confirms it's gone.
-// Skipped with -short or without tmux. The interactive Run loop needs a real
-// TTY and is exercised manually, not here.
+// Skipped with -short or without tmux.
 func TestListAndKillIntegration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
@@ -23,11 +22,11 @@ func TestListAndKillIntegration(t *testing.T) {
 		t.Skip("tmux not installed")
 	}
 
-	r := tmux.Exec{SocketName: fmt.Sprintf("wyrm-pick-it-%d", os.Getpid())}
+	r := tmux.Exec{SocketName: fmt.Sprintf("wyrm-sess-it-%d", os.Getpid())}
 	t.Cleanup(func() { r.Run("kill-server") }) //nolint:errcheck
 
 	// No server running yet: ListSessions must report empty, not error.
-	if got, err := ListSessions(r); err != nil || len(got) != 0 {
+	if got, err := List(r); err != nil || len(got) != 0 {
 		t.Fatalf("ListSessions before any server: got %v, err %v; want empty, nil", got, err)
 	}
 
@@ -37,7 +36,7 @@ func TestListAndKillIntegration(t *testing.T) {
 		}
 	}
 
-	got, err := ListSessions(r)
+	got, err := List(r)
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
@@ -55,10 +54,10 @@ func TestListAndKillIntegration(t *testing.T) {
 		t.Errorf("beta wrong: %+v", s)
 	}
 
-	if err := KillSession(r, seen["alpha"].ID); err != nil {
+	if err := Kill(r, seen["alpha"].ID); err != nil {
 		t.Fatalf("KillSession: %v", err)
 	}
-	after, err := ListSessions(r)
+	after, err := List(r)
 	if err != nil {
 		t.Fatalf("ListSessions after kill: %v", err)
 	}
@@ -81,7 +80,7 @@ func TestDottedSessionNameIntegration(t *testing.T) {
 		t.Skip("tmux not installed")
 	}
 
-	r := tmux.Exec{SocketName: fmt.Sprintf("wyrm-pick-dot-it-%d", os.Getpid())}
+	r := tmux.Exec{SocketName: fmt.Sprintf("wyrm-sess-dot-it-%d", os.Getpid())}
 	t.Cleanup(func() { r.Run("kill-server") }) //nolint:errcheck
 
 	if out, err := r.Run("new-session", "-d", "-s", "wyrm.vim"); err != nil {
@@ -97,7 +96,7 @@ func TestDottedSessionNameIntegration(t *testing.T) {
 		t.Fatalf("new-session: %v (%s)", err, out)
 	}
 
-	got, err := ListSessions(r)
+	got, err := List(r)
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
@@ -113,10 +112,10 @@ func TestDottedSessionNameIntegration(t *testing.T) {
 		t.Skipf(`this tmux build sanitizes "." in session names (got %q); the bug this test guards against doesn't apply here`, got[0].Name)
 	}
 
-	if err := KillSession(r, got[0].ID); err != nil {
+	if err := Kill(r, got[0].ID); err != nil {
 		t.Fatalf("KillSession: %v", err)
 	}
-	after, err := ListSessions(r)
+	after, err := List(r)
 	if err != nil {
 		t.Fatalf("ListSessions after kill: %v", err)
 	}

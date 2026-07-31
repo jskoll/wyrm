@@ -132,66 +132,48 @@ but works standalone too.
 
 ## Picking a running session
 
-`wyrm pick` opens an interactive, fuzzy list of the running tmux sessions
-(most-recently-active first) and attaches to the one you choose — handy from a
-plain shell, where tmux's own `choose-tree` isn't available because you aren't
-attached to a client yet.
+`wyrm pick` opens an interactive, fuzzy list of the tmux sessions currently
+running (most-recently-active first) and attaches to the one you choose. It's
+handy from a plain shell, where tmux's own `choose-tree` isn't available
+because you aren't attached to a client yet.
+
+It is `wyrm tui` in a compact two-panel form — Sessions over Windows, with the
+filter already open so typing narrows the list immediately. Same program, same
+keys: anything you learn in one works in the other.
 
 | Key | Action |
 |---|---|
-| type | fuzzy-filter by session name |
-| ↑ / ↓, `Ctrl-P` / `Ctrl-N` | move the selection |
-| `Enter` | attach (or `switch-client` if you're already in tmux) |
-| `Ctrl-W` | show the selected session's windows, to jump straight to one (below) |
-| `Ctrl-X` | kill the selected session (a plain tmux kill, no `on_project_exit`) |
-| `Esc` | cancel |
-| `Ctrl-C` | quit outright, from either view |
-
-The `>`-prefixed row is the current selection (shown in reverse video in a
-real terminal):
-
-```
-> 
-  api-server               2 windows
-> wyrm                     3 windows  (attached)
-  notes                    1 window
-
-  3/3 · up/down move · enter attach · ctrl-x kill · ctrl-w windows · esc quit
-```
-
-The picker is built into the binary — no dependency on `fzf` or any other
-external tool.
-
-It also works well inside a tmux `display-popup`, which is a convenient way
-to bind it to a key while attached to a session:
-
-```tmux
-# ~/.tmux.conf — prefix + y opens the session picker in a popup
-bind y display-popup -d "#{pane_current_path}" -w 50% -h 50% -E "wyrm pick"
-```
-
-The picker redraws in place and clips over-long rows to the popup's width, so
-navigation stays stable regardless of the popup size or how many sessions are
-running.
-
-`Ctrl-W` drops into that session's window list (names only, no fuzzy filter —
-window counts per session are small enough a plain list is enough). `Enter`
-selects a window and attaches (or switches) straight to it; `Esc` backs out
-to the session list instead of quitting the picker.
+| type | fuzzy-filter the focused panel |
+| ↑ / ↓, `j` / `k` | move the selection |
+| `Enter` | attach to the selected session (or `switch-client` if you're already in tmux), landing on the selected window |
+| `Tab`, `1` / `2` | move between the Sessions and Windows panels |
+| `x` | kill the selected session or window, after a `y`/`n` confirm (no `on_project_exit` hook — it's a plain tmux kill) |
+| `r` | rename the selection |
+| `Esc` | clear the filter |
+| `?` | the full key reference |
+| `q`, `Ctrl-C` | quit |
 
 ```
-windows of wyrm
-  code
-> server  (active)
-  logs
-
-  3 windows · up/down move · enter switch · esc back
+┌Sessions──────────────┐┌%3 nvim───────────────────────────────┐
+│  api-server     (2w) ││                                      │
+│● wyrm           (3w) ││  … live preview of the selected pane │
+│  notes          (1w) ││                                      │
+└──────────────────────┘│                                      │
+┌Windows───────────────┐│                                      │
+│0: code               ││                                      │
+│1: server             ││                                      │
+└──────────────────────┘└──────────────────────────────────────┘
+/wyr_
 ```
 
-Window counts are shown in cyan and `(attached)` in green. Set
-[`NO_COLOR`](https://no-color.org) (any value) to disable color — the rest
-of the picker's styling (bold, dim, the reverse-video selection highlight)
-isn't affected, since it isn't color.
+Both interfaces are built into the binary — there's no dependency on `fzf` or
+any other external tool, keeping wyrm a single static binary. Colors come from
+the same optional `theme.toml` the TUI uses.
+
+> **Note (changed in 0.6.0):** `pick` used to be a separate implementation with
+> its own bindings (`Ctrl-X` to kill, `Ctrl-W` for windows, `Ctrl-U` to clear
+> the filter). Those are now `x`, the Windows panel, and `Esc`. Two UIs offering
+> the same actions under different keys was the reason for the change.
 
 If you already know the session's name, `wyrm <name>` skips the picker and
 attaches (or `switch-client`s) directly to it — exact match only, no fuzzy
@@ -292,9 +274,9 @@ Colors are literal hex rather than terminal palette indices, so a theme looks
 the same wherever it runs; Lipgloss degrades them on terminals without true
 color and drops them entirely under [`NO_COLOR`](https://no-color.org).
 
-The TUI is the one part of wyrm built on the [Charm](https://charm.sh) stack
-(Bubble Tea / Lipgloss); the core build/attach path and `pick` remain
-dependency-free.
+`wyrm tui` and `wyrm pick` are the same [Charm](https://charm.sh) stack
+program (Bubble Tea / Lipgloss); the core build/attach path stays free of it,
+so `wyrm up` never renders anything.
 
 ## Saving a running session
 

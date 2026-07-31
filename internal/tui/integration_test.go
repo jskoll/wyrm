@@ -11,7 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/jskoll/wyrm/internal/picker"
+	"github.com/jskoll/wyrm/internal/sessions"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
@@ -105,23 +105,23 @@ func TestIntegrationProject(t *testing.T) {
 	if started.sessionID == "" {
 		t.Fatal("startProjectCmd returned an empty session ID")
 	}
-	sessions, _ := picker.ListSessions(r)
-	if !hasSession(sessions, "itproj") {
-		t.Fatalf("session 'itproj' not running after start; have %+v", sessions)
+	running, _ := sessions.List(r)
+	if !hasSession(running, "itproj") {
+		t.Fatalf("session 'itproj' not running after start; have %+v", running)
 	}
 
 	msg, ok := run(killProjectCmd(r, nil, path)).(projectsMsg)
 	if !ok || msg.err != nil {
 		t.Fatalf("killProjectCmd -> %+v", msg)
 	}
-	sessions, _ = picker.ListSessions(r)
-	if hasSession(sessions, "itproj") {
-		t.Errorf("session 'itproj' still running after stop; have %+v", sessions)
+	running, _ = sessions.List(r)
+	if hasSession(running, "itproj") {
+		t.Errorf("session 'itproj' still running after stop; have %+v", running)
 	}
 }
 
-func hasSession(sessions []picker.Session, name string) bool {
-	for _, s := range sessions {
+func hasSession(list []sessions.Session, name string) bool {
+	for _, s := range list {
 		if s.Name == name {
 			return true
 		}
@@ -146,7 +146,7 @@ func TestIntegrationManagement(t *testing.T) {
 	if out, err := r.Run("new-session", "-d", "-s", "mgmt", "-n", "first"); err != nil {
 		t.Fatalf("new-session: %v (%s)", err, out)
 	}
-	sessions, err := picker.ListSessions(r)
+	sessions, err := sessions.List(r)
 	if err != nil || len(sessions) == 0 {
 		t.Fatalf("ListSessions: %v (%d sessions)", err, len(sessions))
 	}

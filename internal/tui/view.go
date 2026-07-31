@@ -25,14 +25,18 @@ const (
 	minPanelHeight = borderSize + titleRows + 1
 )
 
-// minWidth/minHeight are the smallest terminal the four-panel layout fits in.
-// Below minHeight the panels would render more lines than the screen has —
-// lipgloss's Height() pads but never clips — and Bubble Tea keeps only the
-// last screenful, silently slicing the top panels away.
-var (
-	minWidth  = minLeftWidth + 20
-	minHeight = int(numPanels)*minPanelHeight + helpHeight
-)
+// minWidth is the narrowest terminal the layout fits in.
+//
+// minHeight depends on how many panels are shown, so it is a method: below it
+// the panels would render more lines than the screen has — lipgloss's Height()
+// pads but never clips — and Bubble Tea keeps only the last screenful, silently
+// slicing the top panels away. The compact picker shows two panels and so fits
+// in terminals the full four-panel view refuses.
+var minWidth = minLeftWidth + 20
+
+func (m Model) minHeight() int {
+	return len(m.panels())*minPanelHeight + helpHeight
+}
 
 // span is one styled run of text within a list row. Rows are assembled as
 // spans rather than as pre-rendered strings so the selection highlight can be
@@ -95,22 +99,20 @@ func (m Model) View() string {
 		return m.renderHelpOverlay()
 	}
 
-	if !m.ready || m.width < minWidth || m.height < minHeight {
+	if !m.ready || m.width < minWidth || m.height < m.minHeight() {
 		return fmt.Sprintf("wyrm: terminal too small (need at least %dx%d, have %dx%d)",
-			minWidth, minHeight, m.width, m.height)
+			minWidth, m.minHeight(), m.width, m.height)
 	}
 
 	// One description of the layout, read by both the renderer and the mouse
 	// hit test — see layout.go.
 	g := m.geometry()
 
-	left := lipgloss.JoinVertical(
-		lipgloss.Left,
-		m.renderProjects(g.leftW, g.heights[panelProjects]),
-		m.renderSessions(g.leftW, g.heights[panelSessions]),
-		m.renderWindows(g.leftW, g.heights[panelWindows]),
-		m.renderPanes(g.leftW, g.heights[panelPanes]),
-	)
+	boxes := make([]string, len(g.panels))
+	for i, p := range g.panels {
+		boxes[i] = m.renderPanel(p, g.leftW, g.heights[i])
+	}
+	left := lipgloss.JoinVertical(lipgloss.Left, boxes...)
 	right := m.renderPreview(g.rightW, g.bodyH)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
@@ -123,16 +125,25 @@ func (m Model) View() string {
 	return frame
 }
 
-// panelHeights distributes the body's rows across the four left panels. Each
-// gets at least minPanelHeight, no more than its own fair share while it has
-// content to show, and all remaining slack goes to Sessions.
+// panelHeights distributes the body's rows across the left panels. Each gets at
+// least minPanelHeight, no more than its own fair share while it has content to
+// show, and all remaining slack goes to the panel at index slack.
 //
-// Splitting into equal quarters — the previous behavior — gave the Panes panel
+// Splitting into equal shares — the previous behavior — gave the Panes panel
 // (typically one to three entries) exactly as much room as Sessions, and at
 // 80x24 left every list showing two rows at a time.
-func panelHeights(bodyH int, counts []int) []int {
+//
+// counts is indexed by position in the shown panel list, not by panel value, so
+// the compact two-panel layout needs no special case here.
+func panelHeights(bodyH int, counts []int, slack int) []int {
 	n := len(counts)
 	heights := make([]int, n)
+	if n == 0 {
+		return heights
+	}
+	if slack < 0 || slack >= n {
+		slack = 0
+	}
 	if bodyH < n*minPanelHeight {
 		// View refuses to render this small; stay total-preserving anyway so
 		// nothing overflows if that guard is ever loosened.
@@ -164,8 +175,24 @@ func panelHeights(bodyH int, counts []int) []int {
 			left -= grow
 		}
 	}
-	heights[panelSessions] += left
+	heights[slack] += left
 	return heights
+}
+
+// renderPanel dispatches to the renderer for p. One entry point, so View can
+// walk whatever panel set the model shows without knowing which is which.
+func (m Model) renderPanel(p panel, outerW, outerH int) string {
+	switch p {
+	case panelProjects:
+		return m.renderProjects(outerW, outerH)
+	case panelSessions:
+		return m.renderSessions(outerW, outerH)
+	case panelWindows:
+		return m.renderWindows(outerW, outerH)
+	case panelPanes:
+		return m.renderPanes(outerW, outerH)
+	}
+	return ""
 }
 
 func (m Model) renderProjects(outerW, outerH int) string {
@@ -183,7 +210,7 @@ func (m Model) renderProjects(outerW, outerH int) string {
 			rows[i] = appendAgentMark(rows[i], m.agents.session(p.SessionID))
 		}
 	}
-	return m.renderPanel(panelProjects, "Projects", rows, m.projectCur, outerW, outerH, "no wyrm configs found")
+	return m.renderListBox(panelProjects, "Projects", rows, m.projectCur, outerW, outerH, "no wyrm configs found")
 }
 
 func (m Model) renderSessions(outerW, outerH int) string {
@@ -200,7 +227,7 @@ func (m Model) renderSessions(outerW, outerH int) string {
 			{hintStyle, fmt.Sprintf("(%dw)", s.Windows)},
 		}, m.agents.session(s.ID))
 	}
-	return m.renderPanel(panelSessions, "Sessions", rows, m.sessionCur, outerW, outerH, "no running sessions")
+	return m.renderListBox(panelSessions, "Sessions", rows, m.sessionCur, outerW, outerH, "no running sessions")
 }
 
 func (m Model) renderWindows(outerW, outerH int) string {
@@ -216,7 +243,7 @@ func (m Model) renderWindows(outerW, outerH int) string {
 			plain(" " + name),
 		}, m.agents.window(w.ID))
 	}
-	return m.renderPanel(panelWindows, "Windows", rows, m.windowCur, outerW, outerH, "")
+	return m.renderListBox(panelWindows, "Windows", rows, m.windowCur, outerW, outerH, "")
 }
 
 func (m Model) renderPanes(outerW, outerH int) string {
@@ -228,7 +255,7 @@ func (m Model) renderPanes(outerW, outerH int) string {
 			plain(" " + p.Command),
 		}, m.agents.pane(p.ID))
 	}
-	return m.renderPanel(panelPanes, "Panes", rows, m.paneCur, outerW, outerH, "")
+	return m.renderListBox(panelPanes, "Panes", rows, m.paneCur, outerW, outerH, "")
 }
 
 // appendAgentMark adds the trailing "waiting for you" glyph to a row, if the
@@ -241,9 +268,9 @@ func appendAgentMark(row []span, state agent.State) []span {
 	return row
 }
 
-// renderPanel draws one bordered list box with a title, a cursor-tracking
+// renderListBox draws one bordered list box with a title, a cursor-tracking
 // viewport, and an empty-state hint.
-func (m Model) renderPanel(p panel, title string, rows [][]span, cursor, outerW, outerH int, empty string) string {
+func (m Model) renderListBox(p panel, title string, rows [][]span, cursor, outerW, outerH int, empty string) string {
 	focused := m.focus == p
 	innerW := outerW - borderSize
 	innerH := outerH - borderSize

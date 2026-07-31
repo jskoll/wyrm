@@ -8,8 +8,8 @@ import (
 
 	"github.com/jskoll/wyrm/internal/config"
 	"github.com/jskoll/wyrm/internal/editor"
-	"github.com/jskoll/wyrm/internal/picker"
 	"github.com/jskoll/wyrm/internal/session"
+	"github.com/jskoll/wyrm/internal/sessions"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
@@ -29,7 +29,7 @@ type Project struct {
 // session by each project's name is currently running.
 func listProjects(r tmux.Runner, settings *config.Settings) ([]Project, error) {
 	running := map[string]string{}
-	if sessions, err := picker.ListSessions(r); err == nil {
+	if sessions, err := sessions.List(r); err == nil {
 		for _, s := range sessions {
 			running[s.Name] = s.ID
 		}

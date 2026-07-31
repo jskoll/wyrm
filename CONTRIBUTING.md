@@ -23,14 +23,24 @@ The integration tests run a real tmux server on an isolated socket
 ## Layout
 
 ```
-main.go            subcommand dispatch + wiring only
+main.go            subcommand dispatch, error/exit-code policy, shared helpers
+cmd_session.go     up, restart, kill, attach-by-name
+cmd_config.go      edit, validate, save, migrate-config, list-configs
+cmd_ui.go          pick, tui, list
 internal/config/   TOML types, parsing, validation, settings, project discovery
 internal/tmux/     Runner interface, real exec implementation, dry-run recorder
 internal/session/  session creation/teardown (tested against a mock Runner)
+internal/sessions/ listing/killing/matching running sessions — no rendering
 internal/freeze/   the reverse of session: a live tmux layout -> a config
-internal/picker/   the dependency-free raw-terminal fuzzy picker (wyrm pick)
-internal/tui/      the Bubble Tea session manager (wyrm tui)
+internal/agent/    classifying what an AI agent in a pane is doing
+internal/editor/   resolving $EDITOR, shared by `wyrm edit` and the TUI
+internal/tui/      the Bubble Tea session manager (wyrm tui and wyrm pick)
 ```
+
+Each verb in `cmd_*.go` returns an `error`; `app.report` in `main.go` is the one
+place that turns it into a message and an exit status. Return `usageErrf` for a
+mistake in how the command was typed (exit 2) and a plain error for a failure
+(exit 1).
 
 Everything that talks to tmux goes through `tmux.Runner`, so it can be driven
 by a recording mock in tests. `main.run` takes its stdio, runner, and attach

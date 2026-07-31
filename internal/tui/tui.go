@@ -24,7 +24,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jskoll/wyrm/internal/config"
-	"github.com/jskoll/wyrm/internal/picker"
+	"github.com/jskoll/wyrm/internal/sessions"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
@@ -91,7 +91,7 @@ type Model struct {
 	focus panel
 
 	projects []Project
-	sessions []picker.Session
+	sessions []sessions.Session
 	windows  []tmux.WindowInfo
 	panes    []tmux.PaneInfo
 
@@ -136,6 +136,12 @@ type Model struct {
 	// agents holds the last agent-pane scan: which sessions, windows, and panes
 	// hold an AI agent that's waiting on the user. Empty until the first scan.
 	agents agentStatus
+
+	// compact drops the Projects and Panes panels, leaving Sessions over
+	// Windows. It is what `wyrm pick` runs — see RunPicker. Focus and the mouse
+	// hit test both walk panels(), so nothing has to special-case it beyond the
+	// panel list itself.
+	compact bool
 
 	// mouseOn mirrors the terminal's mouse-reporting state, toggled by "m".
 	// Capturing the mouse takes click-drag text selection away from the
@@ -195,7 +201,7 @@ func (m Model) Init() tea.Cmd {
 // --- messages ---
 
 type sessionsMsg struct {
-	sessions []picker.Session
+	sessions []sessions.Session
 	err      error
 }
 
@@ -227,7 +233,7 @@ type listTickMsg time.Time
 
 func loadSessions(r tmux.Runner) tea.Cmd {
 	return func() tea.Msg {
-		s, err := picker.ListSessions(r)
+		s, err := sessions.List(r)
 		return sessionsMsg{sessions: s, err: err}
 	}
 }
@@ -283,21 +289,21 @@ func (m Model) visibleProjects() []Project {
 	}
 	out := make([]Project, 0, len(m.projects))
 	for _, p := range m.projects {
-		if _, ok := picker.FuzzyMatch(f, p.Name); ok {
+		if _, ok := sessions.FuzzyMatch(f, p.Name); ok {
 			out = append(out, p)
 		}
 	}
 	return out
 }
 
-func (m Model) visibleSessions() []picker.Session {
+func (m Model) visibleSessions() []sessions.Session {
 	f := m.filterFor(panelSessions)
 	if f == "" {
 		return m.sessions
 	}
-	out := make([]picker.Session, 0, len(m.sessions))
+	out := make([]sessions.Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
-		if _, ok := picker.FuzzyMatch(f, s.Name); ok {
+		if _, ok := sessions.FuzzyMatch(f, s.Name); ok {
 			out = append(out, s)
 		}
 	}
@@ -311,7 +317,7 @@ func (m Model) visibleWindows() []tmux.WindowInfo {
 	}
 	out := make([]tmux.WindowInfo, 0, len(m.windows))
 	for _, w := range m.windows {
-		if _, ok := picker.FuzzyMatch(f, w.Name); ok {
+		if _, ok := sessions.FuzzyMatch(f, w.Name); ok {
 			out = append(out, w)
 		}
 	}
@@ -325,11 +331,39 @@ func (m Model) visiblePanes() []tmux.PaneInfo {
 	}
 	out := make([]tmux.PaneInfo, 0, len(m.panes))
 	for _, p := range m.panes {
-		if _, ok := picker.FuzzyMatch(f, p.ID+" "+p.Command); ok {
+		if _, ok := sessions.FuzzyMatch(f, p.ID+" "+p.Command); ok {
 			out = append(out, p)
 		}
 	}
 	return out
+}
+
+// compactPanels is the panel set `wyrm pick` shows: find a session, optionally
+// pick the window to land on. Projects and Panes are browsing tools, which is
+// what the full TUI is for.
+var compactPanels = []panel{panelSessions, panelWindows}
+
+// allPanels is the full cascade, in render order.
+var allPanels = []panel{panelProjects, panelSessions, panelWindows, panelPanes}
+
+// panels returns the panels this model shows, in top-to-bottom order. Focus
+// cycling, the layout, and the mouse hit test all read it, so "which panels
+// exist" is stated once.
+func (m Model) panels() []panel {
+	if m.compact {
+		return compactPanels
+	}
+	return allPanels
+}
+
+// panelIndex is p's position in panels(), or -1 when this model doesn't show it.
+func (m Model) panelIndex(p panel) int {
+	for i, q := range m.panels() {
+		if q == p {
+			return i
+		}
+	}
+	return -1
 }
 
 // panelLen is the number of rows currently displayed in a panel.
@@ -357,10 +391,10 @@ func (m Model) currentProject() (Project, bool) {
 	return list[m.projectCur], true
 }
 
-func (m Model) currentSession() (picker.Session, bool) {
+func (m Model) currentSession() (sessions.Session, bool) {
 	list := m.visibleSessions()
 	if m.sessionCur < 0 || m.sessionCur >= len(list) {
-		return picker.Session{}, false
+		return sessions.Session{}, false
 	}
 	return list[m.sessionCur], true
 }
@@ -547,6 +581,15 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		m.filtering = false
 		m.mode = modeNormal
+		// In the compact picker the filter *is* the interaction — it opens
+		// focused and typing is the first thing you do — so Enter finishes the
+		// job rather than just the filter. Requiring a second Enter to attach
+		// would be a step backwards from the fzf-style chooser this replaced.
+		// The full TUI keeps the lazygit behavior: there `/` is one tool among
+		// several and Enter should commit the search, not act on it.
+		if m.compact {
+			return m.activateSelection()
+		}
 		return m, nil
 	case tea.KeyEsc, tea.KeyCtrlC:
 		m.filtering = false
@@ -639,23 +682,13 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// for why the mouse can't be the only way in.
 		return m.openMenuAtSelection()
 	case "tab", "l", "right":
-		m.focus = (m.focus + 1) % numPanels
-		return m, m.updatePreview()
+		return m.cycleFocus(1)
 	case "shift+tab", "h", "left":
-		m.focus = (m.focus + numPanels - 1) % numPanels
-		return m, m.updatePreview()
-	case "1":
-		m.focus = panelProjects
-		return m, m.updatePreview()
-	case "2":
-		m.focus = panelSessions
-		return m, m.updatePreview()
-	case "3":
-		m.focus = panelWindows
-		return m, m.updatePreview()
-	case "4":
-		m.focus = panelPanes
-		return m, m.updatePreview()
+		return m.cycleFocus(-1)
+	case "1", "2", "3", "4":
+		// The digits address the panels this model actually shows, so in compact
+		// mode "1" is Sessions rather than a Projects panel that isn't there.
+		return m.focusPanelAt(int(msg.String()[0] - '1'))
 	case "up", "k":
 		return m.moveCursor(-1)
 	case "down", "j":
@@ -716,6 +749,28 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+// cycleFocus moves focus by delta positions through the shown panels, wrapping.
+func (m Model) cycleFocus(delta int) (tea.Model, tea.Cmd) {
+	list := m.panels()
+	i := m.panelIndex(m.focus)
+	if i < 0 {
+		i = 0
+	}
+	m.focus = list[((i+delta)%len(list)+len(list))%len(list)]
+	return m, m.updatePreview()
+}
+
+// focusPanelAt focuses the i'th shown panel, ignoring an out-of-range index so
+// a "4" in compact mode does nothing rather than something surprising.
+func (m Model) focusPanelAt(i int) (tea.Model, tea.Cmd) {
+	list := m.panels()
+	if i < 0 || i >= len(list) {
+		return m, nil
+	}
+	m.focus = list[i]
+	return m, m.updatePreview()
 }
 
 // pageSize is how far PgUp/PgDn move: one panel's worth of rows, less one for
@@ -1052,11 +1107,36 @@ func (m *Model) reloadPreview() tea.Cmd {
 	return loadPreview(m.runner, p.ID)
 }
 
-// Run drives the program to completion and returns the tmux session ID to
-// attach to (empty if the user quit without choosing). An error the model was
-// still holding when the user quit is reported on stderr — the alt screen is
-// gone by then, so the footer that would have shown it is too.
+// Run drives the full four-panel session manager to completion and returns the
+// tmux session ID to attach to (empty if the user quit without choosing). An
+// error the model was still holding when the user quit is reported on stderr —
+// the alt screen is gone by then, so the footer that would have shown it is too.
 func Run(runner tmux.Runner, settings *config.Settings, stderr io.Writer) (pendingAttach string, err error) {
+	return runProgram(New(runner, settings), settings, stderr)
+}
+
+// RunPicker drives the compact, fzf-style chooser behind `wyrm pick`: the same
+// model and the same key map, with only the Sessions and Windows panels shown
+// and the filter already open so typing narrows the list immediately.
+//
+// It is the same program as Run on purpose. `wyrm pick` used to be a second,
+// independent implementation — a hand-rolled raw-mode terminal loop with its
+// own escape-sequence decoder, its own frame renderer, its own signal handling
+// and its own key names — offering a strict subset of what the TUI already did.
+// Two key maps that disagreed about how to kill a session was the visible cost;
+// the invisible one was that every new feature had to be built twice or quietly
+// exist in only one of them.
+func RunPicker(runner tmux.Runner, settings *config.Settings, stderr io.Writer) (pendingAttach string, err error) {
+	m := New(runner, settings)
+	m.compact = true
+	m.focus = panelSessions
+	// Straight into filter mode: `pick` exists to be typed at. The full TUI
+	// starts in normal mode because it is a browser first and a finder second.
+	m.mode, m.filtering = modeFilter, true
+	return runProgram(m, settings, stderr)
+}
+
+func runProgram(m Model, settings *config.Settings, stderr io.Writer) (pendingAttach string, err error) {
 	// Before the alt screen: a broken theme file has to be reportable, and
 	// styles are read by every render from here on.
 	theme, err := LoadTheme()
@@ -1073,7 +1153,7 @@ func Run(runner tmux.Runner, settings *config.Settings, stderr io.Writer) (pendi
 		opts = append(opts, tea.WithMouseCellMotion())
 	}
 
-	fm, err := tea.NewProgram(New(runner, settings), opts...).Run()
+	fm, err := tea.NewProgram(m, opts...).Run()
 	if err != nil {
 		return "", err
 	}

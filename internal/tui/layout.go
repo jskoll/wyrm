@@ -24,12 +24,15 @@ func (b panelBox) listRows() (y0, y1 int) {
 }
 
 // geometry is the frame's layout for one render: the column split and where
-// each of the four panels sits.
+// each shown panel sits. panels lists them top-to-bottom; heights and boxes are
+// indexed alongside it, not by panel value, so a compact frame with two panels
+// needs no special case.
 type geometry struct {
 	leftW, rightW int
 	bodyH         int
+	panels        []panel
 	heights       []int
-	boxes         [numPanels]panelBox
+	boxes         []panelBox
 }
 
 // geometry computes the current layout from the model's size and list lengths.
@@ -48,11 +51,20 @@ func (m Model) geometry() geometry {
 		leftW:  leftW,
 		rightW: m.width - leftW,
 		bodyH:  m.height - helpHeight,
+		panels: m.panels(),
 	}
-	g.heights = panelHeights(g.bodyH, []int{
-		m.panelLen(panelProjects), m.panelLen(panelSessions),
-		m.panelLen(panelWindows), m.panelLen(panelPanes),
-	})
+	counts := make([]int, len(g.panels))
+	for i, p := range g.panels {
+		counts[i] = m.panelLen(p)
+	}
+	// Slack goes to whichever shown panel is the Sessions one — the list most
+	// worth seeing more of — and to the first panel if Sessions isn't shown.
+	grow := m.panelIndex(panelSessions)
+	if grow < 0 {
+		grow = 0
+	}
+	g.heights = panelHeights(g.bodyH, counts, grow)
+	g.boxes = make([]panelBox, len(g.panels))
 	y := 0
 	for i := range g.boxes {
 		g.boxes[i] = panelBox{y0: y, y1: y + g.heights[i]}
@@ -74,15 +86,15 @@ type hit struct {
 // hitTest reports what is at screen cell (x, y). It returns false for anything
 // outside the four list panels — the preview pane and the footer included.
 func (m Model) hitTest(x, y int) (hit, bool) {
-	if !m.ready || m.width < minWidth || m.height < minHeight {
+	if !m.ready || m.width < minWidth || m.height < m.minHeight() {
 		return hit{}, false
 	}
 	g := m.geometry()
 	if x < 0 || x >= g.leftW || y < 0 || y >= g.bodyH {
 		return hit{}, false
 	}
-	for p := panel(0); p < numPanels; p++ {
-		box := g.boxes[p]
+	for i, p := range g.panels {
+		box := g.boxes[i]
 		if y < box.y0 || y >= box.y1 {
 			continue
 		}

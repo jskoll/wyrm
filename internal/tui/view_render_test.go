@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 
-	"github.com/jskoll/wyrm/internal/picker"
+	"github.com/jskoll/wyrm/internal/sessions"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
@@ -35,7 +35,7 @@ func TestViewRendersProjectsWithRunningMark(t *testing.T) {
 
 func TestViewContextualHelpPerFocus(t *testing.T) {
 	m := newSizedModel()
-	m.sessions = []picker.Session{{ID: "$1", Name: "s", Windows: 1}}
+	m.sessions = []sessions.Session{{ID: "$1", Name: "s", Windows: 1}}
 	m.windows = []tmux.WindowInfo{{Index: 0, ID: "@1", Name: "w"}}
 	m.panes = []tmux.PaneInfo{{ID: "%1", Index: 0, Command: "sh"}}
 
@@ -90,7 +90,7 @@ func TestViewPromptModal(t *testing.T) {
 
 func TestViewWindowEmptyNameFallback(t *testing.T) {
 	m := newSizedModel()
-	m.sessions = []picker.Session{{ID: "$1", Name: "s", Windows: 1}}
+	m.sessions = []sessions.Session{{ID: "$1", Name: "s", Windows: 1}}
 	m.windows = []tmux.WindowInfo{{Index: 3, ID: "@3", Name: ""}}
 	m.focus = panelWindows
 
@@ -121,7 +121,7 @@ func TestFilteredPanelUsesFilterAccent(t *testing.T) {
 
 	m := newSizedModel()
 	m.focus = panelSessions
-	m.sessions = []picker.Session{{ID: "$1", Name: "webapp", Windows: 1}}
+	m.sessions = []sessions.Session{{ID: "$1", Name: "webapp", Windows: 1}}
 
 	if out := m.renderSessions(30, 6); strings.Contains(out, filterFgSGR) {
 		t.Errorf("unfiltered panel should not use the filter accent:\n%q", out)

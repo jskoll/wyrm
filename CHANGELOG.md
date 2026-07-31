@@ -32,6 +32,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (unknown keys, deprecations), for use in CI.
 
 ### Changed
+- **`wyrm pick` is now the same program as `wyrm tui`**, in a compact two-panel
+  form (Sessions over Windows) with the filter already open. It was previously a
+  separate hand-rolled raw-terminal UI — its own escape-sequence decoder, frame
+  renderer, signal handling and key names — offering a strict subset of what the
+  TUI already did. Consequences:
+  - The bindings are the TUI's: `x` kills (was `Ctrl-X`), the Windows panel
+    replaces the `Ctrl-W` drill-down, `Esc` clears the filter (was `Ctrl-U`).
+    `?` now shows a full key reference, and `pick` gains rename, layout cycling,
+    the live pane preview, mouse support, and the agent markers.
+  - `Enter` still attaches in one press: in compact mode it commits the filter
+    *and* activates, unlike the full TUI where `/` is one tool among several.
+  - `pick` now honors `theme.toml`. `NO_COLOR` is handled by Lipgloss rather
+    than by wyrm's own code.
+  - With no sessions running it still prints one line and exits 0 rather than
+    opening a full-screen program onto an empty list.
+- Internal: the session-listing data layer moved from `internal/picker` to
+  `internal/sessions` (`List`, `Kill`, `FuzzyMatch`, `FormatRow`), so the TUI no
+  longer imports a UI package to get at a struct. `internal/picker` is gone —
+  about 690 lines of terminal handling deleted, with coverage up rather than
+  down.
 - Internal: the CLI's verbs moved out of `main.go` into `cmd_session.go`,
   `cmd_config.go`, and `cmd_ui.go`, and each now returns an error instead of an
   exit code. One place turns that into a message and a status, replacing the 37

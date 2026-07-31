@@ -8,7 +8,7 @@ import (
 	"fmt"
 
 	"github.com/jskoll/wyrm/internal/config"
-	"github.com/jskoll/wyrm/internal/picker"
+	"github.com/jskoll/wyrm/internal/sessions"
 	"github.com/jskoll/wyrm/internal/tui"
 	"github.com/pelletier/go-toml/v2"
 )
@@ -16,9 +16,8 @@ import (
 // list prints the running tmux sessions non-interactively, in the given
 // format — for scripts and status bars, where the interactive picker doesn't
 // apply. An empty session list is not an error in any format: table mode
-// reports it on stderr (matching picker.Run's message) but exits 0; json/toml
-// print an empty array so consumers don't need to special-case "no server
-// running".
+// reports it on stderr but exits 0; json/toml print an empty array so
+// consumers don't need to special-case "no server running".
 func (a *app) list(args []string) error {
 	fs := a.newFlagSet("list")
 	format := fs.String("format", "table", "output format: table, json, toml, or names")
@@ -29,37 +28,37 @@ func (a *app) list(args []string) error {
 		return err
 	}
 
-	sessions, err := picker.ListSessions(a.runner)
+	running, err := sessions.List(a.runner)
 	if err != nil {
 		return err
 	}
-	if sessions == nil {
-		sessions = []picker.Session{}
+	if running == nil {
+		running = []sessions.Session{}
 	}
 
 	switch *format {
 	case "table":
-		if len(sessions) == 0 {
+		if len(running) == 0 {
 			_, _ = fmt.Fprintln(a.stderr, "wyrm: no running tmux sessions")
 			return nil
 		}
-		for _, s := range sessions {
+		for _, s := range running {
 			_, _ = fmt.Fprintln(a.stdout, formatSessionRow(s))
 		}
 	case "names":
-		for _, s := range sessions {
+		for _, s := range running {
 			_, _ = fmt.Fprintln(a.stdout, s.Name)
 		}
 	case "json":
-		data, err := json.MarshalIndent(sessions, "", "  ")
+		data, err := json.MarshalIndent(running, "", "  ")
 		if err != nil {
 			return err
 		}
 		_, _ = fmt.Fprintln(a.stdout, string(data))
 	case "toml":
 		data, err := toml.Marshal(struct {
-			Sessions []picker.Session `toml:"sessions"`
-		}{Sessions: sessions})
+			Sessions []sessions.Session `toml:"sessions"`
+		}{Sessions: running})
 		if err != nil {
 			return err
 		}
@@ -74,13 +73,18 @@ func (a *app) list(args []string) error {
 
 // formatSessionRow renders one session as a plain, awk-able line: name,
 // window count, and an attached marker — the same shape as the picker's row,
-// minus color codes. See picker.FormatRow.
-func formatSessionRow(s picker.Session) string {
-	return picker.FormatRow(s, false)
+// minus color codes. See sessions.FormatRow.
+func formatSessionRow(s sessions.Session) string {
+	return sessions.FormatRow(s)
 }
 
 // pick lets the user choose a running session and attaches to it. An empty
 // choice (nothing running, or the user aborted) exits quietly.
+//
+// It runs the same program `wyrm tui` does, in its compact two-panel form with
+// the filter already open — see tui.RunPicker. It used to be an entirely
+// separate hand-rolled terminal UI offering a subset of the same features under
+// different keys.
 func (a *app) pick(args []string) error {
 	fs := a.newFlagSet("pick")
 	if err := parseFlags(fs, args); err != nil {
@@ -89,7 +93,24 @@ func (a *app) pick(args []string) error {
 	if err := requireNoArgs(fs); err != nil {
 		return err
 	}
-	sessionID, err := picker.Run(a.runner, a.stderr)
+	settings, err := config.LoadSettings()
+	if err != nil {
+		return err
+	}
+	// Check before taking the screen. With nothing running there is nothing to
+	// pick, and a full-screen program that opens onto an empty list and has to
+	// be quit again is a worse answer than one line on stderr. It also keeps
+	// `wyrm pick` usable where there is no TTY at all, e.g. in a script.
+	running, err := sessions.List(a.runner)
+	if err != nil {
+		return err
+	}
+	if len(running) == 0 {
+		_, _ = fmt.Fprintln(a.stderr, "wyrm: no running tmux sessions")
+		return nil
+	}
+
+	sessionID, err := tui.RunPicker(a.runner, settings, a.stderr)
 	if err != nil {
 		return err
 	}

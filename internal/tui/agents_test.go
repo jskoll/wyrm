@@ -7,7 +7,7 @@ import (
 
 	"github.com/jskoll/wyrm/internal/agent"
 	"github.com/jskoll/wyrm/internal/config"
-	"github.com/jskoll/wyrm/internal/picker"
+	"github.com/jskoll/wyrm/internal/sessions"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
@@ -209,7 +209,7 @@ func TestBusyAgentIsNotMarked(t *testing.T) {
 // isn't selected is still visible.
 func TestProjectRowShowsItsSessionState(t *testing.T) {
 	m := mouseModel(t)
-	m.sessions = []picker.Session{{ID: "$2", Name: "two"}}
+	m.sessions = []sessions.Session{{ID: "$2", Name: "two"}}
 	m.windows, m.panes = nil, nil
 	m.agents = agentStatus{sessions: map[string]agent.State{"$2": agent.StateBlocked}}
 

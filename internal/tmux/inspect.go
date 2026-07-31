@@ -89,7 +89,7 @@ const allPanesFormat = "#{session_id}|#{window_id}|#{pane_id}|#{pane_current_com
 // list-windows and list-panes per session, costs a tmux call per window and is
 // run on a timer.
 //
-// Like picker.ListSessions, no server running is not an error: it just means
+// Like sessions.List, no server running is not an error: it just means
 // there are no panes.
 func ListAllPanes(r Runner) ([]PaneRef, error) {
 	out, err := r.Run("list-panes", "-a", "-F", allPanesFormat)

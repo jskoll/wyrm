@@ -4,14 +4,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jskoll/wyrm/internal/picker"
+	"github.com/jskoll/wyrm/internal/sessions"
 )
 
 func filterModel() Model {
 	m := New(nopRunner(), nil)
 	m.width, m.height = 100, 40
 	m.ready = true
-	m.sessions = []picker.Session{
+	m.sessions = []sessions.Session{
 		{ID: "$1", Name: "api-server", Windows: 2},
 		{ID: "$2", Name: "web-frontend", Windows: 1},
 		{ID: "$3", Name: "api-worker", Windows: 3},

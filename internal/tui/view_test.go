@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/jskoll/wyrm/internal/picker"
+	"github.com/jskoll/wyrm/internal/sessions"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
@@ -21,7 +21,7 @@ func TestViewTooSmall(t *testing.T) {
 func TestViewRendersPanels(t *testing.T) {
 	m := New(nopRunner(), nil)
 	m.width, m.height, m.ready = 100, 30, true
-	m.sessions = []picker.Session{{ID: "$1", Name: "webapp", Windows: 2, Attached: true}}
+	m.sessions = []sessions.Session{{ID: "$1", Name: "webapp", Windows: 2, Attached: true}}
 	m.windows = []tmux.WindowInfo{{Index: 0, ID: "@1", Name: "code", Active: true}}
 	m.panes = []tmux.PaneInfo{{ID: "%1", Index: 0, Command: "nvim", Active: true}}
 	m.preview = "some pane output"

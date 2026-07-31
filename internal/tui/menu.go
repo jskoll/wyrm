@@ -110,7 +110,7 @@ func (m Model) openMenu(p panel, x, y int) (Model, bool) {
 // A menu reachable only by right-click is, on those setups, a menu that does
 // not exist.
 func (m Model) openMenuAtSelection() (tea.Model, tea.Cmd) {
-	if !m.ready || m.width < minWidth || m.height < minHeight {
+	if !m.ready || m.width < minWidth || m.height < m.minHeight() {
 		return m, nil
 	}
 	g := m.geometry()

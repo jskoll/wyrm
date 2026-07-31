@@ -3,7 +3,7 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/jskoll/wyrm/internal/picker"
+	"github.com/jskoll/wyrm/internal/sessions"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
@@ -46,10 +46,10 @@ var cycleLayouts = []string{"even-horizontal", "even-vertical", "main-horizontal
 
 func killSessionCmd(r tmux.Runner, sessionID string) tea.Cmd {
 	return func() tea.Msg {
-		if err := picker.KillSession(r, sessionID); err != nil {
+		if err := sessions.Kill(r, sessionID); err != nil {
 			return actionErrMsg{err}
 		}
-		s, err := picker.ListSessions(r)
+		s, err := sessions.List(r)
 		return sessionsMsg{sessions: s, err: err}
 	}
 }
@@ -79,7 +79,7 @@ func renameSessionCmd(r tmux.Runner, sessionID, name string) tea.Cmd {
 		if err := tmux.RenameSession(r, sessionID, name); err != nil {
 			return actionErrMsg{err}
 		}
-		s, err := picker.ListSessions(r)
+		s, err := sessions.List(r)
 		return sessionsMsg{sessions: s, err: err}
 	}
 }

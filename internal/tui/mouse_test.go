@@ -7,7 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/jskoll/wyrm/internal/picker"
+	"github.com/jskoll/wyrm/internal/sessions"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
@@ -20,7 +20,7 @@ func mouseModel(t *testing.T) Model {
 		{Name: "alpha", Path: "/a/.wyrm.toml"},
 		{Name: "beta", Path: "/b/.wyrm.toml", Running: true, SessionID: "$2"},
 	}
-	m.sessions = []picker.Session{
+	m.sessions = []sessions.Session{
 		{ID: "$1", Name: "one", Windows: 2},
 		{ID: "$2", Name: "two", Windows: 1},
 		{ID: "$3", Name: "three", Windows: 3},
@@ -93,7 +93,7 @@ func TestHitTestFollowsAScrolledPanel(t *testing.T) {
 	m := mouseModel(t)
 	m.sessions = nil
 	for i := 0; i < 60; i++ {
-		m.sessions = append(m.sessions, picker.Session{ID: "$" + string(rune('a'+i%26)), Name: "s"})
+		m.sessions = append(m.sessions, sessions.Session{ID: "$" + string(rune('a'+i%26)), Name: "s"})
 	}
 	m.sessionCur = 45
 	m.focus = panelSessions

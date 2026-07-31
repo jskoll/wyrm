@@ -7,7 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/jskoll/wyrm/internal/picker"
+	"github.com/jskoll/wyrm/internal/sessions"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
@@ -15,7 +15,7 @@ import (
 // one window, and one pane selected.
 func modelWithData(r tmux.Runner) Model {
 	m := New(r, nil)
-	m.sessions = []picker.Session{{ID: "$1", Name: "webapp"}}
+	m.sessions = []sessions.Session{{ID: "$1", Name: "webapp"}}
 	m.windows = []tmux.WindowInfo{{Index: 0, ID: "@1", Name: "code"}}
 	m.panes = []tmux.PaneInfo{{ID: "%1", Index: 0, Command: "nvim"}}
 	m.sessionCur, m.windowCur, m.paneCur = 0, 0, 0
