@@ -71,6 +71,54 @@ func ListWindows(r Runner, sessionID string) ([]WindowInfo, error) {
 	return windows, nil
 }
 
+// PaneRef locates one pane within the whole tmux server, alongside the command
+// it's running. It's what a server-wide `list-panes -a` yields: enough to decide
+// which panes are worth inspecting, and which window and session to attribute
+// the result to.
+type PaneRef struct {
+	SessionID string
+	WindowID  string
+	PaneID    string
+	Command   string
+}
+
+const allPanesFormat = "#{session_id}|#{window_id}|#{pane_id}|#{pane_current_command}"
+
+// ListAllPanes returns every pane on the tmux server. The TUI uses it to find
+// agent panes across all sessions in one round trip — the alternative, walking
+// list-windows and list-panes per session, costs a tmux call per window and is
+// run on a timer.
+//
+// Like picker.ListSessions, no server running is not an error: it just means
+// there are no panes.
+func ListAllPanes(r Runner) ([]PaneRef, error) {
+	out, err := r.Run("list-panes", "-a", "-F", allPanesFormat)
+	if err != nil {
+		if NoServerRunning(out) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("listing panes: %v (%s)", err, out)
+	}
+	var refs []PaneRef
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 4)
+		if len(parts) != 4 {
+			return nil, fmt.Errorf("unexpected list-panes output %q", line)
+		}
+		refs = append(refs, PaneRef{
+			SessionID: parts[0],
+			WindowID:  parts[1],
+			PaneID:    parts[2],
+			Command:   parts[3],
+		})
+	}
+	return refs, nil
+}
+
 const paneListFormat = "#{pane_id}|#{pane_index}|#{?pane_active,1,0}|#{pane_current_command}"
 
 // ListPanes returns the panes of target (a window ID such as "@2", or a

@@ -270,9 +270,9 @@ already running.
 | `n` | new window in the current session |
 | `L` | cycle the focused window through tmux's standard layouts |
 | `z` | toggle zoom on the focused pane |
-
 | `e` | edit the selected project's config in `$EDITOR` |
 | `R` | reload the project and session lists |
+| `m` | toggle mouse capture |
 | `?` | show the full keyboard-shortcut help overlay (scrollable) |
 | `q` / `Ctrl-C` | quit |
 
@@ -289,6 +289,80 @@ floating session manager over your current work:
 # ~/.tmux.conf — prefix + g opens the session manager in a popup
 bind g display-popup -d "#{pane_current_path}" -w 80% -h 80% -E "wyrm tui"
 ```
+
+### Mouse
+
+The mouse works throughout, and is on by default:
+
+| Action | Effect |
+|---|---|
+| Click | focus that panel and select the row |
+| Double-click | attach, landing on the clicked window/pane (on Projects: start the config's session) |
+| Right-click | open a context menu for the row under the pointer |
+| Wheel | scroll the panel under the pointer |
+
+Right-click opens the actions for whatever you clicked — the same set the
+panel's footer advertises, so the menu teaches the keys rather than replacing
+them. It's driveable either way: `↑`/`↓` and `Enter`, or just click an entry.
+`Esc`, or a click anywhere else, dismisses it.
+
+```
+├ Sessions ─────┤
+│ ● webapp  2w  │
+│   notes ╭──────────────────╮
+│   api   │ Attach         ↵ │
+├ Windows ┤ Rename session r │
+│ 0: code │ New window     n │
+│ 1: serve│ Kill session   x │
+└─────────╰──────────────────╯
+```
+
+Capturing the mouse takes click-drag text selection away from your terminal.
+Press `m` to hand it back for the rest of the session (most terminals also
+select on `Shift`-drag while it's captured), or turn it off permanently:
+
+```toml
+# ~/.config/wyrm/config.toml
+[tui]
+mouse = false
+```
+
+### Waiting agents
+
+A pane running an AI coding agent gets a marker in every panel that contains it,
+so a session that needs you is visible without opening it:
+
+| Marker | Meaning |
+|---|---|
+| `⏸` | stopped on a prompt it can't answer itself — a permission request, a plan approval, a question |
+| `✓` | finished its turn and is waiting for the next instruction |
+
+A busy agent is deliberately unmarked: an indicator lit on every agent pane all
+the time is one nobody reads. Windows and sessions take the state of their most
+urgent pane, so `⏸` on a session means *something* in there is blocked.
+
+```
+├ Sessions ─────┤
+│ ● webapp  2w ⏸│   <- an agent is waiting on an answer
+│   notes   1w ✓│   <- an agent finished; nothing is blocked
+│   api     3w  │   <- no agent, or one that's still working
+```
+
+Detection reads the bottom of each agent pane with `capture-pane` — only panes
+whose command matches, never every pane on the server — on the same 3-second
+tick as the session list. It recognises `claude` out of the box; point it at
+other agents, or switch it off entirely, in `~/.config/wyrm/config.toml`:
+
+```toml
+[tui.agent]
+enabled  = true                  # false stops the scanning (and its cost)
+commands = ["claude", "aider"]   # #{pane_current_command} values to inspect
+```
+
+Because it reads what's on screen, an agent displaying a *screenshot* of a
+prompt — reviewing a diff of prompt-handling code, say — can be misread. The
+detector only matches the agent's own prompt chrome, never prose, which keeps
+that rare; and it self-corrects on the next refresh.
 
 ### Colors
 
@@ -311,6 +385,8 @@ trail    = "#3b4252"  # selection band in the other panels
 index    = "#8fbcbb"  # window indices and pane IDs
 active   = "#a3be8c"  # running / attached dots
 error    = "#bf616a"  # failed actions
+blocked  = "#ebcb8b"  # an agent waiting on an answer (⏸)
+idle     = "#8fbcbb"  # an agent that finished its turn (✓)
 ```
 
 Values are `#rgb` or `#rrggbb`. A misspelled role or an unparseable color is an

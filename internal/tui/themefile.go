@@ -31,6 +31,8 @@ func (t *Theme) roles() []role {
 		{"index", &t.Index},
 		{"active", &t.Active},
 		{"error", &t.Error},
+		{"blocked", &t.Blocked},
+		{"idle", &t.Idle},
 	}
 }
 

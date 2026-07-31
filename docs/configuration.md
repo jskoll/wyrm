@@ -17,6 +17,30 @@ directory's basename) inside `shared_dir` first, falling back to the normal
 local search if it's missing. Run `wyrm migrate-config` to move an existing
 local config into the shared directory under the right name.
 
+## `[tui]` — session manager preferences
+
+The same global settings file configures `wyrm tui`. Both sections are
+optional; the defaults below apply when the file (or a key) is absent.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `tui.mouse` | bool | `true` | Capture the mouse. `false` leaves your terminal's own click-drag text selection alone; `m` toggles it for one run |
+| `tui.agent.enabled` | bool | `true` | Mark sessions, windows, and panes whose AI agent is waiting on you |
+| `tui.agent.commands` | array | `["claude"]` | The `#{pane_current_command}` values treated as an agent pane |
+
+```toml
+[tui]
+mouse = true
+
+[tui.agent]
+enabled  = true
+commands = ["claude", "aider"]
+```
+
+Agent detection costs one `list-panes` call per refresh plus one `capture-pane`
+for each *matching* pane — panes running an ordinary shell are never captured.
+Set `enabled = false` to stop both.
+
 ## Custom default config
 
 When no project config is found at all, wyrm falls back to

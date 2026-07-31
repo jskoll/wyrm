@@ -6,6 +6,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/jskoll/wyrm/internal/agent"
 )
 
 // Layout constants. The left column holds the four stacked list panels; the
@@ -98,32 +100,27 @@ func (m Model) View() string {
 			minWidth, minHeight, m.width, m.height)
 	}
 
-	leftW := m.width * 30 / 100
-	if leftW < minLeftWidth {
-		leftW = minLeftWidth
-	}
-	if leftW > maxLeftWidth {
-		leftW = maxLeftWidth
-	}
-	rightW := m.width - leftW
-
-	bodyH := m.height - helpHeight
-	heights := panelHeights(bodyH, []int{
-		m.panelLen(panelProjects), m.panelLen(panelSessions),
-		m.panelLen(panelWindows), m.panelLen(panelPanes),
-	})
+	// One description of the layout, read by both the renderer and the mouse
+	// hit test — see layout.go.
+	g := m.geometry()
 
 	left := lipgloss.JoinVertical(
 		lipgloss.Left,
-		m.renderProjects(leftW, heights[panelProjects]),
-		m.renderSessions(leftW, heights[panelSessions]),
-		m.renderWindows(leftW, heights[panelWindows]),
-		m.renderPanes(leftW, heights[panelPanes]),
+		m.renderProjects(g.leftW, g.heights[panelProjects]),
+		m.renderSessions(g.leftW, g.heights[panelSessions]),
+		m.renderWindows(g.leftW, g.heights[panelWindows]),
+		m.renderPanes(g.leftW, g.heights[panelPanes]),
 	)
-	right := m.renderPreview(rightW, bodyH)
+	right := m.renderPreview(g.rightW, g.bodyH)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
-	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderHelp())
+	frame := lipgloss.JoinVertical(lipgloss.Left, body, m.renderHelp())
+
+	if m.mode == modeMenu && len(m.menu) > 0 {
+		x, y, _, _ := m.menuBox()
+		frame = overlay(frame, m.renderMenu(), x, y)
+	}
+	return frame
 }
 
 // panelHeights distributes the body's rows across the four left panels. Each
@@ -180,6 +177,11 @@ func (m Model) renderProjects(outerW, outerH int) string {
 			mark = span{activeMark, "●"}
 		}
 		rows[i] = []span{mark, plain(" " + p.Name)}
+		// A project's marker is its session's: the project row is the only
+		// place a not-currently-selected session's agent shows up at all.
+		if p.Running {
+			rows[i] = appendAgentMark(rows[i], m.agents.session(p.SessionID))
+		}
 	}
 	return m.renderPanel(panelProjects, "Projects", rows, m.projectCur, outerW, outerH, "no wyrm configs found")
 }
@@ -192,11 +194,11 @@ func (m Model) renderSessions(outerW, outerH int) string {
 		if s.Attached {
 			mark = span{activeMark, "●"}
 		}
-		rows[i] = []span{
+		rows[i] = appendAgentMark([]span{
 			mark,
 			plain(" " + s.Name + " "),
 			{hintStyle, fmt.Sprintf("(%dw)", s.Windows)},
-		}
+		}, m.agents.session(s.ID))
 	}
 	return m.renderPanel(panelSessions, "Sessions", rows, m.sessionCur, outerW, outerH, "no running sessions")
 }
@@ -209,10 +211,10 @@ func (m Model) renderWindows(outerW, outerH int) string {
 		if name == "" {
 			name = fmt.Sprintf("window %d", w.Index)
 		}
-		rows[i] = []span{
+		rows[i] = appendAgentMark([]span{
 			{indexMark, fmt.Sprintf("%d:", w.Index)},
 			plain(" " + name),
-		}
+		}, m.agents.window(w.ID))
 	}
 	return m.renderPanel(panelWindows, "Windows", rows, m.windowCur, outerW, outerH, "")
 }
@@ -221,12 +223,22 @@ func (m Model) renderPanes(outerW, outerH int) string {
 	panes := m.visiblePanes()
 	rows := make([][]span, len(panes))
 	for i, p := range panes {
-		rows[i] = []span{
+		rows[i] = appendAgentMark([]span{
 			{indexMark, p.ID},
 			plain(" " + p.Command),
-		}
+		}, m.agents.pane(p.ID))
 	}
 	return m.renderPanel(panelPanes, "Panes", rows, m.paneCur, outerW, outerH, "")
+}
+
+// appendAgentMark adds the trailing "waiting for you" glyph to a row, if the
+// state warrants one. It trails the text rather than leading it so it can't be
+// confused with the running/attached dot in the first column.
+func appendAgentMark(row []span, state agent.State) []span {
+	if mark, ok := agentMark(state); ok {
+		return append(row, mark)
+	}
+	return row
 }
 
 // renderPanel draws one bordered list box with a title, a cursor-tracking
@@ -397,8 +409,19 @@ var helpSections = []helpSection{
 		{"/", "filter the focused panel"},
 		{"Esc", "clear the filter"},
 		{"R", "reload the project and session lists"},
+		{"m", "toggle mouse capture"},
 		{"?", "toggle this help"},
 		{"q / Ctrl-C", "quit"},
+	}},
+	{"Mouse", [][2]string{
+		{"Click", "focus a panel and select a row"},
+		{"Double-click", "attach (or start a project)"},
+		{"Right-click", "open the context menu for a row"},
+		{"Wheel", "scroll the panel under the pointer"},
+	}},
+	{"Agent markers", [][2]string{
+		{blockedGlyph, "an agent is waiting on an answer"},
+		{idleGlyph, "an agent finished and is awaiting input"},
 	}},
 	{"Projects panel", [][2]string{
 		{"Enter", "start or attach the config's session"},

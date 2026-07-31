@@ -75,6 +75,10 @@ const (
 	modePrompt
 	modeHelp
 	modeFilter
+	// modeMenu is the right-click context menu. It's a mode rather than an
+	// overlay flag because it captures the keys it shares with normal mode
+	// (j/k/enter) while it's open.
+	modeMenu
 )
 
 // Model is the Bubble Tea model for the TUI. It is a plain value type; Update
@@ -129,6 +133,32 @@ type Model struct {
 	filter    string
 	filtering bool
 
+	// agents holds the last agent-pane scan: which sessions, windows, and panes
+	// hold an AI agent that's waiting on the user. Empty until the first scan.
+	agents agentStatus
+
+	// mouseOn mirrors the terminal's mouse-reporting state, toggled by "m".
+	// Capturing the mouse takes click-drag text selection away from the
+	// terminal, so it has to be surrenderable without restarting the TUI.
+	mouseOn bool
+
+	// Double-click tracking. clickCount is 0 or 1: the click that would make it
+	// 2 is dispatched as an activation instead of being counted.
+	clickCount     int
+	lastClickAt    time.Time
+	lastClickPanel panel
+	lastClickRow   int
+
+	// clock reads the current time, so tests can drive the double-click window
+	// without sleeping. nil means time.Now — see Model.now.
+	clock func() time.Time
+
+	// The context menu (modeMenu). menuX/menuY are the click point it's
+	// anchored to, not its top-left corner — see menuBox.
+	menu         []menuEntry
+	menuCur      int
+	menuX, menuY int
+
 	err error
 
 	// pendingAttach is the tmux session ID (e.g. "$3") to hand the terminal to
@@ -151,13 +181,15 @@ func New(runner tmux.Runner, settings *config.Settings) Model {
 		windowCur: -1,
 		paneCur:   -1,
 		selfPane:  os.Getenv("TMUX_PANE"),
+		mouseOn:   settings.MouseEnabled(),
 	}
 }
 
 // Init loads the initial project and session lists and starts the refresh
 // ticker.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(loadProjects(m.runner, m.settings), loadSessions(m.runner), tick(), listTick())
+	return tea.Batch(loadProjects(m.runner, m.settings), loadSessions(m.runner),
+		m.agentCmd(), tick(), listTick())
 }
 
 // --- messages ---
@@ -363,6 +395,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+
+	case agentStatusMsg:
+		// A failed scan keeps the previous markers rather than clearing them or
+		// claiming the footer: this is an optional decoration polled on a timer,
+		// and one unlucky tmux call shouldn't wipe an error the user is reading.
+		if msg.err == nil {
+			m.agents = msg.status
+		}
+		return m, nil
+
 	case tickMsg:
 		// Refresh the live pane preview, then reschedule. A config preview is
 		// static, so leave it alone — keyed off what's actually being shown
@@ -380,7 +424,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode != modeNormal && m.mode != modeFilter {
 			return m, listTick()
 		}
-		return m, tea.Batch(loadProjects(m.runner, m.settings), loadSessions(m.runner), listTick())
+		return m, tea.Batch(loadProjects(m.runner, m.settings), loadSessions(m.runner),
+			m.agentCmd(), listTick())
 
 	case projectsMsg:
 		if msg.err != nil {
@@ -486,6 +531,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleHelpKey(msg)
 	case modeFilter:
 		return m.handleFilterKey(msg)
+	case modeMenu:
+		return m.handleMenuKey(msg)
 	}
 	// Any key clears a reported error, so the footer returns to the key hints
 	// once it's been seen.
@@ -580,7 +627,13 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	case "R":
-		return m, tea.Batch(loadProjects(m.runner, m.settings), loadSessions(m.runner))
+		return m, tea.Batch(loadProjects(m.runner, m.settings), loadSessions(m.runner), m.agentCmd())
+	case "m":
+		// Hand the mouse back to the terminal (and take it again). While it's
+		// captured, click-drag selects nothing — this is the way out for anyone
+		// who wants to copy text off the screen.
+		m.mouseOn = !m.mouseOn
+		return m, m.mouseCmd()
 	case "tab", "l", "right":
 		m.focus = (m.focus + 1) % numPanels
 		return m, m.updatePreview()
@@ -891,7 +944,14 @@ func (m Model) focusedCursor() int {
 // than refusing to move — a PgDn near the bottom should land on the last row,
 // not do nothing — and reloads the panels below it.
 func (m Model) moveCursorTo(next int) (tea.Model, tea.Cmd) {
-	n := m.panelLen(m.focus)
+	return m.setCursor(m.focus, next)
+}
+
+// setCursor is moveCursorTo for an arbitrary panel. The mouse needs it: a click
+// or a wheel event names the panel it landed on, rather than acting on whatever
+// currently has focus.
+func (m Model) setCursor(p panel, next int) (tea.Model, tea.Cmd) {
+	n := m.panelLen(p)
 	if n == 0 {
 		return m, nil
 	}
@@ -901,7 +961,7 @@ func (m Model) moveCursorTo(next int) (tea.Model, tea.Cmd) {
 	if next >= n {
 		next = n - 1
 	}
-	switch m.focus {
+	switch p {
 	case panelProjects:
 		if next == m.projectCur {
 			return m, nil
@@ -1001,7 +1061,15 @@ func Run(runner tmux.Runner, settings *config.Settings, stderr io.Writer) (pendi
 	}
 	SetTheme(theme)
 
-	fm, err := tea.NewProgram(New(runner, settings), tea.WithAltScreen()).Run()
+	opts := []tea.ProgramOption{tea.WithAltScreen()}
+	// Cell motion, not all motion: the menu wants hover tracking while a button
+	// is down, but reporting every idle pointer move would wake the program on
+	// each pixel of travel for no benefit.
+	if settings.MouseEnabled() {
+		opts = append(opts, tea.WithMouseCellMotion())
+	}
+
+	fm, err := tea.NewProgram(New(runner, settings), opts...).Run()
 	if err != nil {
 		return "", err
 	}

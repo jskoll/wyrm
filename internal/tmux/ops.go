@@ -18,6 +18,18 @@ func CapturePane(r Runner, target string) (string, error) {
 	return out, nil
 }
 
+// CapturePanePlain returns the visible contents of a pane as plain text —
+// CapturePane without "-e". The agent-state detector matches patterns against
+// this, and SGR escapes interleaved with the text would break those matches
+// wherever the pane happens to have colored a word mid-marker.
+func CapturePanePlain(r Runner, target string) (string, error) {
+	out, err := r.Run("capture-pane", "-p", "-t", target)
+	if err != nil {
+		return "", fmt.Errorf("capturing pane %q: %v (%s)", target, err, out)
+	}
+	return out, nil
+}
+
 // KillWindow removes a window by its window ID (e.g. "@2").
 func KillWindow(r Runner, windowID string) error {
 	if out, err := r.Run("kill-window", "-t", windowID); err != nil {

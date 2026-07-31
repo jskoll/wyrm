@@ -291,3 +291,54 @@ func TestDiscoverGlobalLocalMode(t *testing.T) {
 		t.Errorf("DiscoverGlobal = %q, %v, want %q, nil", got, err, DefaultFileName)
 	}
 }
+
+// The [tui] section is optional in every direction: an absent file, an absent
+// section, and an absent key all have to land on the documented defaults, which
+// is why the bool fields are pointers.
+func TestTUISettingsDefaults(t *testing.T) {
+	var nilSettings *Settings
+	for name, s := range map[string]*Settings{
+		"nil settings":     nilSettings,
+		"empty settings":   {},
+		"no [tui] section": {Storage: StorageLocal},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !s.MouseEnabled() {
+				t.Error("MouseEnabled() = false, want true by default")
+			}
+			if !s.AgentEnabled() {
+				t.Error("AgentEnabled() = false, want true by default")
+			}
+			if got := s.AgentCommands(); got != nil {
+				t.Errorf("AgentCommands() = %v, want nil (the package default)", got)
+			}
+		})
+	}
+}
+
+func TestLoadSettingsParsesTUISection(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	dir := filepath.Join(xdg, "wyrm")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "storage = \"local\"\n\n[tui]\nmouse = false\n\n[tui.agent]\nenabled = false\ncommands = [\"claude\", \"aider\"]\n"
+	if err := os.WriteFile(filepath.Join(dir, SettingsFileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := LoadSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.MouseEnabled() {
+		t.Error("mouse = false in the file should disable the mouse")
+	}
+	if s.AgentEnabled() {
+		t.Error("enabled = false in the file should disable agent detection")
+	}
+	if got := s.AgentCommands(); len(got) != 2 || got[0] != "claude" || got[1] != "aider" {
+		t.Errorf("AgentCommands() = %v, want [claude aider]", got)
+	}
+}

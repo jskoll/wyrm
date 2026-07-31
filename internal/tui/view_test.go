@@ -134,3 +134,22 @@ func TestViewEmptySessions(t *testing.T) {
 		t.Errorf("View() with no sessions should show the empty hint\n%s", out)
 	}
 }
+
+// The help overlay falls back to a single column when two won't fit, and a
+// single column is tall enough to need scrolling — so a binding added with a
+// wordy description silently pushes half the cheat sheet off-screen. That is
+// exactly what adding the Mouse section did the first time. Assert the
+// two-column layout survives at the size the other help tests use.
+func TestHelpOverlayStaysTwoColumns(t *testing.T) {
+	m := New(nopRunner(), nil)
+	m.width, m.height, m.ready = 120, 40, true
+	m, _ = update(m, key("?"))
+
+	for _, line := range m.helpLines() {
+		if strings.Contains(line, "Global") && strings.Contains(line, "Sessions panel") {
+			return // both column headers on one line: two columns
+		}
+	}
+	t.Errorf("help overlay collapsed to one column at 120x40 — shorten a description\n%s",
+		strings.Join(m.helpLines(), "\n"))
+}

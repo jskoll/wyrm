@@ -19,6 +19,8 @@ type Theme struct {
 	Index    string `toml:"index"`    // window indices and pane IDs
 	Active   string `toml:"active"`   // running / attached dots
 	Error    string `toml:"error"`    // failed actions
+	Blocked  string `toml:"blocked"`  // agent stopped on a prompt it can't answer
+	Idle     string `toml:"idle"`     // agent finished its turn, awaiting input
 }
 
 // Nord (https://www.nordtheme.com), MIT-licensed, is the built-in default:
@@ -51,6 +53,12 @@ func DefaultTheme() Theme {
 		Index:    nord7,
 		Active:   nord14,
 		Error:    nord11,
+		// Yellow for blocked so it reads as "stop, you're needed", against the
+		// green of an agent that merely finished. Idle deliberately does not
+		// reuse Active's green: the running/attached dot is already that color
+		// and sits on the same rows.
+		Blocked: nord13,
+		Idle:    nord7,
 	}
 }
 
@@ -90,6 +98,14 @@ var (
 
 	activeMark lipgloss.Style // "●" running/attached
 	indexMark  lipgloss.Style // window/pane identifiers
+
+	blockedMark lipgloss.Style // "⏸" agent waiting on an answer
+	idleMark    lipgloss.Style // "✓" agent finished its turn
+
+	menuBorder   lipgloss.Style // the right-click context menu's box
+	menuItem     lipgloss.Style // an unselected menu entry
+	menuSelected lipgloss.Style // the highlighted menu entry
+	menuKey      lipgloss.Style // the keyboard equivalent shown beside an entry
 )
 
 func init() { SetTheme(DefaultTheme()) }
@@ -123,4 +139,12 @@ func SetTheme(t Theme) {
 
 	activeMark = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Active))
 	indexMark = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Index))
+
+	blockedMark = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(t.Blocked))
+	idleMark = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Idle))
+
+	menuBorder = border.BorderForeground(accent)
+	menuItem = lipgloss.NewStyle()
+	menuSelected = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Text)).Background(lipgloss.Color(t.Selected))
+	menuKey = lipgloss.NewStyle().Foreground(subtle)
 }

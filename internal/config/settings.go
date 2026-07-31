@@ -54,6 +54,57 @@ const (
 type Settings struct {
 	Storage   Storage `toml:"storage"`
 	SharedDir string  `toml:"shared_dir"`
+	TUI       TUI     `toml:"tui"`
+}
+
+// TUI holds the interactive session manager's preferences.
+//
+// The bool fields are pointers so "absent" and "explicitly false" stay
+// distinguishable: both of these default to on, and a plain bool would make an
+// unwritten settings file indistinguishable from one that turned them off.
+type TUI struct {
+	// Mouse enables mouse reporting in the TUI. Defaults to true; a user who
+	// would rather keep their terminal's own click-drag text selection can set
+	// it to false here, or toggle it for one run with "m".
+	Mouse *bool `toml:"mouse"`
+	Agent Agent `toml:"agent"`
+}
+
+// Agent configures the "this pane is waiting for you" markers.
+type Agent struct {
+	// Enabled turns agent detection on. Defaults to true. Turning it off also
+	// stops the pane captures it costs.
+	Enabled *bool `toml:"enabled"`
+	// Commands are the #{pane_current_command} values treated as an agent pane.
+	// Empty means the built-in default (claude).
+	Commands []string `toml:"commands"`
+}
+
+// MouseEnabled reports whether the TUI should start with the mouse captured.
+// Nil-safe: a nil Settings takes the defaults, which is how the TUI is
+// constructed in tests and when no settings file exists.
+func (s *Settings) MouseEnabled() bool {
+	if s == nil || s.TUI.Mouse == nil {
+		return true
+	}
+	return *s.TUI.Mouse
+}
+
+// AgentEnabled reports whether the TUI should look for waiting agent panes.
+func (s *Settings) AgentEnabled() bool {
+	if s == nil || s.TUI.Agent.Enabled == nil {
+		return true
+	}
+	return *s.TUI.Agent.Enabled
+}
+
+// AgentCommands returns the pane commands to treat as agents; nil means the
+// package default.
+func (s *Settings) AgentCommands() []string {
+	if s == nil {
+		return nil
+	}
+	return s.TUI.Agent.Commands
 }
 
 // SettingsPath returns the path to the global settings file, honoring
