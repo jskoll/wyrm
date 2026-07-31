@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -74,7 +73,7 @@ func loadThemeFile(path string) (Theme, error) {
 		var missing *toml.StrictMissingError
 		if errors.As(err, &missing) {
 			return def, fmt.Errorf("%s: unknown theme role %s (valid: %s)",
-				path, unknownKeys(missing), strings.Join(roleNames(), ", "))
+				path, strings.Join(config.UnknownKeys(missing), ", "), strings.Join(roleNames(), ", "))
 		}
 		return def, fmt.Errorf("parsing %s: %w", path, err)
 	}
@@ -101,15 +100,6 @@ func roleNames() []string {
 		names = append(names, r.name)
 	}
 	return names
-}
-
-// unknownKeys renders the keys go-toml rejected, quoted, for an error message.
-func unknownKeys(e *toml.StrictMissingError) string {
-	keys := make([]string, 0, len(e.Errors))
-	for _, d := range e.Errors {
-		keys = append(keys, strconv.Quote(strings.Join(d.Key(), ".")))
-	}
-	return strings.Join(keys, ", ")
 }
 
 // validHex reports whether s is "#rgb" or "#rrggbb". lipgloss treats anything

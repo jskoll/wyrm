@@ -350,3 +350,80 @@ func TestDiscover(t *testing.T) {
 		t.Errorf("Discover = %q, want %q preferred", got, DefaultFileName)
 	}
 }
+
+// TestLoadWarnsOnUnknownKeys: a misspelled key is dropped silently by a plain
+// TOML unmarshal, so a config whose every key was a typo passed `wyrm validate`
+// — the exact mistake validate exists to catch.
+func TestLoadWarnsOnUnknownKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, DefaultFileName)
+	body := "[session]\nnmae = \"x\"\nroot = \".\"\n\n[[windows]]\nname = \"w\"\n\n" +
+		"  [[windows.splits]]\n  comand = \"nvim\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	joined := strings.Join(cfg.Warnings(), "\n")
+	for _, want := range []string{`"session.nmae"`, `"windows.splits.comand"`} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("warnings = %q, want one naming %s", joined, want)
+		}
+	}
+	// The correctly-spelled keys still have to land.
+	if cfg.Session.Root != "." || len(cfg.Windows) != 1 {
+		t.Errorf("cfg = %+v, want the valid keys decoded despite the typos", cfg)
+	}
+}
+
+// TestLoadAcceptsEveryDocumentedKey guards the strict decoder against becoming
+// a false alarm: every key the reference documents must round-trip warning-free.
+func TestLoadAcceptsEveryDocumentedKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, DefaultFileName)
+	body := `
+[session]
+name = "s"
+root = "."
+on_project_start = "true"
+on_project_exit = "true"
+startup_window = "w"
+startup_pane = 0
+
+[[windows]]
+name = "w"
+layout = "tiled"
+pre_window = "true"
+
+  [[windows.splits]]
+  type = "h"
+  size = 30
+  command = "nvim"
+
+    [[windows.splits.children]]
+    type = "v"
+    size = 50
+    command = "top"
+
+[[windows]]
+name = "legacy"
+
+  [[windows.panes]]
+  command = "htop"
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for _, w := range cfg.Warnings() {
+		if strings.Contains(w, "unknown key") {
+			t.Errorf("documented key reported as unknown: %s", w)
+		}
+	}
+}

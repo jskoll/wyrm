@@ -147,7 +147,7 @@ func TestDetect(t *testing.T) {
 		{"blocked on a bare option list", "claude", blockedOptionsOnly, StateBlocked},
 		{"busy beats a numbered list in prose", "claude", busyWithProse, StateBusy},
 		{"a shell pane is not an agent", "zsh", idleFresh, StateNone},
-		{"an empty pane still counts as idle", "claude", "", StateIdle},
+		{"an empty pane says nothing either way", "claude", "", StateUnknown},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -265,6 +265,51 @@ func TestNeedsUser(t *testing.T) {
 	} {
 		if got := state.NeedsUser(); got != want {
 			t.Errorf("%v.NeedsUser() = %v, want %v", state, got, want)
+		}
+	}
+}
+
+// TestDetectUnrecognisedAgentIsUnknown is the regression guard for the failure
+// mode that mattered most: Detect used to return StateIdle by elimination, so a
+// pane running an agent this package has no patterns for — or a Claude Code
+// whose chrome had changed — rendered a confident "finished, come look" marker
+// forever. Unknown draws nothing instead.
+func TestDetectUnrecognisedAgentIsUnknown(t *testing.T) {
+	// A plausible screenful from some other agent, with none of Claude Code's
+	// input-box chrome on it.
+	content := `
+> refactor the parser
+  editing src/parse.go
+  applied 3 edits, 0 failed
+tokens: 4.2k sent, 900 received
+`
+	if got := Detect("aider", content, []string{"aider"}); got != StateUnknown {
+		t.Errorf("Detect = %v, want StateUnknown for an agent with no matching patterns", got)
+	}
+	if got := Detect("aider", content, []string{"aider"}); got.NeedsUser() {
+		t.Error("an unrecognised pane must not claim it needs the user")
+	}
+}
+
+// TestUnknownDoesNotOutrankRealStates: a window holding one unknown pane and one
+// blocked pane must still roll up as blocked.
+func TestUnknownDoesNotOutrankRealStates(t *testing.T) {
+	for _, s := range []State{StateBusy, StateIdle, StateBlocked} {
+		if got := Merge(s, StateUnknown); got != s {
+			t.Errorf("Merge(%v, unknown) = %v, want %v", s, got, s)
+		}
+		if got := Merge(StateUnknown, s); got != s {
+			t.Errorf("Merge(unknown, %v) = %v, want %v", s, got, s)
+		}
+	}
+}
+
+// TestIdleRequiresPositiveEvidence pins the markers to the fixtures they were
+// derived from, so an idle verdict always traces to something actually on screen.
+func TestIdleRequiresPositiveEvidence(t *testing.T) {
+	for name, content := range map[string]string{"fresh": idleFresh, "done": idleDone} {
+		if got := Detect("claude", content, nil); got != StateIdle {
+			t.Errorf("%s: Detect = %v, want StateIdle", name, got)
 		}
 	}
 }

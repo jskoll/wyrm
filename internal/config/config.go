@@ -2,11 +2,13 @@
 package config
 
 import (
+	"bytes"
 	_ "embed"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -99,8 +101,8 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	var cfg Config
-	if err := toml.Unmarshal(data, &cfg); err != nil {
+	cfg, unknown, err := decode(data)
+	if err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
 	if abs, err := filepath.Abs(path); err == nil {
@@ -109,24 +111,70 @@ func Load(path string) (*Config, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	for _, key := range unknown {
+		cfg.warnings = append(cfg.warnings, fmt.Sprintf(
+			"unknown key %s — it is ignored (a typo?)", key))
+	}
 	if filepath.Base(path) == LegacyFileName {
 		cfg.warnings = append(cfg.warnings, fmt.Sprintf(
 			"%s is deprecated and will be removed in 1.0; rename it to %s", LegacyFileName, DefaultFileName))
 	}
-	return &cfg, nil
+	return cfg, nil
+}
+
+// decode parses TOML into a Config and reports any keys the file sets that
+// Config has no field for.
+//
+// Unknown keys are collected rather than rejected. A misspelled key is silently
+// dropped by a plain Unmarshal, so `wyrm validate` would bless a config whose
+// every key was a typo — the exact mistake validate exists to catch. But
+// erroring outright would break configs that already carry stray keys, so for
+// now they surface through Warnings (which `wyrm validate -strict` turns into a
+// non-zero exit) and become errors in 1.0, alongside the other deprecations.
+//
+// go-toml still fills the destination when it reports strict errors, so the
+// returned Config is complete either way.
+func decode(data []byte) (*Config, []string, error) {
+	var cfg Config
+	dec := toml.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&cfg); err != nil {
+		var missing *toml.StrictMissingError
+		if !errors.As(err, &missing) {
+			return nil, nil, err
+		}
+		return &cfg, UnknownKeys(missing), nil
+	}
+	return &cfg, nil, nil
+}
+
+// UnknownKeys renders the dotted key paths go-toml rejected under
+// DisallowUnknownFields, quoted, for an error or warning message. Shared with
+// the TUI's theme loader so the two report a typo the same way.
+func UnknownKeys(e *toml.StrictMissingError) []string {
+	keys := make([]string, 0, len(e.Errors))
+	for _, d := range e.Errors {
+		keys = append(keys, strconv.Quote(strings.Join(d.Key(), ".")))
+	}
+	return keys
 }
 
 // LoadDefault parses and validates the built-in fallback config, used when no
 // config file is found in the current directory (see Discover).
 func LoadDefault() (*Config, error) {
-	var cfg Config
-	if err := toml.Unmarshal(defaultConfigData, &cfg); err != nil {
+	// Strict, and an outright error rather than a warning: the built-in config
+	// is ours, so an unknown key in it is a wyrm bug, not a user's typo.
+	cfg, unknown, err := decode(defaultConfigData)
+	if err != nil {
 		return nil, fmt.Errorf("parsing default config: %w", err)
+	}
+	if len(unknown) > 0 {
+		return nil, fmt.Errorf("default config: unknown key %s", strings.Join(unknown, ", "))
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("default config: %w", err)
 	}
-	return &cfg, nil
+	return cfg, nil
 }
 
 func (c *Config) validate() error {

@@ -137,8 +137,8 @@ Usage:
   wyrm [-config PATH]        build or attach the current folder's session (default)
   wyrm up [-config PATH]     same as bare wyrm, spelled explicitly (-n to dry-run)
   wyrm <name>                attach to a running session, or start a known project, by name
-  wyrm restart [-config P]   stop the session and build it again from the config
-  wyrm kill [name]           destroy the session (runs on_project_exit first)
+  wyrm restart [-config P]   stop the session and build it again (-n to dry-run)
+  wyrm kill [name]           destroy the session (runs on_project_exit first; -n to dry-run)
   wyrm pick                  fuzzy-pick a running session and attach to it
   wyrm tui                   full-screen session manager (browse, preview, manage)
   wyrm save [-config PATH]   save the running session's layout as this folder's config
@@ -296,20 +296,30 @@ func runUp(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTm
 	return attachOrSwitch(runner, stderr, insideTmux, attach, sessionID)
 }
 
-// dryRunBuild prints the tmux commands `wyrm up` would issue, without running
-// any of them. A wyrm config executes arbitrary shell by design, so being able
-// to read the plan before running it is worth the small amount of machinery —
-// session.Create already takes a tmux.Runner, so a recording one is the whole
-// implementation.
+// dryRunBuild prints the tmux commands `wyrm up` would issue, and the lifecycle
+// hooks it would run, without doing either. A wyrm config executes arbitrary
+// shell by design, so being able to read the plan before running it is worth
+// the small amount of machinery — session.Create takes a tmux.Runner, so a
+// recording one covers the tmux half, and session.DryRun covers the hooks,
+// which never go through the Runner at all.
 func dryRunBuild(cfg *config.Config, stdout, stderr io.Writer) int {
-	_, _ = fmt.Fprintln(stdout, "# dry run: no tmux commands are executed, and an")
-	_, _ = fmt.Fprintln(stdout, "# already-running session is not consulted.")
+	dryRunHeader(stdout,
+		"dry run: no tmux commands are executed, no lifecycle",
+		"hooks are run, and an already-running session is not",
+		"consulted.")
 	dry := tmux.NewDryRun(stdout)
-	if _, _, _, err := session.Create(dry, cfg, io.Discard, stderr); err != nil {
+	if _, _, _, err := session.Create(dry, cfg, io.Discard, stderr, session.DryRun(stdout)); err != nil {
 		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
 		return 1
 	}
 	return 0
+}
+
+// dryRunHeader announces a dry run on stdout, ahead of the transcript.
+func dryRunHeader(stdout io.Writer, lines ...string) {
+	for _, l := range lines {
+		_, _ = fmt.Fprintln(stdout, "# "+l)
+	}
 }
 
 // runRestart tears the session down (running on_project_exit) and builds it
@@ -319,6 +329,7 @@ func dryRunBuild(cfg *config.Config, stdout, stderr io.Writer) int {
 func runRestart(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux func() bool, attach func(string) error) int {
 	fs := newFlagSet("restart", stderr)
 	configPath := fs.String("config", "", "path to config file (default: .wyrm.toml, then .tmuxconfig)")
+	dryRun := fs.Bool("n", false, "print the tmux commands and hooks that would run, without touching tmux")
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
 	}
@@ -332,6 +343,22 @@ func runRestart(args []string, stdout, stderr io.Writer, runner tmux.Runner, ins
 	cfg, _, ok := resolveConfig(settings, *configPath, stderr)
 	if !ok {
 		return 1
+	}
+
+	if *dryRun {
+		// The teardown half consults the real server (see session.Kill's doc),
+		// so a not-running session is reported and only the build is described.
+		dryRunHeader(stdout, "dry run: no tmux commands are executed and no",
+			"lifecycle hooks are run.")
+		dry := tmux.NewDryRun(stdout)
+		if _, err := session.Kill(runner, cfg, stderr, session.DryRun(stdout)); err != nil {
+			_, _ = fmt.Fprintf(stderr, "wyrm: nothing to stop (%v)\n", err)
+		}
+		if _, _, _, err := session.Create(dry, cfg, io.Discard, stderr, session.DryRun(stdout)); err != nil {
+			_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+			return 1
+		}
+		return 0
 	}
 
 	// A session that isn't running is not an error here: restart means "end up
@@ -358,6 +385,7 @@ func runRestart(args []string, stdout, stderr io.Writer, runner tmux.Runner, ins
 func runKill(args []string, stdout, stderr io.Writer, runner tmux.Runner) int {
 	fs := newFlagSet("kill", stderr)
 	configPath := fs.String("config", "", "path to config file (default: .wyrm.toml, then .tmuxconfig)")
+	dryRun := fs.Bool("n", false, "print the hook and kill that would run, without touching tmux")
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
 	}
@@ -379,12 +407,22 @@ func runKill(args []string, stdout, stderr io.Writer, runner tmux.Runner) int {
 			_, _ = fmt.Fprintln(stderr, "wyrm: -config and a session name are mutually exclusive")
 			return 2
 		}
-		return killByName(runner, stdout, stderr, settings, target)
+		return killByName(runner, stdout, stderr, settings, target, *dryRun)
 	}
 
 	cfg, _, ok := resolveConfig(settings, *configPath, stderr)
 	if !ok {
 		return 1
+	}
+
+	if *dryRun {
+		dryRunHeader(stdout, "dry run: no tmux commands are executed and no",
+			"lifecycle hooks are run.")
+		if _, err := session.Kill(runner, cfg, stderr, session.DryRun(stdout)); err != nil {
+			_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
+			return 1
+		}
+		return 0
 	}
 
 	name, err := session.Kill(runner, cfg, stderr)
@@ -396,13 +434,23 @@ func runKill(args []string, stdout, stderr io.Writer, runner tmux.Runner) int {
 	return 0
 }
 
-func killByName(runner tmux.Runner, stdout, stderr io.Writer, settings *config.Settings, target string) int {
+func killByName(runner tmux.Runner, stdout, stderr io.Writer, settings *config.Settings, target string, dryRun bool) int {
+	var opts []session.Option
+	if dryRun {
+		dryRunHeader(stdout, "dry run: no tmux commands are executed and no",
+			"lifecycle hooks are run.")
+		opts = append(opts, session.DryRun(stdout))
+	}
+
 	if project, found := config.FindProject(settings, target); found {
 		if cfg, err := config.Load(project.Path); err == nil {
-			name, kerr := session.Kill(runner, cfg, stderr)
+			name, kerr := session.Kill(runner, cfg, stderr, opts...)
 			if kerr != nil {
 				_, _ = fmt.Fprintln(stderr, "wyrm: "+kerr.Error())
 				return 1
+			}
+			if dryRun {
+				return 0
 			}
 			_, _ = fmt.Fprintf(stdout, "killed session %s\n", name)
 			return 0
@@ -417,6 +465,11 @@ func killByName(runner tmux.Runner, stdout, stderr io.Writer, settings *config.S
 	if !ok {
 		_, _ = fmt.Fprintf(stderr, "wyrm: no running session named %q\n", target)
 		return 1
+	}
+	// No config, so no hook to run or describe — just the kill itself.
+	if dryRun {
+		_, _ = fmt.Fprintf(stdout, "tmux kill-session -t %s\n", id)
+		return 0
 	}
 	if err := picker.KillSession(runner, id); err != nil {
 		_, _ = fmt.Fprintln(stderr, "wyrm: "+err.Error())
@@ -644,6 +697,7 @@ func runMigrateConfig(args []string, stdout, stderr io.Writer) int {
 func runValidate(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("validate", stderr)
 	configPath := fs.String("config", "", "path to config file (default: .wyrm.toml, then .tmuxconfig)")
+	strict := fs.Bool("strict", false, "exit non-zero if the config has warnings (typos, deprecations)")
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
 	}
@@ -660,6 +714,13 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	printWarnings(stderr, cfg)
+	// Warnings are not failures by default — a deprecated `panes` list still
+	// builds the session its author wanted. -strict is for CI, where "this
+	// config has a typo in it" should stop the build.
+	if *strict && len(cfg.Warnings()) > 0 {
+		_, _ = fmt.Fprintf(stderr, "wyrm: %s has %d warning(s) and -strict was given\n", source, len(cfg.Warnings()))
+		return 1
+	}
 	_, _ = fmt.Fprintf(stdout, "config valid: %s\n", source)
 	return 0
 }

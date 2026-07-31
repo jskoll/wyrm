@@ -18,6 +18,41 @@ import (
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
+// Option configures Create and Kill.
+type Option func(*options)
+
+type options struct {
+	dryRun     bool
+	transcript io.Writer
+}
+
+// DryRun makes Create and Kill describe the lifecycle hooks they would run —
+// writing "# would run <hook>" to w — instead of executing them.
+//
+// It exists because a dry run's whole purpose is to let someone read a config's
+// shell before it runs. Passing a recording tmux.Runner covers the tmux side,
+// but hooks never go through the Runner: they are handed straight to $SHELL by
+// runHook. `wyrm up -n` on an unread config therefore executed its
+// on_project_start for real, which is precisely the thing -n is for avoiding.
+//
+// w is the transcript stream (the same writer the recording Runner prints to),
+// not stderr, so the hook lands in reading order among the tmux commands it
+// sits between.
+func DryRun(w io.Writer) Option {
+	return func(o *options) { o.dryRun, o.transcript = true, w }
+}
+
+func newOptions(opts []Option) options {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+	if o.transcript == nil {
+		o.transcript = io.Discard
+	}
+	return o
+}
+
 // Create builds the session described by cfg and returns its name and tmux
 // session ID (e.g. "$3"). If a session with that name is already running it
 // is left untouched — running panes keep running — and created is false so
@@ -33,7 +68,9 @@ import (
 // package doc's error policy) go to stderr — passed in rather than hardcoded
 // so callers can capture or redirect them, the same way main.run threads
 // stdout/stderr throughout the CLI.
-func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer) (name, sessionID string, created bool, err error) {
+func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ...Option) (name, sessionID string, created bool, err error) {
+	o := newOptions(opts)
+
 	name, root, err := cfg.Session.Resolve(cfg.Dir())
 	if err != nil {
 		return "", "", false, err
@@ -48,7 +85,7 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer) (name, 
 		return name, id, false, nil
 	}
 
-	if err := runHook(cfg.Session.OnProjectStart, root, "on_project_start", stderr); err != nil {
+	if err := runHook(o, cfg.Session.OnProjectStart, root, "on_project_start", stderr); err != nil {
 		warnf(stderr, "on_project_start failed: %v", err)
 	}
 
@@ -156,7 +193,13 @@ func rollback(r tmux.Runner, sessionID string, stderr io.Writer, cause error) er
 // Kill runs the on_project_exit hook and destroys the session. The hook is
 // skipped when the session isn't running. Hook-failure warnings go to
 // stderr, passed in rather than hardcoded — see Create.
-func Kill(r tmux.Runner, cfg *config.Config, stderr io.Writer) (string, error) {
+//
+// Under DryRun the session lookup still happens for real — it is what names the
+// session being described — but the hook and the kill-session are printed
+// rather than performed.
+func Kill(r tmux.Runner, cfg *config.Config, stderr io.Writer, opts ...Option) (string, error) {
+	o := newOptions(opts)
+
 	name, root, err := cfg.Session.Resolve(cfg.Dir())
 	if err != nil {
 		return "", err
@@ -168,8 +211,15 @@ func Kill(r tmux.Runner, cfg *config.Config, stderr io.Writer) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("session %q is not running", name)
 	}
-	if err := runHook(cfg.Session.OnProjectExit, root, "on_project_exit", stderr); err != nil {
+	if err := runHook(o, cfg.Session.OnProjectExit, root, "on_project_exit", stderr); err != nil {
 		warnf(stderr, "on_project_exit failed: %v", err)
+	}
+	if o.dryRun {
+		// The lookup above ran against the real server on purpose — "which
+		// session would this kill" has no answer otherwise — so only the
+		// destructive command is withheld.
+		_, _ = fmt.Fprintf(o.transcript, "tmux kill-session -t %s\n", id)
+		return name, nil
 	}
 	if out, err := r.Run("kill-session", "-t", id); err != nil {
 		return "", fmt.Errorf("killing session %q: %v (%s)", name, err, out)
@@ -417,8 +467,15 @@ func findStartupPane(panes []tmux.PaneInfo, index int) (string, bool) {
 // blank screen and no output looks indistinguishable from a hang. stderr
 // rather than stdout so hook chatter can't be confused with wyrm's own
 // progress lines.
-func runHook(hook, dir, label string, stderr io.Writer) error {
+func runHook(o options, hook, dir, label string, stderr io.Writer) error {
 	if hook == "" {
+		return nil
+	}
+	if o.dryRun {
+		// Into the transcript rather than stderr, so it reads in sequence with
+		// the tmux commands it sits between. Two lines, because the directory a
+		// hook runs in is as much a part of "what would happen" as the command.
+		_, _ = fmt.Fprintf(o.transcript, "# would run %s, in %s:\n#   %s\n", label, dir, hook)
 		return nil
 	}
 	shell := os.Getenv("SHELL")

@@ -122,12 +122,12 @@ func TestRenameWindowPromptFlow(t *testing.T) {
 	run(cmd)
 	found := false
 	for _, c := range calls {
-		if c == "rename-window -t @1 servers" {
+		if c == "rename-window -t @1 -- servers" {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("expected rename-window -t @1 servers, got %v", calls)
+		t.Errorf("expected rename-window -t @1 -- servers, got %v", calls)
 	}
 }
 

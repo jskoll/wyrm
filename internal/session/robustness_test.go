@@ -244,7 +244,7 @@ func TestCreateRollsBackHalfBuiltSession(t *testing.T) {
 // with a blank screen.
 func TestHookOutputIsStreamed(t *testing.T) {
 	var stderr bytes.Buffer
-	if err := runHook("echo hello-from-hook", t.TempDir(), "on_project_start", &stderr); err != nil {
+	if err := runHook(options{}, "echo hello-from-hook", t.TempDir(), "on_project_start", &stderr); err != nil {
 		t.Fatalf("runHook: %v", err)
 	}
 	if !strings.Contains(stderr.String(), "hello-from-hook") {

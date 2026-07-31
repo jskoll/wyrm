@@ -6,6 +6,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- `wyrm up -n` executed the `on_project_start` hook for real. A dry run exists
+  so an unfamiliar config's shell can be read before it runs, and the hook is
+  the part most worth reading first; a recording tmux runner covered the tmux
+  commands, but hooks never went through it. Hooks are now printed as
+  `# would run on_project_start: ...` and not executed.
+- Renaming a session or window to a name starting with `-` failed with
+  "unknown flag" instead of doing the rename: the new name is now passed after
+  a `--` terminator.
+- An agent pane whose screen matches none of the detector's patterns is no
+  longer reported as "idle". It used to reach idle by elimination, so an agent
+  whose UI had changed — or one added to `tui.agent.commands` that the detector
+  has no patterns for at all, such as `aider` — showed a confident "finished,
+  come look" marker permanently. Such panes now carry no marker.
+
+### Added
+- `wyrm restart -n` and `wyrm kill -n` dry-run the teardown half, printing the
+  `on_project_exit` hook and the `kill-session` without running either. The
+  session lookup still happens for real, since it is what names the target.
+- Config keys wyrm doesn't recognise are reported as warnings. A misspelled key
+  is dropped silently by any TOML parser, so a config whose every key was a typo
+  passed `wyrm validate` — the exact mistake validate exists to catch.
+- `wyrm validate -strict` exits non-zero when the config has any warnings
+  (unknown keys, deprecations), for use in CI.
+
 ## [0.5.1] - 2026-07-31
 
 ### Added

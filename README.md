@@ -64,16 +64,16 @@ wyrm uses git-style subcommands:
 ```sh
 wyrm                        # use .wyrm.toml (or legacy .tmuxconfig) in the cwd
 wyrm up                     # same as bare wyrm, spelled explicitly
-wyrm up -n                  # dry run: print the tmux commands, touch nothing
+wyrm up -n                  # dry run: print the tmux commands and hooks, run neither
 wyrm <name>                 # attach to a running session, or start a known project, by name
 wyrm -config path/to/file   # explicit config for the default build
-wyrm restart                # stop the session and build it again from the config
-wyrm kill [name]            # destroy the session (runs on_project_exit first)
+wyrm restart                # stop the session and build it again (-n to dry-run)
+wyrm kill [name]            # destroy the session (runs on_project_exit first; -n to dry-run)
 wyrm pick                   # fuzzy-pick a running session and attach to it
 wyrm tui                    # full-screen session manager (browse, preview, kill, rename, start)
 wyrm save                   # save the running session's layout as this folder's config
 wyrm edit                   # open the resolved config in $EDITOR, creating one if needed
-wyrm validate               # check the effective config parses and validates, without building a session
+wyrm validate               # check the effective config parses and validates (-strict fails on warnings)
 wyrm list                   # list running tmux sessions non-interactively
 wyrm list-configs           # list candidate config file paths (used by shell completion)
 wyrm migrate-config         # move the local config into the shared config directory
@@ -121,6 +121,8 @@ to save a work-in-progress and fix it later.
 `wyrm validate` runs that same parse-and-validate check non-interactively,
 without opening an editor or building a session — handy in a pre-commit hook
 or CI for a repo that versions its `.wyrm.toml`.
+
+Validation also reports keys wyrm doesn't recognise. A misspelled key is silently dropped by any TOML parser, so a config whose every key was a typo used to validate clean; those now surface as warnings, and `wyrm validate -strict` exits non-zero when there are any — useful in CI. Deprecations (the `.tmuxconfig` filename, the flat `panes` list) count as warnings too.
 
 `wyrm list` prints the running tmux sessions non-interactively (unlike
 `pick`, no interactive UI) for scripts and status bars. Add `-format json`

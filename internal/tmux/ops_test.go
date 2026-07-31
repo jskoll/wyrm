@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -48,8 +49,8 @@ func TestMutationArgv(t *testing.T) {
 	}{
 		{"KillWindow", func(r Runner) error { return KillWindow(r, "@2") }, "kill-window -t @2"},
 		{"KillPane", func(r Runner) error { return KillPane(r, "%3") }, "kill-pane -t %3"},
-		{"RenameSession", func(r Runner) error { return RenameSession(r, "$1", "new name") }, "rename-session -t $1 new name"},
-		{"RenameWindow", func(r Runner) error { return RenameWindow(r, "@2", "code") }, "rename-window -t @2 code"},
+		{"RenameSession", func(r Runner) error { return RenameSession(r, "$1", "new name") }, "rename-session -t $1 -- new name"},
+		{"RenameWindow", func(r Runner) error { return RenameWindow(r, "@2", "code") }, "rename-window -t @2 -- code"},
 		{"SelectLayout", func(r Runner) error { return SelectLayout(r, "@2", "tiled") }, "select-layout -t @2 tiled"},
 		{"SelectWindow", func(r Runner) error { return SelectWindow(r, "@2") }, "select-window -t @2"},
 		{"SelectPane", func(r Runner) error { return SelectPane(r, "%3") }, "select-pane -t %3"},
@@ -98,5 +99,47 @@ func TestNewWindowBadOutput(t *testing.T) {
 	r := &recordingRunner{out: "no-delimiter"}
 	if _, _, err := NewWindow(r, "$1", "x", ""); err == nil {
 		t.Error("NewWindow with malformed output: want error, got nil")
+	}
+}
+
+// TestIntegrationRenameToDashLeadingName drives a real tmux server, because the
+// bug this guards is in tmux's argument parsing rather than in wyrm's: without
+// the "--" terminator, "rename-window -t @0 -bad" is rejected as "unknown flag
+// -b". A mock runner cannot show that, so this one talks to tmux.
+func TestIntegrationRenameToDashLeadingName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test needs a real tmux")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+
+	const socket = "wyrm-rename-test"
+	r := Exec{SocketName: socket}
+	t.Cleanup(func() { _, _ = r.Run("kill-server") })
+
+	out, err := r.Run("new-session", "-d", "-P", "-F", "#{session_id}|#{window_id}",
+		"-s", "renametest", "-n", "w")
+	if err != nil {
+		t.Fatalf("new-session: %v (%s)", err, out)
+	}
+	sessionID, windowID, ok := strings.Cut(out, "|")
+	if !ok {
+		t.Fatalf("unexpected new-session output %q", out)
+	}
+
+	if err := RenameWindow(r, windowID, "-bad"); err != nil {
+		t.Fatalf("RenameWindow to a dash-leading name: %v", err)
+	}
+	if err := RenameSession(r, sessionID, "-alsobad"); err != nil {
+		t.Fatalf("RenameSession to a dash-leading name: %v", err)
+	}
+
+	got, err := r.Run("display-message", "-p", "-t", windowID, "-F", "#{session_name}|#{window_name}")
+	if err != nil {
+		t.Fatalf("display-message: %v (%s)", err, got)
+	}
+	if got != "-alsobad|-bad" {
+		t.Errorf("names after rename = %q, want %q", got, "-alsobad|-bad")
 	}
 }

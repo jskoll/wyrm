@@ -49,16 +49,22 @@ func KillPane(r Runner, paneID string) error {
 // RenameSession renames the session with the given ID (e.g. "$1"). Targeting by
 // ID rather than name is required so a name containing "." isn't misparsed —
 // see FindSessionID.
+//
+// "--" ends the flag list. The new name is arbitrary user text typed into the
+// TUI's rename prompt, and without the terminator tmux parses one starting with
+// "-" as flags: renaming to "-bad" failed with "unknown flag -b" rather than
+// doing what was asked.
 func RenameSession(r Runner, sessionID, name string) error {
-	if out, err := r.Run("rename-session", "-t", sessionID, name); err != nil {
+	if out, err := r.Run("rename-session", "-t", sessionID, "--", name); err != nil {
 		return fmt.Errorf("renaming session %q: %v (%s)", sessionID, err, out)
 	}
 	return nil
 }
 
-// RenameWindow renames the window with the given ID (e.g. "@2").
+// RenameWindow renames the window with the given ID (e.g. "@2"). See
+// RenameSession for the "--".
 func RenameWindow(r Runner, windowID, name string) error {
-	if out, err := r.Run("rename-window", "-t", windowID, name); err != nil {
+	if out, err := r.Run("rename-window", "-t", windowID, "--", name); err != nil {
 		return fmt.Errorf("renaming window %q: %v (%s)", windowID, err, out)
 	}
 	return nil
@@ -67,6 +73,9 @@ func RenameWindow(r Runner, windowID, name string) error {
 // NewWindow creates a window in sessionID and returns the new window and pane
 // IDs. name and root are optional: an empty name lets tmux auto-name the window,
 // and an empty root leaves the working directory to tmux's default.
+//
+// No "--" here, unlike the rename commands: the name arrives as the argument to
+// "-n", which tmux consumes as that flag's value whatever it starts with.
 func NewWindow(r Runner, sessionID, name, root string) (windowID, paneID string, err error) {
 	args := []string{"new-window", "-P", "-F", "#{window_id}|#{pane_id}", "-t", sessionID}
 	if name != "" {

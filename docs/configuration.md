@@ -28,6 +28,15 @@ optional; the defaults below apply when the file (or a key) is absent.
 | `tui.agent.enabled` | bool | `true` | Mark sessions, windows, and panes whose AI agent is waiting on you |
 | `tui.agent.commands` | array | `["claude"]` | The `#{pane_current_command}` values treated as an agent pane |
 
+!!! warning "`tui.agent.commands` only widens *which* panes are inspected"
+
+    The patterns that decide busy / blocked / waiting are Claude Code's own
+    on-screen chrome. Adding another agent here makes wyrm capture those panes,
+    but it has no patterns for them, so they are classified "unknown" and carry
+    no marker. That is deliberate — reporting an unrecognised pane as "waiting
+    for you" would be worse than reporting nothing — but it does mean adding a
+    command is not, on its own, enough to get markers for another agent.
+
 ```toml
 [tui]
 mouse = true

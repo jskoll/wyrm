@@ -76,6 +76,66 @@ func TestRunUpDryRun(t *testing.T) {
 	}
 }
 
+// TestRunUpDryRunDoesNotExecuteHooks: `wyrm up -n` used to run
+// on_project_start for real. Its entire purpose is reading a config's shell
+// before it runs, and the hook is the part most worth reading first — a
+// recording tmux.Runner covers the tmux commands, but hooks never go through
+// the Runner, so nothing stopped them.
+func TestRunUpDryRunDoesNotExecuteHooks(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "hook-ran")
+	cfg := "[session]\nname = \"proj\"\nroot = \".\"\non_project_start = \"touch " +
+		marker + "\"\non_project_exit = \"touch " + marker + "\"\n\n[[windows]]\nname = \"w\"\n"
+	writeLocalConfig(t, cfg)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"up", "-n"}, &stdout, &stderr, &fakeRunner{},
+		func() bool { return false }, func(string) error { return nil })
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("dry run executed on_project_start")
+	}
+	if !strings.Contains(stdout.String(), "would run on_project_start") {
+		t.Errorf("stdout = %q, want the hook described rather than run", stdout.String())
+	}
+}
+
+// TestRunKillDryRunDoesNotExecuteHooks is the teardown half. Unlike a build,
+// the session lookup is genuinely performed — it names what would be killed —
+// so this also checks the kill-session itself is withheld.
+func TestRunKillDryRunDoesNotExecuteHooks(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "hook-ran")
+	cfg := "[session]\nname = \"proj\"\nroot = \".\"\non_project_exit = \"touch " +
+		marker + "\"\n\n[[windows]]\nname = \"w\"\n"
+	writeLocalConfig(t, cfg)
+
+	r := &fakeRunner{listOutput: "$7|proj"}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"kill", "-n"}, &stdout, &stderr, r,
+		func() bool { return false }, func(string) error { return nil })
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("dry run executed on_project_exit")
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "would run on_project_exit") {
+		t.Errorf("stdout = %q, want the hook described rather than run", out)
+	}
+	if !strings.Contains(out, "kill-session -t $7") {
+		t.Errorf("stdout = %q, want the kill described against the resolved id", out)
+	}
+	for _, c := range r.calls {
+		if len(c) > 0 && c[0] == "kill-session" {
+			t.Errorf("dry run really killed the session: %v", r.calls)
+		}
+	}
+}
+
 // TestRunRestartKillsThenRebuilds: "I edited the config, make the session
 // match it" previously had to be spelled `wyrm kill && wyrm`.
 func TestRunRestartKillsThenRebuilds(t *testing.T) {

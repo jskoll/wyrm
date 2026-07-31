@@ -21,7 +21,7 @@ import (
 type State int
 
 const (
-	// StateNone is "not an agent pane", or a pane whose state couldn't be read.
+	// StateNone is "not an agent pane".
 	StateNone State = iota
 	// StateBusy is working: the user has nothing to do.
 	StateBusy
@@ -31,11 +31,21 @@ const (
 	StateBlocked
 	// StateIdle is "finished its turn, waiting for the next instruction".
 	StateIdle
+	// StateUnknown is an agent pane whose screen matched nothing we recognise.
+	//
+	// It exists so that not-recognised and finished-its-turn stay separate.
+	// Detect used to return StateIdle by elimination, which made every failure
+	// mode — an agent whose UI changed, or one added to tui.agent.commands that
+	// this package has no patterns for at all — render as a confident "done,
+	// come look" marker. Wrong in the most expensive direction. Unknown carries
+	// no marker, so a detector that has stopped working goes quiet rather than
+	// lying.
+	StateUnknown
 )
 
 // NeedsUser reports whether the state is one the user has to act on. Busy panes
 // deliberately get no marker: an indicator that's lit on every agent pane all
-// the time is one nobody reads.
+// the time is one nobody reads. Unknown gets none either — see StateUnknown.
 func (s State) NeedsUser() bool { return s == StateBlocked || s == StateIdle }
 
 func (s State) String() string {
@@ -46,13 +56,16 @@ func (s State) String() string {
 		return "blocked"
 	case StateIdle:
 		return "idle"
+	case StateUnknown:
+		return "unknown"
 	}
 	return "none"
 }
 
 // Rank orders states by how much they want the user's attention, so a window or
 // session can take the state of its most-urgent pane. Blocked outranks idle:
-// "answer me" matters more than "I'm done".
+// "answer me" matters more than "I'm done". Unknown ranks with none: neither
+// draws a marker, so neither should win a rollup from a pane that would.
 func (s State) Rank() int {
 	switch s {
 	case StateBlocked:
@@ -162,6 +175,22 @@ var blockedMarkers = []string{
 	"enter to confirm",
 }
 
+// idleMarkers is the agent's *idle input box* — chrome it draws only when it is
+// accepting typing. A running turn replaces the whole footer (see busyHints in
+// the tests: "Esc to cancel · Tab to amend" stands where these normally sit),
+// and an open selector replaces the box entirely.
+//
+// These exist so idle is reported on evidence rather than by elimination. The
+// vim-mode indicators are the box's mode display; "? for shortcuts" is the
+// footer it shows when vim mode is off. Between them they cover the default
+// setups; anything else lands on StateUnknown and draws no marker, which is the
+// honest answer.
+var idleMarkers = []string{
+	"-- insert --",
+	"-- normal --",
+	"? for shortcuts",
+}
+
 // optionOne/optionTwo match the first two rows of a numbered choice list, e.g.
 //
 //	❯ 1. Yes, I trust this folder
@@ -185,9 +214,9 @@ const optionGap = 4
 // contents (as captured by tmux capture-pane, without escape sequences).
 // commands may be nil, in which case DefaultCommands applies.
 //
-// A pane running an agent always resolves to one of busy/blocked/idle: when
-// nothing identifiable is on screen the agent is, by elimination, sitting at a
-// prompt with nothing to say — which is exactly the idle case.
+// Every branch requires positive evidence. A pane that is running an agent but
+// shows none resolves to StateUnknown, not StateIdle — see StateUnknown for why
+// the difference matters.
 func Detect(command, content string, commands []string) State {
 	if !IsAgent(command, commands) {
 		return StateNone
@@ -209,7 +238,10 @@ func Detect(command, content string, commands []string) State {
 	if hasOptionList(prompt) {
 		return StateBlocked
 	}
-	return StateIdle
+	if containsAny(prompt, idleMarkers) {
+		return StateIdle
+	}
+	return StateUnknown
 }
 
 // tail returns the last n non-blank lines of content, in order. Blank lines are

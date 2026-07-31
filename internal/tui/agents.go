@@ -76,7 +76,9 @@ func loadAgentStatus(r tmux.Runner, commands []string, skipPane string) tea.Cmd 
 				continue
 			}
 			state := agent.Detect(ref.Command, content, commands)
-			if state == agent.StateNone {
+			// Unknown is stored nowhere: it draws no marker and must not win a
+			// rollup, and leaving it out keeps the maps to panes worth showing.
+			if state == agent.StateNone || state == agent.StateUnknown {
 				continue
 			}
 			status.panes[ref.PaneID] = state

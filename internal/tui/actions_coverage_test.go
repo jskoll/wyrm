@@ -70,7 +70,7 @@ func TestRenameSessionCmdRenamesAndRelists(t *testing.T) {
 	}
 	// Targeted by ID, never by the old name: a name containing "." would be
 	// misparsed by tmux's -t syntax.
-	if !contains(calls, "rename-session -t $1 renamed") {
+	if !contains(calls, "rename-session -t $1 -- renamed") {
 		t.Errorf("rename-session not issued by ID: %v", calls)
 	}
 }
