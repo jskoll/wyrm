@@ -272,6 +272,7 @@ already running.
 | `z` | toggle zoom on the focused pane |
 | `e` | edit the selected project's config in `$EDITOR` |
 | `R` | reload the project and session lists |
+| `M` | open the context menu for the current selection |
 | `m` | toggle mouse capture |
 | `?` | show the full keyboard-shortcut help overlay (scrollable) |
 | `q` / `Ctrl-C` | quit |
@@ -298,13 +299,28 @@ The mouse works throughout, and is on by default:
 |---|---|
 | Click | focus that panel and select the row |
 | Double-click | attach, landing on the clicked window/pane (on Projects: start the config's session) |
-| Right-click | open a context menu for the row under the pointer |
+| Right-click, or `M` | open a context menu for the row under the pointer |
 | Wheel | scroll the panel under the pointer |
 
-Right-click opens the actions for whatever you clicked — the same set the
-panel's footer advertises, so the menu teaches the keys rather than replacing
-them. It's driveable either way: `↑`/`↓` and `Enter`, or just click an entry.
-`Esc`, or a click anywhere else, dismisses it.
+The context menu offers the actions for whatever you clicked — the same set the
+panel's footer advertises, so it teaches the keys rather than replacing them.
+It's driveable either way: `↑`/`↓` and `Enter`, or just click an entry. `Esc`,
+or a click anywhere else, dismisses it.
+
+**If right-click does nothing, your terminal is keeping it.** Several emulators
+reserve the right button for their own context menu and never forward button 3
+to the application — iTerm2 does this by default, so right-click never reaches
+wyrm no matter what tmux is set to. `M` opens the same menu from the keyboard
+and always works. To check whether your terminal forwards it, turn on mouse
+reporting in a shell and watch what arrives:
+
+```sh
+printf '\033[?1000h\033[?1006h'; cat -v   # click around; Ctrl-C when done
+printf '\033[?1000l\033[?1006l'           # then turn it back off
+```
+
+A left click prints something like `^[[<0;42;9M`. If a right click prints
+nothing, the terminal swallowed it.
 
 ```
 ├ Sessions ─────┤

@@ -634,6 +634,10 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// who wants to copy text off the screen.
 		m.mouseOn = !m.mouseOn
 		return m, m.mouseCmd()
+	case "M":
+		// The keyboard route to the right-click menu — see openMenuAtSelection
+		// for why the mouse can't be the only way in.
+		return m.openMenuAtSelection()
 	case "tab", "l", "right":
 		m.focus = (m.focus + 1) % numPanels
 		return m, m.updatePreview()

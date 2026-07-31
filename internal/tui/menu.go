@@ -100,6 +100,41 @@ func (m Model) openMenu(p panel, x, y int) (Model, bool) {
 	return m, true
 }
 
+// openMenuAtSelection opens the context menu on the focused panel's current
+// row, anchored where that row is drawn.
+//
+// The menu needs a keyboard route because right-click is not reliably
+// deliverable: a terminal emulator may keep the right button for its own
+// context menu and never forward button 3 to the application at all (iTerm2
+// does this by default), and inside tmux the event has to survive a second hop.
+// A menu reachable only by right-click is, on those setups, a menu that does
+// not exist.
+func (m Model) openMenuAtSelection() (tea.Model, tea.Cmd) {
+	if !m.ready || m.width < minWidth || m.height < minHeight {
+		return m, nil
+	}
+	g := m.geometry()
+	top, bottom := g.boxes[m.focus].listRows()
+
+	cur := m.cursorFor(m.focus)
+	start, _ := viewport(cur, m.panelLen(m.focus), bottom-top)
+	y := top + (cur - start)
+	if y < top {
+		y = top
+	}
+	if y >= bottom {
+		y = bottom - 1
+	}
+
+	// Indent it into the panel so the box hangs off the row rather than off the
+	// screen edge, the way it would from a click.
+	opened, ok := m.openMenu(m.focus, g.leftW/3, y)
+	if !ok {
+		return m, nil
+	}
+	return opened, nil
+}
+
 func (m Model) closeMenu() Model {
 	m.mode = modeNormal
 	m.menu = nil

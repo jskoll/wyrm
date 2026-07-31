@@ -280,3 +280,77 @@ func TestOverlayIgnoresOutOfRangeRows(t *testing.T) {
 		t.Errorf("overlay above the frame changed it: %q", got)
 	}
 }
+
+// The menu must be reachable without a mouse: a terminal that keeps the right
+// button for itself (iTerm2, by default) never forwards button 3, so a
+// right-click-only menu is unreachable there.
+func TestMenuKeyOpensOnTheSelection(t *testing.T) {
+	m := mouseModel(t)
+	m.focus = panelWindows
+	m.windowCur = 1
+
+	next, _ := m.Update(key("M"))
+	m = next.(Model)
+
+	if m.mode != modeMenu {
+		t.Fatalf("mode = %d, want modeMenu after 'M'", m.mode)
+	}
+	if len(m.menu) == 0 || m.menu[0].op != menuAttach {
+		t.Errorf("menu = %+v, want the Windows panel's actions", m.menu)
+	}
+	// Anchored on the selected row, so the box appears beside it.
+	if want := rowY(m, panelWindows, 1); m.menuY != want {
+		t.Errorf("menuY = %d, want %d (the selected row)", m.menuY, want)
+	}
+}
+
+// It opens on whichever panel has focus, and acts on that panel's selection.
+func TestMenuKeyFollowsFocus(t *testing.T) {
+	m := mouseModel(t)
+	m.focus = panelPanes
+
+	next, _ := m.Update(key("M"))
+	m = next.(Model)
+
+	if len(m.menu) != 3 {
+		t.Fatalf("%d entries, want the Panes panel's 3", len(m.menu))
+	}
+	for i, e := range m.menu {
+		if e.op == menuZoom {
+			m.menuCur = i
+		}
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if next.(Model).mode != modeNormal {
+		t.Error("zoom should run and close the menu")
+	}
+}
+
+// 'M' opens the menu whether or not the mouse is captured — that is the point.
+func TestMenuKeyWorksWithMouseOff(t *testing.T) {
+	m := mouseModel(t)
+	m.mouseOn = false
+
+	next, _ := m.Update(key("M"))
+	if next.(Model).mode != modeMenu {
+		t.Error("'M' must work with mouse capture off")
+	}
+}
+
+// The menu box still has to fit on screen when opened from the keyboard.
+func TestMenuKeyBoxStaysOnScreen(t *testing.T) {
+	m := mouseModel(t)
+	for p := panel(0); p < numPanels; p++ {
+		mm := m
+		mm.focus = p
+		next, _ := mm.Update(key("M"))
+		mm = next.(Model)
+		if mm.mode != modeMenu {
+			continue
+		}
+		x, y, w, h := mm.menuBox()
+		if x < 0 || y < 0 || x+w > mm.width || y+h > mm.height {
+			t.Errorf("panel %d: box (%d,%d,%d,%d) escapes %dx%d", p, x, y, w, h, mm.width, mm.height)
+		}
+	}
+}

@@ -409,6 +409,7 @@ var helpSections = []helpSection{
 		{"/", "filter the focused panel"},
 		{"Esc", "clear the filter"},
 		{"R", "reload the project and session lists"},
+		{"M", "open the context menu for the selection"},
 		{"m", "toggle mouse capture"},
 		{"?", "toggle this help"},
 		{"q / Ctrl-C", "quit"},
@@ -416,7 +417,7 @@ var helpSections = []helpSection{
 	{"Mouse", [][2]string{
 		{"Click", "focus a panel and select a row"},
 		{"Double-click", "attach (or start a project)"},
-		{"Right-click", "open the context menu for a row"},
+		{"Right-click", "open the context menu (or M)"},
 		{"Wheel", "scroll the panel under the pointer"},
 	}},
 	{"Agent markers", [][2]string{
