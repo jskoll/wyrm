@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -89,6 +90,18 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 		warnf(stderr, "on_project_start failed: %v", err)
 	}
 
+	// Every window's root is resolved up front so a bad one fails before any
+	// tmux state exists, rather than half way through a build.
+	roots := make([]string, len(cfg.Windows))
+	for i, w := range cfg.Windows {
+		wr, rerr := config.ResolveRoot(root, w.Root)
+		if rerr != nil {
+			return "", "", false, fmt.Errorf("window %q: %w", w.Name, rerr)
+		}
+		roots[i] = wr
+	}
+	env := envArgs(cfg.Session.Env)
+
 	var id, firstWindowID string
 	for i, w := range cfg.Windows {
 		var out string
@@ -101,8 +114,14 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 			// "example.com" hits that. Reporting the config's name instead of
 			// the real one makes the *next* run fail to find the session and
 			// try to create a duplicate.
-			out, err = r.Run("new-session", "-d", "-P", "-F", "#{session_id}|#{session_name}|#{window_id}|#{pane_id}",
-				"-s", name, "-n", w.Name, "-c", root)
+			// -c is the *first window's* root, not necessarily the session's:
+			// new-session sets both at once, and the pane's directory is the one
+			// a user can see. They differ only when window 0 sets its own root.
+			args := []string{"new-session", "-d", "-P", "-F", "#{session_id}|#{session_name}|#{window_id}|#{pane_id}",
+				"-s", name, "-n", w.Name, "-c", roots[0]}
+			args = append(args, env...)
+			args = append(args, paneProcess(w)...)
+			out, err = r.Run(args...)
 			if err != nil {
 				return "", "", false, fmt.Errorf("creating session: %w (%s)", err, out)
 			}
@@ -124,8 +143,11 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 			// it tmux makes each new window current, so a freshly built
 			// session opens on the *last* window in the config rather than the
 			// first (which is what startup_window's default documents).
-			out, err = r.Run("new-window", "-d", "-P", "-F", "#{window_id}|#{pane_id}",
-				"-t", id, "-n", w.Name, "-c", root)
+			args := []string{"new-window", "-d", "-P", "-F", "#{window_id}|#{pane_id}",
+				"-t", id, "-n", w.Name, "-c", roots[i]}
+			args = append(args, env...)
+			args = append(args, paneProcess(w)...)
+			out, err = r.Run(args...)
 			if err != nil {
 				return "", "", false, rollback(r, id, stderr,
 					fmt.Errorf("creating window %q: %w (%s)", w.Name, err, out))
@@ -140,7 +162,7 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 			}
 		}
 		_, _ = fmt.Fprintf(stdout, "window %s: %s\n", windowID, w.Name)
-		buildWindow(r, windowID, paneID, w, stderr)
+		buildWindow(r, windowID, paneID, w, roots[i], env, stderr)
 	}
 
 	if cfg.Session.StartupWindow != "" {
@@ -227,18 +249,66 @@ func Kill(r tmux.Runner, cfg *config.Config, stderr io.Writer, opts ...Option) (
 	return name, nil
 }
 
-func buildWindow(r tmux.Runner, windowID, initialPane string, w config.Window, stderr io.Writer) {
+// envArgs renders a session's env map as repeated "-e KEY=VALUE" arguments, in
+// sorted order so a build is reproducible and a dry-run transcript is stable.
+// tmux takes -e on new-session, new-window, and split-window; setting it per
+// command rather than once on the session is what makes it reach the panes,
+// since set-environment only affects processes started afterward.
+func envArgs(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	args := make([]string, 0, len(keys)*2)
+	for _, k := range keys {
+		args = append(args, "-e", k+"="+env[k])
+	}
+	return args
+}
+
+// paneProcess returns the trailing command arguments for a window whose first
+// split sets `run`, so tmux starts that process directly instead of a shell.
+// Only a leading entry with no type owns the window's initial pane; anything
+// else creates its own pane and is handled in applySplits.
+func paneProcess(w config.Window) []string {
+	if len(w.Splits) == 0 {
+		return nil
+	}
+	first := w.Splits[0]
+	if first.Type != "" || first.Run == "" {
+		return nil
+	}
+	// "--" so a command starting with "-" isn't read as more tmux flags.
+	return []string{"--", first.Run}
+}
+
+func buildWindow(r tmux.Runner, windowID, initialPane string, w config.Window, root string, env []string, stderr io.Writer) {
 	// done tracks the panes pre_window has already been typed into, so it runs
 	// exactly once per pane across the whole window — see sendPreWindow.
 	done := map[string]bool{}
+	ctx := splitCtx{root: root, env: env, preWindow: w.PreWindow, done: done}
 	switch {
 	case len(w.Splits) > 0:
-		applySplits(r, initialPane, w.Splits, w.PreWindow, done, stderr)
+		applySplits(r, initialPane, w.Splits, ctx, stderr)
 	case len(w.Panes) > 0:
-		applyPanes(r, windowID, initialPane, w, done, stderr)
+		applyPanes(r, windowID, initialPane, w, root, env, done, stderr)
 	case w.PreWindow != "":
 		sendPreWindow(r, initialPane, w.PreWindow, done, stderr)
 	}
+}
+
+// splitCtx is what a level of the split tree inherits from the one above it:
+// the directory new panes open in, the environment they get, the window's
+// pre_window command, and the per-pane record of where it has already run.
+type splitCtx struct {
+	root      string
+	env       []string
+	preWindow string
+	done      map[string]bool
 }
 
 // applySplits walks a split tree. Each entry with a type splits the pane of
@@ -253,13 +323,21 @@ func buildWindow(r tmux.Runner, windowID, initialPane string, w config.Window, s
 // an earlier sibling's children already subdivided it. Splitting breadth-first
 // is what makes `size` mean that, and what lets a layout captured by
 // `wyrm save` rebuild to the geometry it was captured from.
-func applySplits(r tmux.Runner, basePane string, splits []config.Split, preWindow string, done map[string]bool, stderr io.Writer) {
+func applySplits(r tmux.Runner, basePane string, splits []config.Split, ctx splitCtx, stderr io.Writer) {
 	panes := make([]string, len(splits))
+	roots := make([]string, len(splits))
 	current := basePane
 	for i, s := range splits {
+		root, err := config.ResolveRoot(ctx.root, s.Root)
+		if err != nil {
+			warnf(stderr, "split %d: %v", i, err)
+			root = ctx.root
+		}
+		roots[i] = root
+
 		pane := current
 		if s.Type != "" {
-			newPane, err := splitPane(r, current, s)
+			newPane, err := splitPane(r, current, s, root, ctx.env)
 			if err != nil {
 				warnf(stderr, "failed to split pane: %v", err)
 				continue // panes[i] stays "": skipped below
@@ -274,20 +352,30 @@ func applySplits(r tmux.Runner, basePane string, splits []config.Split, preWindo
 	// *new* pane, so the loop below never touches basePane — but it is still a
 	// pane of this window, so pre_window still applies to it. At nested levels
 	// basePane is the parent's pane, already in done, so this is a no-op there.
-	sendPreWindow(r, basePane, preWindow, done, stderr)
+	sendPreWindow(r, basePane, ctx.preWindow, ctx.done, stderr)
 
 	for i, s := range splits {
 		pane := panes[i]
 		if pane == "" {
 			continue
 		}
-		sendPreWindow(r, pane, preWindow, done, stderr)
-		sendKeys(r, pane, s.Command, stderr)
-		applySplits(r, pane, s.Children, preWindow, done, stderr)
+		sendPreWindow(r, pane, ctx.preWindow, ctx.done, stderr)
+		// A pane created with `run` has no shell to type into: the process is
+		// already what the pane is. splitPane (or paneProcess, for the window's
+		// initial pane) has started it.
+		if s.Run == "" {
+			sendKeys(r, pane, s.Command, stderr)
+		} else {
+			// Its own pane has no shell, but it can still parent children.
+			ctx.done[pane] = true
+		}
+		child := ctx
+		child.root = roots[i]
+		applySplits(r, pane, s.Children, child, stderr)
 	}
 }
 
-func splitPane(r tmux.Runner, target string, s config.Split) (string, error) {
+func splitPane(r tmux.Runner, target string, s config.Split, root string, env []string) (string, error) {
 	dir := "-v"
 	if t := strings.ToLower(s.Type); t == "h" || t == "horizontal" {
 		dir = "-h"
@@ -296,10 +384,23 @@ func splitPane(r tmux.Runner, target string, s config.Split) (string, error) {
 	// on its first pane rather than on whichever split happened to be created
 	// last. startup_pane still overrides this.
 	args := []string{"split-window", "-d", "-t", target, dir, "-P", "-F", "#{pane_id}"}
+	// -c explicitly, always. Without it tmux starts the pane in the *invoking
+	// client's* working directory rather than anywhere related to the session:
+	// `wyrm api` run from ~ built a session rooted at ~/work/api whose every
+	// split pane sat in ~. Only the window's initial pane, created with
+	// new-session/new-window -c, was ever in the right place.
+	if root != "" {
+		args = append(args, "-c", root)
+	}
 	if s.Size > 0 {
 		// -l N% rather than -p N: -p was deprecated in tmux 3.1 and removed
 		// from newer builds; -l with a percentage works on 3.1+.
 		args = append(args, "-l", fmt.Sprintf("%d%%", s.Size))
+	}
+	args = append(args, env...)
+	if s.Run != "" {
+		// "--" so a command starting with "-" isn't read as more tmux flags.
+		args = append(args, "--", s.Run)
 	}
 	out, err := r.Run(args...)
 	if err != nil {
@@ -313,7 +414,7 @@ func splitPane(r tmux.Runner, target string, s config.Split) (string, error) {
 
 // applyPanes implements the legacy flat pane list: panes split alternately
 // h/v off the previously created pane, then a layout evens them out.
-func applyPanes(r tmux.Runner, windowID, initialPane string, w config.Window, done map[string]bool, stderr io.Writer) {
+func applyPanes(r tmux.Runner, windowID, initialPane string, w config.Window, root string, env []string, done map[string]bool, stderr io.Writer) {
 	sendPreWindow(r, initialPane, w.PreWindow, done, stderr)
 	sendKeys(r, initialPane, w.Panes[0].Command, stderr)
 
@@ -323,7 +424,12 @@ func applyPanes(r tmux.Runner, windowID, initialPane string, w config.Window, do
 		if i%2 == 1 {
 			dir = "-v"
 		}
-		out, err := r.Run("split-window", "-d", "-t", current, dir, "-P", "-F", "#{pane_id}")
+		args := []string{"split-window", "-d", "-t", current, dir, "-P", "-F", "#{pane_id}"}
+		if root != "" {
+			args = append(args, "-c", root) // see splitPane
+		}
+		args = append(args, env...)
+		out, err := r.Run(args...)
 		if err != nil {
 			warnf(stderr, "failed to split pane: %v (%s)", err, out)
 			continue

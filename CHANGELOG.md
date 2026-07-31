@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Split panes ignored `session.root`.** `split-window` was issued without an
+  explicit `-c`, so tmux started those panes in the *invoking client's* working
+  directory rather than the session's. Only each window's initial pane, created
+  by `new-session`/`new-window -c`, was ever in the right place. Anyone running
+  `wyrm <name>` for a project outside the current folder — the thing shared
+  config storage exists for — got a session whose split panes sat wherever they
+  happened to be standing. Every pane now gets an explicit directory.
 - `wyrm up -n` executed the `on_project_start` hook for real. A dry run exists
   so an unfamiliar config's shell can be read before it runs, and the hook is
   the part most worth reading first; a recording tmux runner covered the tmux
@@ -22,6 +29,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   come look" marker permanently. Such panes now carry no marker.
 
 ### Added
+- **Per-window and per-split `root`.** A relative path resolves against its
+  parent, so a monorepo can say `root = "api"` on a window and have it open
+  there. The only way to express this before was `pre_window = "cd api"`, which
+  types a visible `cd` into every pane of the window and races that pane's own
+  command. See `examples/monorepo.wyrm.toml`.
+- **`run` on a split**, making the command the pane's own process instead of
+  typing it into a shell. No shell underneath means the pane closes when the
+  command exits (good for a dev server you'd rather see die loudly), the text
+  never enters shell history, and a command starting with `#` is finally
+  runnable. Mutually exclusive with `command`, which is rejected rather than
+  silently resolved.
+- **`[session.env]`**, environment variables passed to every window and pane as
+  it is created. Requires tmux 3.2+; everything else still works on 3.1+.
+- **`[[tui.agent.profiles]]`**, describing another agent's on-screen chrome so
+  the markers work for something other than Claude Code. `tui.agent.commands`
+  now means only "also inspect these commands with the built-in patterns", which
+  is what a wrapper script needs; a profile is what a different agent needs. A
+  profile with no commands or an uncompilable pattern is an error reported
+  before the TUI takes the screen, not a silent fallback.
 - `wyrm restart -n` and `wyrm kill -n` dry-run the teardown half, printing the
   `on_project_exit` hook and the `kill-session` without running either. The
   session lookup still happens for real, since it is what names the target.
@@ -63,6 +89,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Runners other than the real one.
 - Internal: errors are wrapped with `%w` rather than formatted with `%v`, so the
   chain survives; `errorlint` now enforces it.
+- The TUI's refresh tickers now idle while the terminal is unfocused, and
+  refresh at once when focus returns. A session manager in a background tab was
+  spending a `capture-pane` every second and a full list sweep every three,
+  forever, for a screen nobody was looking at.
+- Project discovery memoizes each config's session name by (size, mtime) instead
+  of re-reading and re-parsing every config on disk. The TUI runs discovery on a
+  3-second timer, so twenty shared projects meant twenty file reads and twenty
+  TOML parses every three seconds. An edit is still picked up on the next tick.
 - CI additionally runs `go test -short` (the no-tmux path the Makefile
   advertises), `govulncheck`, and a coverage floor — the coverage number was
   previously printed and discarded. `gosec`, `errorlint`, `copyloopvar`,

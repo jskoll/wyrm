@@ -1,0 +1,51 @@
+# A monorepo: each window opens in its own package, without a visible `cd`.
+#
+# Before per-window `root`, the only way to express this was
+# pre_window = "cd api", which types the cd into every pane of the window and
+# races that pane's own command.
+
+[session]
+name = "shop"
+root = "~/code/shop"
+
+  # Reaches every pane, so each service sees the same environment.
+  [session.env]
+  NODE_ENV = "development"
+
+[[windows]]
+name = "api"
+root = "api"                  # ~/code/shop/api
+
+  [[windows.splits]]
+  command = "nvim"
+
+  [[windows.splits]]
+  type = "h"
+  size = 35
+  # `run` makes the server the pane's own process: no shell underneath, so it
+  # dies visibly rather than dropping to a prompt you won't notice.
+  run = "npm run dev"
+
+    [[windows.splits.children]]
+    type = "v"
+    size = 50
+    root = "../packages/shared"   # relative to this window's root
+    command = "npm run watch"
+
+[[windows]]
+name = "web"
+root = "web"
+
+  [[windows.splits]]
+  command = "nvim"
+
+  [[windows.splits]]
+  type = "v"
+  size = 30
+  run = "npm run dev"
+
+[[windows]]
+name = "git"                  # no root: inherits the session's
+
+  [[windows.splits]]
+  command = "lazygit"

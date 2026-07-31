@@ -77,7 +77,26 @@ type Agent struct {
 	Enabled *bool `toml:"enabled"`
 	// Commands are the #{pane_current_command} values treated as an agent pane.
 	// Empty means the built-in default (claude).
+	//
+	// It only widens which panes are inspected; the patterns that classify them
+	// stay the built-in ones. Use Profiles to describe a different agent.
 	Commands []string `toml:"commands"`
+	// Profiles describe agents wyrm doesn't ship knowing about: which command
+	// each runs as, and the on-screen chrome that marks it busy, blocked, or
+	// idle. A non-empty list replaces the built-in profile entirely rather than
+	// adding to it — otherwise one agent's chrome could decide another's state.
+	Profiles []AgentProfile `toml:"profiles"`
+}
+
+// AgentProfile mirrors agent.Profile in the settings file. It is duplicated
+// rather than imported so internal/config keeps no dependency on the detector,
+// which is what lets internal/agent stay a leaf package.
+type AgentProfile struct {
+	Commands    []string `toml:"commands"`
+	Busy        []string `toml:"busy"`
+	Blocked     []string `toml:"blocked"`
+	Idle        []string `toml:"idle"`
+	BusyPattern string   `toml:"busy_pattern"`
 }
 
 // MouseEnabled reports whether the TUI should start with the mouse captured.
@@ -105,6 +124,17 @@ func (s *Settings) AgentCommands() []string {
 		return nil
 	}
 	return s.TUI.Agent.Commands
+}
+
+// AgentProfiles returns the configured agent profiles; nil means the built-in
+// one. A bare `commands` list is surfaced here as a profile carrying the
+// built-in patterns, so the two settings compose the way a reader would expect:
+// commands widens what the shipped detector looks at, profiles replaces it.
+func (s *Settings) AgentProfiles() []AgentProfile {
+	if s == nil {
+		return nil
+	}
+	return s.TUI.Agent.Profiles
 }
 
 // SettingsPath returns the path to the global settings file, honoring

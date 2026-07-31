@@ -283,10 +283,10 @@ func TestDetectUnrecognisedAgentIsUnknown(t *testing.T) {
   applied 3 edits, 0 failed
 tokens: 4.2k sent, 900 received
 `
-	if got := Detect("aider", content, []string{"aider"}); got != StateUnknown {
+	if got := Detect("aider", content, []Profile{{Commands: []string{"aider"}}}); got != StateUnknown {
 		t.Errorf("Detect = %v, want StateUnknown for an agent with no matching patterns", got)
 	}
-	if got := Detect("aider", content, []string{"aider"}); got.NeedsUser() {
+	if got := Detect("aider", content, []Profile{{Commands: []string{"aider"}}}); got.NeedsUser() {
 		t.Error("an unrecognised pane must not claim it needs the user")
 	}
 }

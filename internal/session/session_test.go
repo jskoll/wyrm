@@ -130,7 +130,7 @@ func TestCreateSplitTree(t *testing.T) {
 		"list-sessions -F #{session_id}|#{session_name}",
 		"new-session -d -P -F #{session_id}|#{session_name}|#{window_id}|#{pane_id} -s proj -n editor -c /tmp/proj",
 		// second entry splits the initial pane %1 -> %2 (breadth first)
-		"split-window -d -t %1 -h -P -F #{pane_id} -l 30%",
+		"split-window -d -t %1 -h -P -F #{pane_id} -c /tmp/proj -l 30%",
 		// first split entry: no type, reuses initial pane %1
 		"send-keys -t %1 -l -- nvm use 18",
 		"send-keys -t %1 Enter",
@@ -141,7 +141,7 @@ func TestCreateSplitTree(t *testing.T) {
 		"send-keys -t %2 -l -- npm run dev",
 		"send-keys -t %2 Enter",
 		// child splits its parent %2 -> %3
-		"split-window -d -t %2 -v -P -F #{pane_id}",
+		"split-window -d -t %2 -v -P -F #{pane_id} -c /tmp/proj",
 		"send-keys -t %3 -l -- nvm use 18",
 		"send-keys -t %3 Enter",
 		"send-keys -t %3 -l -- npm test",
@@ -181,9 +181,9 @@ func TestCreateLegacyPanes(t *testing.T) {
 	got := strings.Join(r.joined(), "\n")
 	for _, want := range []string{
 		"send-keys -t %1 -l -- npm test",
-		"split-window -d -t %1 -h -P -F #{pane_id}",
+		"split-window -d -t %1 -h -P -F #{pane_id} -c /tmp/proj",
 		"send-keys -t %2 -l -- npm run lint",
-		"split-window -d -t %2 -v -P -F #{pane_id}",
+		"split-window -d -t %2 -v -P -F #{pane_id} -c /tmp/proj",
 		"select-layout -t @1 tiled",
 	} {
 		if !strings.Contains(got, want) {
@@ -581,5 +581,99 @@ func TestSelectStartupSelectPaneError(t *testing.T) {
 	}
 	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
 		t.Fatalf("Create: %v", err)
+	}
+}
+
+// TestCreateWindowAndSplitRoots pins the exact -c arguments: a window root is
+// relative to the session root, a split root to its window's, and an absolute
+// one escapes both.
+func TestCreateWindowAndSplitRoots(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{
+			{Name: "api", Root: "api", Splits: []config.Split{
+				{},
+				{Type: "h", Root: "deep"},
+				{Type: "v", Root: "/elsewhere"},
+			}},
+			{Name: "plain", Splits: []config.Split{{}}},
+		},
+	}
+	r := &fakeRunner{}
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	joined := strings.Join(r.joined(), "\n")
+	for _, want := range []string{
+		"new-session -d -P -F #{session_id}|#{session_name}|#{window_id}|#{pane_id} -s proj -n api -c /tmp/proj/api",
+		"split-window -d -t %1 -h -P -F #{pane_id} -c /tmp/proj/api/deep",
+		"split-window -d -t %2 -v -P -F #{pane_id} -c /elsewhere",
+		"new-window -d -P -F #{window_id}|#{pane_id} -t $1 -n plain -c /tmp/proj",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing call %q in:\n%s", want, joined)
+		}
+	}
+}
+
+// TestCreateRunStartsProcessAndSkipsSendKeys: `run` hands the command to tmux as
+// the pane's process, so nothing is typed into a shell that isn't there.
+func TestCreateRunStartsProcessAndSkipsSendKeys(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{{
+			Name: "w",
+			Splits: []config.Split{
+				{Run: "npm run dev"},
+				{Type: "h", Run: "-flaglike"},
+				{Type: "v", Command: "typed"},
+			},
+		}},
+	}
+	r := &fakeRunner{}
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	joined := strings.Join(r.joined(), "\n")
+	// The window's initial pane gets its process from new-session itself.
+	if !strings.Contains(joined, "-n w -c /tmp/proj -- npm run dev") {
+		t.Errorf("initial pane did not start its run command:\n%s", joined)
+	}
+	// "--" guards a command that looks like a flag.
+	if !strings.Contains(joined, "-- -flaglike") {
+		t.Errorf("a dash-leading run command was not guarded by --:\n%s", joined)
+	}
+	// Only the `command` entry is typed.
+	if n := strings.Count(joined, "send-keys"); n != 2 {
+		t.Errorf("got %d send-keys calls, want 2 (one -l plus its Enter) — run must not type:\n%s", n, joined)
+	}
+	if !strings.Contains(joined, "send-keys -t %3 -l -- typed") {
+		t.Errorf("the command entry was not typed:\n%s", joined)
+	}
+}
+
+// TestCreatePassesEnvToEveryPaneCommand: tmux's set-environment only reaches
+// processes started afterward, so the vars have to ride along on each
+// new-session/new-window/split-window instead.
+func TestCreatePassesEnv(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{
+			Name: "proj", Root: "/tmp/proj",
+			Env: map[string]string{"NODE_ENV": "development", "API_URL": "http://x"},
+		},
+		Windows: []config.Window{{Name: "w", Splits: []config.Split{{}, {Type: "h"}}}},
+	}
+	r := &fakeRunner{}
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for _, c := range r.joined() {
+		switch {
+		case strings.HasPrefix(c, "new-session"), strings.HasPrefix(c, "split-window"):
+			// Sorted, so a build is reproducible and a dry run is stable.
+			if !strings.Contains(c, "-e API_URL=http://x -e NODE_ENV=development") {
+				t.Errorf("call %q is missing the sorted env args", c)
+			}
+		}
 	}
 }

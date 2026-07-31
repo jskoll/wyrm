@@ -39,6 +39,11 @@ with lifecycle hooks and a `startup_window`.
 Demonstrates the split tree with nested `children`, `pre_window` interpreter
 setup, and `startup_pane` targeting.
 
+## [monorepo.wyrm.toml](https://github.com/jskoll/wyrm/blob/main/examples/monorepo.wyrm.toml)
+
+Per-window and per-split `root` so each window opens in its own package,
+`[session.env]` reaching every pane, and `run` for the dev servers.
+
 ## [nodejs.wyrm.toml](https://github.com/jskoll/wyrm/blob/main/examples/nodejs.wyrm.toml)
 
 A Node.js project layout: editor, dev server, and a test watcher window,

@@ -27,6 +27,14 @@ func TestShippedExamplesLoad(t *testing.T) {
 			if len(cfg.Windows) == 0 {
 				t.Error("example defines no windows")
 			}
+			// The examples are copy-paste starting points, so a key that no
+			// longer exists (or never did) has to fail here rather than be
+			// silently ignored in someone's terminal.
+			for _, w := range cfg.Warnings() {
+				if strings.Contains(w, "unknown key") {
+					t.Errorf("example has an unknown key: %s", w)
+				}
+			}
 		})
 	}
 }

@@ -2,11 +2,15 @@ package session_test
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jskoll/wyrm/internal/config"
 	"github.com/jskoll/wyrm/internal/freeze"
@@ -163,4 +167,178 @@ func abs(n int) int {
 		return -n
 	}
 	return n
+}
+
+// TestIntegrationSplitPanesUseSessionRoot is the regression guard for a bug that
+// only shows itself when wyrm is run from somewhere other than the project:
+// split-window without an explicit -c starts the pane in the *invoking client's*
+// working directory, not the session's. So `wyrm api` from ~ built a session
+// rooted at the project whose every split pane sat in ~ — and only the window's
+// initial pane, created by new-session/new-window -c, was ever right.
+//
+// It needs a real tmux because the whole bug is in what tmux does with a missing
+// flag; a mock runner can only assert the flag is passed.
+func TestIntegrationSplitPanesUseSessionRoot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+
+	root := t.TempDir()
+	// Stand somewhere else entirely, which is what makes the bug visible.
+	t.Chdir(t.TempDir())
+
+	r := tmux.Exec{SocketName: fmt.Sprintf("wyrm-root-it-%d", os.Getpid())}
+	t.Cleanup(func() { _, _ = r.Run("kill-server") })
+
+	cfg := &config.Config{
+		Session: config.Session{Name: "rootit", Root: root},
+		Windows: []config.Window{{
+			Name: "w",
+			Splits: []config.Split{
+				{},
+				{Type: "h"},
+				{Type: "v"},
+			},
+		}},
+	}
+	if _, _, _, err := session.Create(r, cfg, io.Discard, io.Discard); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	out, err := r.Run("list-panes", "-t", "rootit", "-a", "-F", "#{pane_id} #{pane_current_path}")
+	if err != nil {
+		t.Fatalf("list-panes: %v (%s)", err, out)
+	}
+	// macOS hands out /var symlinks for temp dirs; compare resolved paths.
+	wantRoot, _ := filepath.EvalSymlinks(root)
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("got %d panes, want 3:\n%s", len(lines), out)
+	}
+	for _, line := range lines {
+		id, path, _ := strings.Cut(line, " ")
+		got, _ := filepath.EvalSymlinks(path)
+		if got != wantRoot {
+			t.Errorf("pane %s is in %q, want the session root %q", id, got, wantRoot)
+		}
+	}
+}
+
+// TestIntegrationWindowAndSplitRoots covers the per-window and per-split root
+// keys, including that a relative one resolves against its parent rather than
+// against the process's working directory.
+func TestIntegrationWindowAndSplitRoots(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+
+	root := t.TempDir()
+	for _, sub := range []string{"api", "api/deep", "web"} {
+		if err := os.MkdirAll(filepath.Join(root, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(t.TempDir())
+
+	r := tmux.Exec{SocketName: fmt.Sprintf("wyrm-wroot-it-%d", os.Getpid())}
+	t.Cleanup(func() { _, _ = r.Run("kill-server") })
+
+	cfg := &config.Config{
+		Session: config.Session{Name: "wrootit", Root: root},
+		Windows: []config.Window{
+			// Window 0 sets its own root: new-session's -c has to follow it.
+			{Name: "api", Root: "api", Splits: []config.Split{
+				{},
+				{Type: "h", Root: "deep"}, // relative to the window's root
+			}},
+			{Name: "web", Root: "web", Splits: []config.Split{{}}},
+			{Name: "plain", Splits: []config.Split{{}}}, // inherits the session root
+		},
+	}
+	if _, _, _, err := session.Create(r, cfg, io.Discard, io.Discard); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	out, err := r.Run("list-panes", "-t", "wrootit", "-a", "-F", "#{window_name}|#{pane_current_path}")
+	if err != nil {
+		t.Fatalf("list-panes: %v (%s)", err, out)
+	}
+	// Grouped by window in tmux's own order rather than keyed by pane_index:
+	// this machine's pane-base-index is 1, and hardcoding 0 would make the test
+	// fail on exactly the setting wyrm targets panes by ID to be immune to.
+	resolved := func(p string) string { s, _ := filepath.EvalSymlinks(p); return s }
+	got := map[string][]string{}
+	var order []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		win, path, ok := strings.Cut(line, "|")
+		if !ok {
+			t.Fatalf("unexpected list-panes line %q", line)
+		}
+		if _, seen := got[win]; !seen {
+			order = append(order, win)
+		}
+		got[win] = append(got[win], resolved(path))
+	}
+	want := map[string][]string{
+		"api":   {resolved(filepath.Join(root, "api")), resolved(filepath.Join(root, "api", "deep"))},
+		"web":   {resolved(filepath.Join(root, "web"))},
+		"plain": {resolved(root)},
+	}
+	if len(order) != len(want) {
+		t.Fatalf("got windows %v, want %d of them", order, len(want))
+	}
+	for win, w := range want {
+		if !reflect.DeepEqual(got[win], w) {
+			t.Errorf("window %q pane dirs = %v, want %v", win, got[win], w)
+		}
+	}
+}
+
+// TestIntegrationRunStartsProcessDirectly: `run` makes the command the pane's
+// own process rather than typing it into a shell, which is the whole difference
+// — pane_current_command reports the program, not the shell hosting it.
+func TestIntegrationRunStartsProcessDirectly(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+
+	r := tmux.Exec{SocketName: fmt.Sprintf("wyrm-run-it-%d", os.Getpid())}
+	t.Cleanup(func() { _, _ = r.Run("kill-server") })
+
+	cfg := &config.Config{
+		Session: config.Session{Name: "runit", Root: t.TempDir()},
+		Windows: []config.Window{{
+			Name: "w",
+			Splits: []config.Split{
+				{Run: "sleep 60"},            // the window's initial pane
+				{Type: "h", Run: "sleep 61"}, // a split
+			},
+		}},
+	}
+	if _, _, _, err := session.Create(r, cfg, io.Discard, io.Discard); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// tmux needs a moment to report the newly exec'd process.
+	var out string
+	for i := 0; i < 20; i++ {
+		var err error
+		out, err = r.Run("list-panes", "-t", "runit", "-a", "-F", "#{pane_current_command}")
+		if err != nil {
+			t.Fatalf("list-panes: %v (%s)", err, out)
+		}
+		if strings.Count(out, "sleep") == 2 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Errorf("pane commands = %q, want both panes running sleep directly", out)
 }

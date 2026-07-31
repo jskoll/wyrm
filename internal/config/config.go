@@ -53,19 +53,28 @@ func (c *Config) Warnings() []string { return c.warnings }
 
 // Session describes the tmux session and its lifecycle hooks.
 type Session struct {
-	Name           string `toml:"name,omitempty"`
-	Root           string `toml:"root,omitempty"`
-	OnProjectStart string `toml:"on_project_start,omitempty"`
-	OnProjectExit  string `toml:"on_project_exit,omitempty"`
-	StartupWindow  string `toml:"startup_window,omitempty"`
-	StartupPane    *int   `toml:"startup_pane,omitempty"` // nil = unset; 0 is a valid pane
+	Name           string            `toml:"name,omitempty"`
+	Root           string            `toml:"root,omitempty"`
+	OnProjectStart string            `toml:"on_project_start,omitempty"`
+	OnProjectExit  string            `toml:"on_project_exit,omitempty"`
+	StartupWindow  string            `toml:"startup_window,omitempty"`
+	StartupPane    *int              `toml:"startup_pane,omitempty"` // nil = unset; 0 is a valid pane
+	Env            map[string]string `toml:"env,omitempty"`
 }
 
 // Window is one tmux window, laid out either by a split tree or a flat pane
 // list (legacy format).
 type Window struct {
-	Name      string  `toml:"name,omitempty"`
-	Layout    string  `toml:"layout,omitempty"`
+	Name   string `toml:"name,omitempty"`
+	Layout string `toml:"layout,omitempty"`
+	// Root is this window's working directory. Relative paths resolve against
+	// the session root, so a monorepo can say root = "api" and get a window
+	// rooted there. Empty means the session root.
+	//
+	// Before this existed the only way to express it was pre_window = "cd api",
+	// which types a visible cd into every pane of the window and races that
+	// pane's own command.
+	Root      string  `toml:"root,omitempty"`
 	Splits    []Split `toml:"splits,omitempty"`
 	Panes     []Pane  `toml:"panes,omitempty"`
 	PreWindow string  `toml:"pre_window,omitempty"`
@@ -73,9 +82,23 @@ type Window struct {
 
 // Split is a node in a window's split tree.
 type Split struct {
-	Type     string  `toml:"type,omitempty"` // "", "h"/"horizontal", "v"/"vertical"
-	Size     int     `toml:"size,omitempty"` // percentage for the new pane; 0 = tmux default
-	Command  string  `toml:"command,omitempty"`
+	Type string `toml:"type,omitempty"` // "", "h"/"horizontal", "v"/"vertical"
+	Size int    `toml:"size,omitempty"` // percentage for the new pane; 0 = tmux default
+	// Command is typed into the pane's shell, as if you had typed it.
+	Command string `toml:"command,omitempty"`
+	// Run makes the command the pane's own process instead of typing it into a
+	// shell. There is no shell underneath, so the pane closes when it exits
+	// (unless tmux's remain-on-exit is set) — which is exactly what you want for
+	// a long-running server and exactly what you don't want for a prompt you
+	// mean to keep using.
+	//
+	// It also sidesteps the two things typing can't do: the text never lands in
+	// shell history, and a command starting with "#" is runnable (Command treats
+	// those as comments).
+	Run string `toml:"run,omitempty"`
+	// Root overrides the window's directory for this pane and, unless they
+	// override it themselves, its children.
+	Root     string  `toml:"root,omitempty"`
 	Children []Split `toml:"children,omitempty"`
 }
 
@@ -234,6 +257,12 @@ func validateSplits(window string, splits []Split) error {
 		default:
 			return fmt.Errorf("window %q split %d: unknown type %q (use h/horizontal or v/vertical)", window, i, s.Type)
 		}
+		// Refusing rather than warning: the two do materially different things
+		// (a pane with a shell under it, or without one), and silently picking
+		// either would surprise half the people who wrote both.
+		if s.Command != "" && s.Run != "" {
+			return fmt.Errorf("window %q split %d: set command or run, not both (command types into a shell; run replaces it)", window, i)
+		}
 		if err := validateSplits(window, s.Children); err != nil {
 			return err
 		}
@@ -314,6 +343,24 @@ func (s Session) Resolve(baseDir string) (name, absRoot string, err error) {
 		name = filepath.Base(absRoot)
 	}
 	return name, absRoot, nil
+}
+
+// ResolveRoot resolves a configured directory against a base: "" yields base
+// unchanged, an absolute (or ~/$VAR-expanded absolute) path is taken as-is, and
+// a relative one is joined onto base. It is what makes a window's root = "api"
+// mean "api inside the session root" while root = "~/other" still escapes it.
+func ResolveRoot(base, root string) (string, error) {
+	if root == "" {
+		return base, nil
+	}
+	expanded, err := ExpandPath(root)
+	if err != nil {
+		return "", err
+	}
+	if filepath.IsAbs(expanded) {
+		return filepath.Clean(expanded), nil
+	}
+	return filepath.Join(base, expanded), nil
 }
 
 // ExpandPath expands a leading "~" and any $VAR references in a configured

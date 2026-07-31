@@ -1,0 +1,127 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func sharedSettings(t *testing.T, dir string) *Settings {
+	t.Helper()
+	return &Settings{Storage: StorageShared, SharedDir: dir}
+}
+
+// TestDiscoverProjectsFindsLocalAndShared covers the rules `wyrm <name>`,
+// `list-configs`, and the TUI's Projects panel all share.
+func TestDiscoverProjectsFindsLocalAndShared(t *testing.T) {
+	shared := t.TempDir()
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(shared, "api"+DefaultFileName),
+		"[session]\nname = \"api\"\n[[windows]]\nname = \"w\"\n")
+	// No explicit name: a shared config falls back to the filename, never to
+	// its root (which would name every shared project after the shared folder).
+	write(filepath.Join(shared, "web"+DefaultFileName),
+		"[session]\nroot = \".\"\n[[windows]]\nname = \"w\"\n")
+
+	local := t.TempDir()
+	t.Chdir(local)
+	write(filepath.Join(local, DefaultFileName),
+		"[session]\nname = \"here\"\n[[windows]]\nname = \"w\"\n")
+
+	got := DiscoverProjects(sharedSettings(t, shared))
+	if len(got) != 3 {
+		t.Fatalf("got %d projects (%+v), want 3", len(got), got)
+	}
+	// Local first, then shared sorted by path.
+	if got[0].Name != "here" || got[0].Shared {
+		t.Errorf("first project = %+v, want the local one", got[0])
+	}
+	if got[1].Name != "api" || !got[1].Shared {
+		t.Errorf("second project = %+v, want shared api", got[1])
+	}
+	if got[2].Name != "web" || !got[2].Shared {
+		t.Errorf("third project = %+v, want shared web named from its filename", got[2])
+	}
+
+	if p, ok := FindProject(sharedSettings(t, shared), "api"); !ok || p.Path == "" {
+		t.Errorf("FindProject(api) = %+v, %v; want the shared config", p, ok)
+	}
+	if _, ok := FindProject(sharedSettings(t, shared), "nope"); ok {
+		t.Error("FindProject found a project that does not exist")
+	}
+}
+
+// TestProjectNameCacheInvalidatesOnEdit: the TUI re-runs discovery every few
+// seconds, so the result is memoized by (size, mtime) rather than re-parsing
+// every config each time. An edit still has to be picked up — that timer exists
+// precisely so the list tracks reality.
+func TestProjectNameCacheInvalidatesOnEdit(t *testing.T) {
+	shared := t.TempDir()
+	path := filepath.Join(shared, "proj"+DefaultFileName)
+	settings := sharedSettings(t, shared)
+	t.Chdir(t.TempDir())
+
+	if err := os.WriteFile(path, []byte("[session]\nname = \"before\"\n[[windows]]\nname = \"w\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := DiscoverProjects(settings); len(got) != 1 || got[0].Name != "before" {
+		t.Fatalf("got %+v, want one project named 'before'", got)
+	}
+	// Cached: a second call must agree.
+	if got := DiscoverProjects(settings); len(got) != 1 || got[0].Name != "before" {
+		t.Fatalf("cached call got %+v, want the same answer", got)
+	}
+
+	if err := os.WriteFile(path, []byte("[session]\nname = \"after\"\n[[windows]]\nname = \"w\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Some filesystems have coarse mtime granularity; the size differs here too,
+	// but nudge mtime so the test doesn't depend on which one caught it.
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if got := DiscoverProjects(settings); len(got) != 1 || got[0].Name != "after" {
+		t.Fatalf("after editing got %+v, want the new name", got)
+	}
+}
+
+// A shared config with a relative root resolves against the shared directory,
+// not the project, so it builds a session in the wrong place. Warn, don't refuse.
+func TestCheckSharedRoot(t *testing.T) {
+	tests := []struct {
+		name   string
+		shared bool
+		root   string
+		want   bool
+	}{
+		{"relative root in a shared config", true, "..", true},
+		{"dot root in a shared config", true, ".", true},
+		{"absolute root is fine", true, "/srv/api", false},
+		{"tilde root is fine", true, "~/api", false},
+		{"var root is fine", true, "$PROJECTS/api", false},
+		{"no root is fine", true, "", false},
+		{"a local config is never affected", false, ".", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{Session: Session{Root: tt.root}}
+			msg, bad := CheckSharedRoot(Project{Path: "p", Shared: tt.shared}, cfg)
+			if bad != tt.want {
+				t.Errorf("CheckSharedRoot = %q, %v; want bad=%v", msg, bad, tt.want)
+			}
+			if bad && msg == "" {
+				t.Error("a reported problem needs a message")
+			}
+		})
+	}
+	if _, bad := CheckSharedRoot(Project{Shared: true}, nil); bad {
+		t.Error("a nil config must not report a problem")
+	}
+}

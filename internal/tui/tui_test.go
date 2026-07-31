@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -379,4 +380,122 @@ func TestFullFilterEnterOnlyClosesTheFilter(t *testing.T) {
 	if m.pendingAttach != "" {
 		t.Errorf("pendingAttach = %q, want empty — the full TUI needs a second enter", m.pendingAttach)
 	}
+}
+
+// A session manager in a background tab used to keep spending a capture-pane
+// every second and a full list sweep every three, forever, for a screen nobody
+// was looking at. The tickers still run — losing them would mean never waking
+// up again — but they do no work while blurred.
+func TestTickersIdleWhileBlurred(t *testing.T) {
+	m := New(nopRunner(), nil)
+	m.panes = []tmux.PaneInfo{{ID: "%1", Command: "nvim"}}
+	m.paneCur = 0
+	m.previewSrc = previewPane
+
+	m, _ = update(m, tea.BlurMsg{})
+	if !m.blurred {
+		t.Fatal("BlurMsg did not mark the model blurred")
+	}
+
+	// The preview tick reschedules itself but captures nothing.
+	blurredModel, cmd := m.Update(tickMsg{})
+	m = blurredModel.(Model)
+	if cmd == nil {
+		t.Error("the ticker must keep rescheduling, or it never wakes again")
+	}
+	if msgs := drain(cmd); containsPreview(msgs) {
+		t.Errorf("a blurred tick captured a pane: %#v", msgs)
+	}
+
+	// The list tick likewise.
+	_, listCmd := m.Update(listTickMsg{})
+	if msgs := drain(listCmd); containsSessions(msgs) {
+		t.Errorf("a blurred list tick re-listed sessions: %#v", msgs)
+	}
+
+	// Focus returns: refresh at once rather than making the user wait a tick.
+	focused, fcmd := m.Update(tea.FocusMsg{})
+	if focused.(Model).blurred {
+		t.Error("FocusMsg did not clear the blurred flag")
+	}
+	if msgs := drain(fcmd); !containsSessions(msgs) {
+		t.Errorf("regaining focus did not refresh the lists: %#v", msgs)
+	}
+}
+
+// While focused, the same ticks do their work — the guard must not be
+// permanently on.
+func TestTickersWorkWhileFocused(t *testing.T) {
+	m := New(nopRunner(), nil)
+	m.panes = []tmux.PaneInfo{{ID: "%1", Command: "nvim"}}
+	m.paneCur = 0
+	m.previewSrc = previewPane
+
+	_, cmd := m.Update(tickMsg{})
+	if msgs := drain(cmd); !containsPreview(msgs) {
+		t.Errorf("a focused tick did not capture the pane: %#v", msgs)
+	}
+	_, listCmd := m.Update(listTickMsg{})
+	if msgs := drain(listCmd); !containsSessions(msgs) {
+		t.Errorf("a focused list tick did not re-list sessions: %#v", msgs)
+	}
+}
+
+// drain runs a command (flattening a tea.Batch) and collects the messages it
+// produced, skipping the timer commands that never resolve synchronously.
+//
+// Every call goes through settle, including the outer one: tea.Batch collapses
+// to its single element when the rest are nil, so a tick that produced no work
+// arrives here as a bare tea.Tick rather than wrapped in a BatchMsg.
+func drain(cmd tea.Cmd) []tea.Msg {
+	msg, ok := settle(cmd)
+	if !ok {
+		return nil
+	}
+	batch, isBatch := msg.(tea.BatchMsg)
+	if !isBatch {
+		return []tea.Msg{msg}
+	}
+	var out []tea.Msg
+	for _, c := range batch {
+		if m, ok := settle(c); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// settle runs cmd and returns its message, or ok=false if it didn't resolve
+// promptly — which means it is a tea.Tick waiting out a second or three. The
+// commands these tests assert on run their tmux call inline and return at once.
+func settle(cmd tea.Cmd) (tea.Msg, bool) {
+	if cmd == nil {
+		return nil, false
+	}
+	done := make(chan tea.Msg, 1)
+	go func() { done <- cmd() }()
+	select {
+	case m := <-done:
+		return m, true
+	case <-time.After(30 * time.Millisecond):
+		return nil, false
+	}
+}
+
+func containsPreview(msgs []tea.Msg) bool {
+	for _, m := range msgs {
+		if _, ok := m.(previewMsg); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func containsSessions(msgs []tea.Msg) bool {
+	for _, m := range msgs {
+		if _, ok := m.(sessionsMsg); ok {
+			return true
+		}
+	}
+	return false
 }

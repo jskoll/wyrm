@@ -274,7 +274,7 @@ func (a *app) startProject(project config.Project) error {
 	}
 	_, _ = fmt.Fprintf(a.stderr, "wyrm: using config %s\n", project.Path)
 	a.printWarnings(cfg)
-	if msg, bad := config.CheckSharedRoot(project); bad {
+	if msg, bad := config.CheckSharedRoot(project, cfg); bad {
 		_, _ = fmt.Fprintln(a.stderr, "wyrm: warning: "+msg)
 	}
 

@@ -13,6 +13,8 @@
 package agent
 
 import (
+	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -87,10 +89,87 @@ func Merge(a, b State) State {
 	return a
 }
 
+// Profile is the set of on-screen markers that identify one agent's states.
+//
+// It exists so that supporting another agent is a matter of describing its
+// chrome rather than editing this package. `tui.agent.commands` used to widen
+// only *which* panes were captured, while the patterns stayed Claude Code's —
+// so adding "aider" got you panes that were captured, matched nothing, and (at
+// the time) were reported idle forever.
+type Profile struct {
+	// Commands are the #{pane_current_command} values this profile claims.
+	Commands []string `toml:"commands"`
+	// Busy, Blocked, and Idle are lowercase substrings looked for near the
+	// bottom of the pane. Match the agent's own chrome — the text it draws
+	// around its input box and prompts — never the prose it is displaying: a
+	// pane is a screenful of arbitrary text, and an agent merely *quoting* a
+	// question is not asking one.
+	Busy    []string `toml:"busy"`
+	Blocked []string `toml:"blocked"`
+	Idle    []string `toml:"idle"`
+	// BusyPattern is an optional regular expression for a live indicator that no
+	// fixed string can capture, such as a running elapsed counter.
+	BusyPattern string `toml:"busy_pattern"`
+
+	busyRe *regexp.Regexp
+}
+
 // DefaultCommands are the #{pane_current_command} values treated as an agent
-// pane. Overridable through settings, because which binary an agent shows up as
-// is a property of the user's setup, not of wyrm.
+// pane when nothing is configured.
 var DefaultCommands = []string{"claude"}
+
+// DefaultProfile describes Claude Code, the agent wyrm ships knowing about.
+func DefaultProfile() Profile {
+	return Profile{
+		Commands:    DefaultCommands,
+		Busy:        busyMarkers,
+		Blocked:     blockedMarkers,
+		Idle:        idleMarkers,
+		BusyPattern: elapsedPattern,
+		busyRe:      elapsed,
+	}
+}
+
+// Compile prepares a profile for use, resolving its BusyPattern. A profile that
+// names no commands, or whose pattern doesn't compile, is rejected here rather
+// than silently misbehaving at scan time.
+func (p Profile) Compile() (Profile, error) {
+	if len(p.Commands) == 0 {
+		return p, errors.New("profile has no commands")
+	}
+	if p.BusyPattern == "" {
+		return p, nil
+	}
+	re, err := regexp.Compile(p.BusyPattern)
+	if err != nil {
+		return p, fmt.Errorf("busy_pattern %q: %w", p.BusyPattern, err)
+	}
+	p.busyRe = re
+	return p, nil
+}
+
+// claims reports whether this profile is the one for a pane running command.
+func (p Profile) claims(command string) bool { return IsAgent(command, p.Commands) }
+
+// profileFor returns the profile matching command. An explicit set wins
+// entirely: a user who has described their own agents has said what wyrm should
+// look for, and quietly folding the built-in Claude patterns back in would make
+// one agent's chrome decide another's state.
+func profileFor(command string, profiles []Profile) (Profile, bool) {
+	if len(profiles) == 0 {
+		def := DefaultProfile()
+		if def.claims(command) {
+			return def, true
+		}
+		return Profile{}, false
+	}
+	for _, p := range profiles {
+		if p.claims(command) {
+			return p, true
+		}
+	}
+	return Profile{}, false
+}
 
 // IsAgent reports whether a pane running command should be inspected. commands
 // falls back to DefaultCommands when empty. The comparison is case-insensitive
@@ -153,7 +232,9 @@ var busyMarkers = []string{
 // and so stopped recognising a turn as busy the moment it passed a minute and
 // the counter became "(19m 24s" — every long-running agent then reported itself
 // idle, which is precisely backwards.
-var elapsed = regexp.MustCompile(`\((?:\d+h\s*)?(?:\d+m\s*)?\d+s[\s·)]`)
+const elapsedPattern = `\((?:\d+h\s*)?(?:\d+m\s*)?\d+s[\s·)]`
+
+var elapsed = regexp.MustCompile(elapsedPattern)
 
 // blockedMarkers is the agent's own prompt chrome — text it draws around a
 // selector, which no transcript reproduces.
@@ -212,13 +293,14 @@ const optionGap = 4
 
 // Detect classifies a pane from the command it's running and its visible
 // contents (as captured by tmux capture-pane, without escape sequences).
-// commands may be nil, in which case DefaultCommands applies.
+// profiles may be nil, in which case DefaultProfile applies.
 //
 // Every branch requires positive evidence. A pane that is running an agent but
 // shows none resolves to StateUnknown, not StateIdle — see StateUnknown for why
 // the difference matters.
-func Detect(command, content string, commands []string) State {
-	if !IsAgent(command, commands) {
+func Detect(command, content string, profiles []Profile) State {
+	p, ok := profileFor(command, profiles)
+	if !ok {
 		return StateNone
 	}
 	prompt := tail(content, blockedTail)
@@ -229,19 +311,29 @@ func Detect(command, content string, commands []string) State {
 	// blocked, and the weaker option-list shape is checked after them so a
 	// numbered list the agent merely *printed* while working can't outvote a
 	// live spinner.
-	if containsAny(prompt, blockedMarkers) {
+	if containsAny(prompt, p.Blocked) {
 		return StateBlocked
 	}
-	if containsAny(work, busyMarkers) || matchesAny(work, elapsed) {
+	if containsAny(work, p.Busy) || (p.busyRe != nil && matchesAny(work, p.busyRe)) {
 		return StateBusy
 	}
+	// The numbered-selector shape is checked for every profile: it is a property
+	// of what a choice list looks like, not of any one agent's wording.
 	if hasOptionList(prompt) {
 		return StateBlocked
 	}
-	if containsAny(prompt, idleMarkers) {
+	if containsAny(prompt, p.Idle) {
 		return StateIdle
 	}
 	return StateUnknown
+}
+
+// IsAgentPane reports whether a pane running command is worth capturing at all,
+// which is what lets the scanner skip a pane running an ordinary shell before
+// paying for a capture-pane.
+func IsAgentPane(command string, profiles []Profile) bool {
+	_, ok := profileFor(command, profiles)
+	return ok
 }
 
 // tail returns the last n non-blank lines of content, in order. Blank lines are

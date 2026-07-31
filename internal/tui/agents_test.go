@@ -137,14 +137,105 @@ func TestLoadAgentStatusToleratesAVanishedPane(t *testing.T) {
 	}
 }
 
-func TestAgentCommandsAreConfigurable(t *testing.T) {
-	r := agentRunner("$1|@1|%1|aider\n", map[string]string{"%1": waitingPane})
+// tui.agent.commands widens which panes the *built-in* detector inspects, for
+// someone running Claude Code under a wrapper name. The patterns stay the
+// shipped ones, which is the whole point of the distinction from profiles.
+func TestAgentCommandsWidenTheBuiltInProfile(t *testing.T) {
+	r := agentRunner("$1|@1|%1|myclaude\n", map[string]string{"%1": waitingPane})
 
-	if got := run(loadAgentStatus(r, nil, "")).(agentStatusMsg).status.pane("%1"); got != agent.StateNone {
-		t.Errorf("aider with default commands = %v, want none", got)
+	def, err := agentProfiles(nil)
+	if err != nil {
+		t.Fatalf("agentProfiles(nil): %v", err)
 	}
-	if got := run(loadAgentStatus(r, []string{"aider"}, "")).(agentStatusMsg).status.pane("%1"); got != agent.StateBlocked {
-		t.Errorf("aider with commands=[aider] = %v, want blocked", got)
+	if got := run(loadAgentStatus(r, def, "")).(agentStatusMsg).status.pane("%1"); got != agent.StateNone {
+		t.Errorf("an unknown command = %v, want none", got)
+	}
+
+	widened, err := agentProfiles(&config.Settings{
+		TUI: config.TUI{Agent: config.Agent{Commands: []string{"myclaude"}}},
+	})
+	if err != nil {
+		t.Fatalf("agentProfiles: %v", err)
+	}
+	if got := run(loadAgentStatus(r, widened, "")).(agentStatusMsg).status.pane("%1"); got != agent.StateBlocked {
+		t.Errorf("widened commands = %v, want blocked via the built-in patterns", got)
+	}
+}
+
+// A profile describes a different agent's chrome. It replaces the built-in one
+// rather than adding to it, so Claude Code's markers can't decide another
+// agent's state.
+func TestAgentProfilesClassifyByTheirOwnPatterns(t *testing.T) {
+	const aiderBusy = "> refactor the parser\napplying edits… 12 files\n[working]"
+	const aiderIdle = "> refactor the parser\napplied 3 edits\naider> "
+	r := agentRunner(
+		"$1|@1|%1|aider\n$1|@1|%2|claude\n",
+		map[string]string{"%1": aiderBusy, "%2": waitingPane},
+	)
+
+	profiles, err := agentProfiles(&config.Settings{TUI: config.TUI{Agent: config.Agent{
+		Profiles: []config.AgentProfile{{
+			Commands: []string{"aider"},
+			Busy:     []string{"[working]"},
+			Idle:     []string{"aider> "},
+		}},
+	}}})
+	if err != nil {
+		t.Fatalf("agentProfiles: %v", err)
+	}
+
+	status := run(loadAgentStatus(r, profiles, "")).(agentStatusMsg).status
+	if got := status.pane("%1"); got != agent.StateBusy {
+		t.Errorf("aider pane = %v, want busy from its own patterns", got)
+	}
+	// claude isn't in any configured profile, so it isn't an agent pane at all.
+	if got := status.pane("%2"); got != agent.StateNone {
+		t.Errorf("claude pane = %v, want none — profiles replace the built-in one", got)
+	}
+
+	// And the idle side, on evidence rather than by elimination.
+	r2 := agentRunner("$1|@1|%1|aider\n", map[string]string{"%1": aiderIdle})
+	if got := run(loadAgentStatus(r2, profiles, "")).(agentStatusMsg).status.pane("%1"); got != agent.StateIdle {
+		t.Errorf("aider at its prompt = %v, want idle", got)
+	}
+}
+
+// A profile wyrm can't use is an error, not a silent fallback: markers that
+// quietly stopped appearing look exactly like an agent that never waits for you.
+func TestAgentProfilesRejectBadConfiguration(t *testing.T) {
+	tests := []struct {
+		name    string
+		profile config.AgentProfile
+	}{
+		{"no commands", config.AgentProfile{Busy: []string{"x"}}},
+		{"uncompilable pattern", config.AgentProfile{Commands: []string{"a"}, BusyPattern: "("}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := agentProfiles(&config.Settings{
+				TUI: config.TUI{Agent: config.Agent{Profiles: []config.AgentProfile{tt.profile}}},
+			})
+			if err == nil {
+				t.Fatal("want an error naming the bad profile")
+			}
+			if !strings.Contains(err.Error(), "profiles[0]") {
+				t.Errorf("err = %q, want it to say which profile", err)
+			}
+		})
+	}
+}
+
+// A custom busy_pattern compiles and matches.
+func TestAgentProfileBusyPattern(t *testing.T) {
+	profiles, err := agentProfiles(&config.Settings{TUI: config.TUI{Agent: config.Agent{
+		Profiles: []config.AgentProfile{{Commands: []string{"bot"}, BusyPattern: `thinking \d+s`}},
+	}}})
+	if err != nil {
+		t.Fatalf("agentProfiles: %v", err)
+	}
+	r := agentRunner("$1|@1|%1|bot\n", map[string]string{"%1": "output\nthinking 42s"})
+	if got := run(loadAgentStatus(r, profiles, "")).(agentStatusMsg).status.pane("%1"); got != agent.StateBusy {
+		t.Errorf("pane = %v, want busy from the custom pattern", got)
 	}
 }
 

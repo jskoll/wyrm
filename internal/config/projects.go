@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Project is a discoverable wyrm config: the session name it would produce and
@@ -17,6 +19,37 @@ type Project struct {
 	Shared bool
 }
 
+// nameCache memoizes ProjectName by file identity, so repeated discovery
+// doesn't re-read and re-parse every config on disk.
+//
+// The TUI calls DiscoverProjects on a 3-second timer, and each call used to
+// Load() every shared config to work out its session name — twenty projects
+// meant twenty file reads and twenty TOML parses every three seconds, forever.
+// Keying on (size, mtime) means an edit is still picked up on the next tick,
+// which is what the timer is for.
+var nameCache sync.Map // path -> nameCacheEntry
+
+type nameCacheEntry struct {
+	size  int64
+	mtime time.Time
+	name  string
+}
+
+// cachedProjectName returns ProjectName(path, shared), reusing the last result
+// while the file is unchanged. info is the already-stat'ed file, since callers
+// have had to stat it to know it exists.
+func cachedProjectName(path string, shared bool, info os.FileInfo) string {
+	if v, ok := nameCache.Load(path); ok {
+		e := v.(nameCacheEntry)
+		if e.size == info.Size() && e.mtime.Equal(info.ModTime()) {
+			return e.name
+		}
+	}
+	name := ProjectName(path, shared)
+	nameCache.Store(path, nameCacheEntry{size: info.Size(), mtime: info.ModTime(), name: name})
+	return name
+}
+
 // DiscoverProjects enumerates every config wyrm can see: the local
 // .wyrm.toml/.tmuxconfig in the current directory, plus every
 // "<folder>.wyrm.toml" in the shared config directory. Shared entries are
@@ -25,7 +58,7 @@ type Project struct {
 func DiscoverProjects(settings *Settings) []Project {
 	var projects []Project
 	seen := map[string]bool{}
-	add := func(path string, shared bool) {
+	add := func(path string, shared bool, info os.FileInfo) {
 		abs, err := filepath.Abs(path)
 		if err != nil {
 			abs = path
@@ -34,7 +67,7 @@ func DiscoverProjects(settings *Settings) []Project {
 			return
 		}
 		seen[abs] = true
-		name := ProjectName(path, shared)
+		name := cachedProjectName(path, shared, info)
 		if name == "" {
 			return
 		}
@@ -42,8 +75,8 @@ func DiscoverProjects(settings *Settings) []Project {
 	}
 
 	for _, name := range []string{DefaultFileName, LegacyFileName} {
-		if _, err := os.Stat(name); err == nil {
-			add(name, false)
+		if info, err := os.Stat(name); err == nil {
+			add(name, false, info)
 		}
 	}
 	if settings != nil {
@@ -51,7 +84,11 @@ func DiscoverProjects(settings *Settings) []Project {
 			matches, _ := filepath.Glob(filepath.Join(dir, "*"+DefaultFileName))
 			sort.Strings(matches)
 			for _, m := range matches {
-				add(m, true)
+				info, err := os.Stat(m)
+				if err != nil {
+					continue
+				}
+				add(m, true, info)
 			}
 		}
 	}
@@ -102,12 +139,8 @@ func ProjectName(path string, shared bool) string {
 // resolves against the shared directory and builds a session rooted in the
 // wrong place. Callers warn rather than refuse: the session still builds, and
 // some configs legitimately set only a name.
-func CheckSharedRoot(p Project) (string, bool) {
-	if !p.Shared {
-		return "", false
-	}
-	cfg, err := Load(p.Path)
-	if err != nil {
+func CheckSharedRoot(p Project, cfg *Config) (string, bool) {
+	if !p.Shared || cfg == nil {
 		return "", false
 	}
 	root := cfg.Session.Root

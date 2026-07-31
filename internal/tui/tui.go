@@ -23,6 +23,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/jskoll/wyrm/internal/agent"
 	"github.com/jskoll/wyrm/internal/config"
 	"github.com/jskoll/wyrm/internal/sessions"
 	"github.com/jskoll/wyrm/internal/tmux"
@@ -137,6 +138,15 @@ type Model struct {
 	// hold an AI agent that's waiting on the user. Empty until the first scan.
 	agents agentStatus
 
+	// agentProfiles is the compiled detector configuration, resolved once at
+	// startup rather than per scan — it involves compiling regexps, and the scan
+	// runs on a timer.
+	agentProfiles []agent.Profile
+
+	// blurred is set while the terminal reports the window as unfocused. The
+	// refresh tickers keep running but skip their work — see the tickMsg case.
+	blurred bool
+
 	// compact drops the Projects and Panes panels, leaving Sessions over
 	// Windows. It is what `wyrm pick` runs — see RunPicker. Focus and the mouse
 	// hit test both walk panels(), so nothing has to special-case it beyond the
@@ -180,14 +190,22 @@ type Model struct {
 // a live pane capture instead of a config file.
 // settings may be nil (the Projects panel then lists only local configs).
 func New(runner tmux.Runner, settings *config.Settings) Model {
+	// A broken profile is reported by Run before the alt screen opens; New
+	// itself falls back to the built-in one so the zero-config and test paths
+	// stay total.
+	profiles, err := agentProfiles(settings)
+	if err != nil {
+		profiles = []agent.Profile{agent.DefaultProfile()}
+	}
 	return Model{
-		runner:    runner,
-		settings:  settings,
-		focus:     panelSessions,
-		windowCur: -1,
-		paneCur:   -1,
-		selfPane:  os.Getenv("TMUX_PANE"),
-		mouseOn:   settings.MouseEnabled(),
+		runner:        runner,
+		settings:      settings,
+		focus:         panelSessions,
+		windowCur:     -1,
+		paneCur:       -1,
+		selfPane:      os.Getenv("TMUX_PANE"),
+		mouseOn:       settings.MouseEnabled(),
+		agentProfiles: profiles,
 	}
 }
 
@@ -441,12 +459,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.FocusMsg:
+		// Terminal focus came back: refresh immediately rather than making the
+		// user wait out the rest of a tick for a stale screen.
+		m.blurred = false
+		return m, tea.Batch(loadProjects(m.runner, m.settings), loadSessions(m.runner),
+			m.agentCmd(), m.reloadPreview())
+
+	case tea.BlurMsg:
+		m.blurred = true
+		return m, nil
+
 	case tickMsg:
 		// Refresh the live pane preview, then reschedule. A config preview is
 		// static, so leave it alone — keyed off what's actually being shown
 		// rather than off which panel has focus.
+		//
+		// The ticker keeps running while the terminal is unfocused but does no
+		// work: a session manager sitting in a background tab was spending a
+		// capture-pane every second and a list sweep every three, forever, for a
+		// screen nobody was looking at.
 		var cmd tea.Cmd
-		if m.previewSrc == previewPane {
+		if !m.blurred && m.previewSrc == previewPane {
 			cmd = m.reloadPreview()
 		}
 		return m, tea.Batch(cmd, tick())
@@ -455,7 +489,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Re-read the lists so sessions started or ended elsewhere show up.
 		// Held off while a modal is open, so the data under a confirm prompt
 		// can't change between reading it and answering it.
-		if m.mode != modeNormal && m.mode != modeFilter {
+		if m.blurred || (m.mode != modeNormal && m.mode != modeFilter) {
 			return m, listTick()
 		}
 		return m, tea.Batch(loadProjects(m.runner, m.settings), loadSessions(m.runner),
@@ -1137,15 +1171,20 @@ func RunPicker(runner tmux.Runner, settings *config.Settings, stderr io.Writer) 
 }
 
 func runProgram(m Model, settings *config.Settings, stderr io.Writer) (pendingAttach string, err error) {
-	// Before the alt screen: a broken theme file has to be reportable, and
-	// styles are read by every render from here on.
+	// Before the alt screen: a broken theme file or agent profile has to be
+	// reportable, and the alt screen would wipe the message on its way up.
 	theme, err := LoadTheme()
 	if err != nil {
 		return "", err
 	}
 	SetTheme(theme)
+	if _, err := agentProfiles(settings); err != nil {
+		return "", err
+	}
 
-	opts := []tea.ProgramOption{tea.WithAltScreen()}
+	// ReportFocus so the refresh tickers can idle while the terminal is in a
+	// background tab — see the tickMsg case in Update.
+	opts := []tea.ProgramOption{tea.WithAltScreen(), tea.WithReportFocus()}
 	// Cell motion, not all motion: the menu wants hover tracking while a button
 	// is down, but reporting every idle pointer move would wake the program on
 	// each pixel of travel for no benefit.

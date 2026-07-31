@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"fmt"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jskoll/wyrm/internal/agent"
+	"github.com/jskoll/wyrm/internal/config"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
@@ -43,7 +46,7 @@ type agentStatusMsg struct {
 // It takes one list-panes call plus one capture-pane per agent pane — which is
 // why the candidate filter happens before any capture, and why a pane running
 // an ordinary shell is never captured at all.
-func loadAgentStatus(r tmux.Runner, commands []string, skipPane string) tea.Cmd {
+func loadAgentStatus(r tmux.Runner, profiles []agent.Profile, skipPane string) tea.Cmd {
 	return func() tea.Msg {
 		refs, err := tmux.ListAllPanes(r)
 		if err != nil {
@@ -56,7 +59,7 @@ func loadAgentStatus(r tmux.Runner, commands []string, skipPane string) tea.Cmd 
 		}
 		captures := 0
 		for _, ref := range refs {
-			if !agent.IsAgent(ref.Command, commands) {
+			if !agent.IsAgentPane(ref.Command, profiles) {
 				continue
 			}
 			// The pane wyrm tui is running in is never an agent pane, but skip
@@ -75,7 +78,7 @@ func loadAgentStatus(r tmux.Runner, commands []string, skipPane string) tea.Cmd 
 				// leave it unmarked and carry on with the rest.
 				continue
 			}
-			state := agent.Detect(ref.Command, content, commands)
+			state := agent.Detect(ref.Command, content, profiles)
 			// Unknown is stored nowhere: it draws no marker and must not win a
 			// rollup, and leaving it out keeps the maps to panes worth showing.
 			if state == agent.StateNone || state == agent.StateUnknown {
@@ -94,7 +97,41 @@ func (m Model) agentCmd() tea.Cmd {
 	if !m.settings.AgentEnabled() {
 		return nil
 	}
-	return loadAgentStatus(m.runner, m.settings.AgentCommands(), m.selfPane)
+	return loadAgentStatus(m.runner, m.agentProfiles, m.selfPane)
+}
+
+// agentProfiles builds the detector's profiles from settings, and reports what
+// is wrong with them rather than quietly falling back — a mistyped pattern that
+// silently disabled the markers would look exactly like an agent that never
+// waits for you.
+//
+// Layering: explicit profiles replace the built-in one outright. A bare
+// `commands` list instead widens the built-in profile, which is what a user
+// running Claude Code under a wrapper name wants.
+func agentProfiles(settings *config.Settings) ([]agent.Profile, error) {
+	configured := settings.AgentProfiles()
+	if len(configured) == 0 {
+		def := agent.DefaultProfile()
+		if extra := settings.AgentCommands(); len(extra) > 0 {
+			def.Commands = extra
+		}
+		return []agent.Profile{def}, nil
+	}
+	out := make([]agent.Profile, 0, len(configured))
+	for i, p := range configured {
+		compiled, err := agent.Profile{
+			Commands:    p.Commands,
+			Busy:        p.Busy,
+			Blocked:     p.Blocked,
+			Idle:        p.Idle,
+			BusyPattern: p.BusyPattern,
+		}.Compile()
+		if err != nil {
+			return nil, fmt.Errorf("tui.agent.profiles[%d]: %w", i, err)
+		}
+		out = append(out, compiled)
+	}
+	return out, nil
 }
 
 // agentMark returns the trailing status span for a row, and whether there is

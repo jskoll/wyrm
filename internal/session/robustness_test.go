@@ -69,7 +69,7 @@ func TestCreateRejectsContaminatedSessionID(t *testing.T) {
 }
 
 func TestSplitPaneRejectsContaminatedPaneID(t *testing.T) {
-	if _, err := splitPane(&noisyRunner{notice: "warning"}, "%1", config.Split{Type: "h"}); err == nil {
+	if _, err := splitPane(&noisyRunner{notice: "warning"}, "%1", config.Split{Type: "h"}, "", nil); err == nil {
 		t.Fatal("splitPane = nil error, want a rejected pane id")
 	}
 }

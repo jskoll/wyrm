@@ -26,16 +26,8 @@ optional; the defaults below apply when the file (or a key) is absent.
 |---|---|---|---|
 | `tui.mouse` | bool | `true` | Capture the mouse. `false` leaves your terminal's own click-drag text selection alone; `m` toggles it for one run |
 | `tui.agent.enabled` | bool | `true` | Mark sessions, windows, and panes whose AI agent is waiting on you |
-| `tui.agent.commands` | array | `["claude"]` | The `#{pane_current_command}` values treated as an agent pane |
-
-!!! warning "`tui.agent.commands` only widens *which* panes are inspected"
-
-    The patterns that decide busy / blocked / waiting are Claude Code's own
-    on-screen chrome. Adding another agent here makes wyrm capture those panes,
-    but it has no patterns for them, so they are classified "unknown" and carry
-    no marker. That is deliberate — reporting an unrecognised pane as "waiting
-    for you" would be worse than reporting nothing — but it does mean adding a
-    command is not, on its own, enough to get markers for another agent.
+| `tui.agent.commands` | array | `["claude"]` | The `#{pane_current_command}` values the **built-in** detector inspects |
+| `tui.agent.profiles` | array | — | Full descriptions of other agents (below) |
 
 ```toml
 [tui]
@@ -43,12 +35,61 @@ mouse = true
 
 [tui.agent]
 enabled  = true
-commands = ["claude", "aider"]
+commands = ["claude", "myclaude-wrapper"]
 ```
 
 Agent detection costs one `list-panes` call per refresh plus one `capture-pane`
 for each *matching* pane — panes running an ordinary shell are never captured.
 Set `enabled = false` to stop both.
+
+### Which panes are marked
+
+A pane is marked only on positive evidence:
+
+| Marker | Meaning |
+|---|---|
+| ⏸ | the agent is stopped on a question it can't answer itself |
+| ✓ | the agent finished its turn and is waiting for the next instruction |
+| *(none)* | busy, or nothing recognisable on screen |
+
+An agent whose screen matches nothing is reported as *unknown* and carries no
+marker. That is deliberate: a marker that says "come look" when wyrm has no idea
+is worse than no marker, and it means a detector broken by a UI change goes
+quiet rather than lying.
+
+### `[[tui.agent.profiles]]` — describing another agent
+
+`commands` widens which panes the **built-in** (Claude Code) detector looks at,
+which is what you want for a wrapper script. It does not teach wyrm another
+agent's UI — that needs a profile:
+
+| Key | Type | Description |
+|---|---|---|
+| `commands` | array | `#{pane_current_command}` values this profile claims. Required |
+| `busy` | array | Lowercase substrings that appear only while a turn is running |
+| `blocked` | array | Substrings that appear only around a prompt awaiting an answer |
+| `idle` | array | Substrings of the idle input box |
+| `busy_pattern` | string | Regular expression for a live indicator no fixed string catches, e.g. a running timer |
+
+```toml
+[[tui.agent.profiles]]
+commands     = ["aider"]
+busy_pattern = 'thinking \d+s'
+idle         = ["aider> "]
+```
+
+Match the agent's own **chrome** — the text it draws around its input box and
+prompts — never the prose it is displaying. A pane is a screenful of arbitrary
+text, and an agent merely *quoting* a question is not asking one.
+
+A numbered choice list (`1.` / `2.` on adjacent lines near the bottom) counts as
+blocked for every profile, since that's a property of what a selector looks like
+rather than of any one agent.
+
+Defining any profile replaces the built-in one entirely, so one agent's chrome
+can't decide another's state — list Claude Code yourself if you still want it.
+A profile with no `commands`, or a `busy_pattern` that doesn't compile, is an
+error reported before the TUI starts rather than a silent fallback.
 
 ## Custom default config
 
@@ -62,19 +103,36 @@ file uses the same `[session]` / `[[windows]]` format documented below.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `name` | string | basename of `root` | tmux session name |
-| `root` | string | `.` | Working directory for every window; `$VAR` is expanded |
+| `root` | string | `.` | Default working directory for every window and pane; `~` and `$VAR` are expanded |
 | `on_project_start` | string | — | Shell command run (via your $SHELL, or sh, in `root`) before the session is created |
 | `on_project_exit` | string | — | Shell command run before `wyrm kill` destroys the session |
 | `startup_window` | string | first window | Window (name or index) to focus after creation. Without it the session opens on the first window, focused on its first pane |
 | `startup_pane` | int | — | Pane to focus within `startup_window` (uses your `pane-base-index`) |
+| `env` | table | — | Environment variables set in every pane of the session (below) |
 
 At least one of `name` / `root` is required.
+
+### `[session.env]`
+
+```toml
+[session.env]
+NODE_ENV = "development"
+API_URL = "http://localhost:3000"
+```
+
+The variables are passed to tmux as each window and pane is created, so they
+reach the shell in every pane. Setting them once on the session with
+`set-environment` would not: that only affects processes started afterward.
+
+Requires tmux 3.2 or newer (for `-e` on `new-session` / `split-window`). Every
+other wyrm feature works on 3.1+.
 
 ## `[[windows]]`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `name` | string | — | Window name |
+| `root` | string | session root | This window's working directory. A relative path resolves against `session.root`, so `root = "api"` means the `api` folder inside the project |
 | `pre_window` | string | — | Command typed once into **every pane of the window**, before that pane's own command (e.g. `nvm use 18`) |
 | `splits` | list | — | Split tree (below) — the recommended layout format |
 | `panes` | list | — | Legacy flat pane list (below); ignored when `splits` is set |
@@ -86,8 +144,34 @@ At least one of `name` / `root` is required.
 |---|---|---|---|
 | `type` | string | — | `h`/`horizontal` or `v`/`vertical`. **Omit** to target the pane created by the previous entry (or the window's first pane) without splitting |
 | `size` | int | tmux default | Percentage of space given to the new pane (1–99) |
-| `command` | string | — | Typed into the pane; entries starting with `#` are comments and skipped |
+| `command` | string | — | **Typed** into the pane's shell; entries starting with `#` are comments and skipped |
+| `run` | string | — | **Run** as the pane's own process, with no shell under it (below). Mutually exclusive with `command` |
+| `root` | string | window root | This pane's working directory, relative to the window's root unless absolute |
 | `children` | list | — | Nested splits, applied inside this entry's pane |
+
+### `command` vs `run`
+
+`command` types the text into the pane's shell, exactly as if you had. The
+shell stays underneath, so when the program exits you get your prompt back —
+which is what you want for `nvim` or a REPL.
+
+`run` makes the command *be* the pane's process. There is no shell, so:
+
+- the pane closes when the command exits (unless you've set tmux's
+  `remain-on-exit`), which suits a long-running server you'd rather see die
+  loudly than silently;
+- the text never lands in your shell history;
+- a command starting with `#` is runnable — `command` treats those as comments.
+
+```toml
+  [[windows.splits]]
+  type = "h"
+  run = "npm run dev"       # the pane *is* the dev server
+```
+
+Working directories cascade: a pane uses its own `root`, else its window's,
+else the session's. All panes get an explicit directory from wyrm, so a session
+built by `wyrm <name>` from an unrelated folder is still rooted correctly.
 
 How the tree is walked: each entry with a `type` splits the pane of the
 previous entry at the same level (the window's initial pane for the first
