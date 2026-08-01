@@ -355,7 +355,7 @@ func levenshtein(a, b string) int {
 func (a *app) attachOrSwitch(sessionID string) error {
 	if a.insideTmux() {
 		if out, err := a.runner.Run("switch-client", "-t", sessionID); err != nil {
-			return fmt.Errorf("switching to session: %w (%s)", err, out)
+			return fmt.Errorf("switching to session: %w", tmux.CmdErr(err, out))
 		}
 		return nil
 	}

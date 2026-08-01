@@ -29,9 +29,45 @@ type PaneInfo struct {
 func SessionPath(r Runner, sessionID string) (string, error) {
 	out, err := r.Run("display-message", "-p", "-t", sessionID, "-F", "#{session_path}")
 	if err != nil {
-		return "", fmt.Errorf("reading session path: %w (%s)", err, out)
+		return "", fmt.Errorf("reading session path: %w", CmdErr(err, out))
 	}
 	return strings.TrimSpace(out), nil
+}
+
+// records splits tmux "-F" output into one field slice per line, each with
+// exactly n pipe-separated fields.
+//
+// The last field is the one allowed to contain the delimiter — a window or
+// session name may hold a "|" — which is why SplitN's cap matters and why every
+// format string here puts the free-form field last. Blank lines are skipped and
+// a trailing "\r" trimmed, both of which some tmux builds emit.
+//
+// A line with the wrong field count is an error rather than a skipped row: it
+// means the format string and this parser disagree, which is a wyrm bug and not
+// something to paper over.
+func records(out string, n int, what string) ([][]string, error) {
+	var recs [][]string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			continue
+		}
+		fields := strings.SplitN(line, "|", n)
+		if len(fields) != n {
+			return nil, fmt.Errorf("unexpected %s output %q", what, line)
+		}
+		recs = append(recs, fields)
+	}
+	return recs, nil
+}
+
+// atoiField converts a numeric field, naming what it was.
+func atoiField(field, what string) (int, error) {
+	n, err := strconv.Atoi(field)
+	if err != nil {
+		return 0, fmt.Errorf("unexpected %s %q", what, field)
+	}
+	return n, nil
 }
 
 const windowListFormat = "#{window_index}|#{window_id}|#{?window_active,1,0}|#{window_layout}|#{window_name}"
@@ -41,31 +77,27 @@ const windowListFormat = "#{window_index}|#{window_id}|#{?window_active,1,0}|#{w
 func ListWindows(r Runner, sessionID string) ([]WindowInfo, error) {
 	out, err := r.Run("list-windows", "-t", sessionID, "-F", windowListFormat)
 	if err != nil {
-		return nil, fmt.Errorf("listing windows: %w (%s)", err, out)
+		return nil, fmt.Errorf("listing windows: %w", CmdErr(err, out))
 	}
-	var windows []WindowInfo
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "|", 5)
-		if len(parts) != 5 {
-			return nil, fmt.Errorf("unexpected list-windows output %q", line)
-		}
-		index, err := strconv.Atoi(parts[0])
+	recs, err := records(out, 5, "list-windows")
+	if err != nil {
+		return nil, err
+	}
+	windows := make([]WindowInfo, 0, len(recs))
+	for _, f := range recs {
+		index, err := atoiField(f[0], "window index")
 		if err != nil {
-			return nil, fmt.Errorf("unexpected window index %q", parts[0])
+			return nil, err
 		}
-		if err := CheckID(WindowSigil, "window", parts[1]); err != nil {
+		if err := CheckID(WindowSigil, "window", f[1]); err != nil {
 			return nil, fmt.Errorf("listing windows: %w", err)
 		}
 		windows = append(windows, WindowInfo{
 			Index:  index,
-			ID:     parts[1],
-			Active: parts[2] == "1",
-			Layout: parts[3],
-			Name:   parts[4],
+			ID:     f[1],
+			Active: f[2] == "1",
+			Layout: f[3],
+			Name:   f[4],
 		})
 	}
 	return windows, nil
@@ -97,26 +129,52 @@ func ListAllPanes(r Runner) ([]PaneRef, error) {
 		if NoServerRunning(err, out) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("listing panes: %w (%s)", err, out)
+		return nil, fmt.Errorf("listing panes: %w", CmdErr(err, out))
 	}
-	var refs []PaneRef
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "|", 4)
-		if len(parts) != 4 {
-			return nil, fmt.Errorf("unexpected list-panes output %q", line)
+	recs, err := records(out, 4, "list-panes")
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]PaneRef, 0, len(recs))
+	for _, f := range recs {
+		// These IDs are used directly as capture-pane targets, so they get the
+		// same validation every other parsed ID gets — see CheckID. This parser
+		// was the one that skipped it.
+		if err := CheckIDs(f[0], f[1], f[2]); err != nil {
+			return nil, fmt.Errorf("listing panes: %w", err)
 		}
 		refs = append(refs, PaneRef{
-			SessionID: parts[0],
-			WindowID:  parts[1],
-			PaneID:    parts[2],
-			Command:   parts[3],
+			SessionID: f[0],
+			WindowID:  f[1],
+			PaneID:    f[2],
+			Command:   f[3],
 		})
 	}
 	return refs, nil
+}
+
+// CheckIDs validates a session/window/pane ID triple parsed out of one tmux
+// response. An empty argument is skipped, so callers can check only the ones
+// they actually parsed. See CheckID for why a malformed ID has to be caught at
+// the parse site rather than left to misdirect a later command.
+func CheckIDs(sessionID, windowID, paneID string) error {
+	for _, c := range []struct {
+		sigil byte
+		kind  string
+		id    string
+	}{
+		{SessionSigil, "session", sessionID},
+		{WindowSigil, "window", windowID},
+		{PaneSigil, "pane", paneID},
+	} {
+		if c.id == "" {
+			continue
+		}
+		if err := CheckID(c.sigil, c.kind, c.id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 const paneListFormat = "#{pane_id}|#{pane_index}|#{?pane_active,1,0}|#{pane_current_command}"
@@ -126,30 +184,26 @@ const paneListFormat = "#{pane_id}|#{pane_index}|#{?pane_active,1,0}|#{pane_curr
 func ListPanes(r Runner, target string) ([]PaneInfo, error) {
 	out, err := r.Run("list-panes", "-t", target, "-F", paneListFormat)
 	if err != nil {
-		return nil, fmt.Errorf("listing panes: %w (%s)", err, out)
+		return nil, fmt.Errorf("listing panes: %w", CmdErr(err, out))
 	}
-	var panes []PaneInfo
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "|", 4)
-		if len(parts) != 4 {
-			return nil, fmt.Errorf("unexpected list-panes output %q", line)
-		}
-		index, err := strconv.Atoi(parts[1])
+	recs, err := records(out, 4, "list-panes")
+	if err != nil {
+		return nil, err
+	}
+	panes := make([]PaneInfo, 0, len(recs))
+	for _, f := range recs {
+		index, err := atoiField(f[1], "pane index")
 		if err != nil {
-			return nil, fmt.Errorf("unexpected pane index %q", parts[1])
+			return nil, err
 		}
-		if err := CheckID(PaneSigil, "pane", parts[0]); err != nil {
+		if err := CheckID(PaneSigil, "pane", f[0]); err != nil {
 			return nil, fmt.Errorf("listing panes: %w", err)
 		}
 		panes = append(panes, PaneInfo{
-			ID:      parts[0],
+			ID:      f[0],
 			Index:   index,
-			Active:  parts[2] == "1",
-			Command: parts[3],
+			Active:  f[2] == "1",
+			Command: f[3],
 		})
 	}
 	return panes, nil

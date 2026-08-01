@@ -13,25 +13,18 @@ import (
 func CapturePane(r Runner, target string) (string, error) {
 	out, err := r.Run("capture-pane", "-e", "-p", "-t", target)
 	if err != nil {
-		return "", fmt.Errorf("capturing pane %q: %w (%s)", target, err, out)
+		return "", fmt.Errorf("capturing pane %q: %w", target, CmdErr(err, out))
 	}
 	return out, nil
 }
 
-// CapturePanePlain returns the visible contents of a pane as plain text —
+// CapturePanePlainArgs is the command that reads a pane as plain text —
 // CapturePane without "-e". The agent-state detector matches patterns against
 // this, and SGR escapes interleaved with the text would break those matches
 // wherever the pane happens to have colored a word mid-marker.
-func CapturePanePlain(r Runner, target string) (string, error) {
-	out, err := r.Run(CapturePanePlainArgs(target)...)
-	if err != nil {
-		return "", fmt.Errorf("capturing pane %q: %w (%s)", target, err, out)
-	}
-	return out, nil
-}
-
-// CapturePanePlainArgs is CapturePanePlain's command, for callers assembling a
-// batch of captures rather than issuing one — see RunOutputsTolerant.
+//
+// It returns the argv rather than running it because its only caller captures a
+// set of panes as one batch — see tmux.RunOutputs.
 func CapturePanePlainArgs(target string) []string {
 	return []string{"capture-pane", "-p", "-t", target}
 }
@@ -39,7 +32,7 @@ func CapturePanePlainArgs(target string) []string {
 // KillWindow removes a window by its window ID (e.g. "@2").
 func KillWindow(r Runner, windowID string) error {
 	if out, err := r.Run("kill-window", "-t", windowID); err != nil {
-		return fmt.Errorf("killing window %q: %w (%s)", windowID, err, out)
+		return fmt.Errorf("killing window %q: %w", windowID, CmdErr(err, out))
 	}
 	return nil
 }
@@ -47,7 +40,7 @@ func KillWindow(r Runner, windowID string) error {
 // KillPane removes a pane by its pane ID (e.g. "%3").
 func KillPane(r Runner, paneID string) error {
 	if out, err := r.Run("kill-pane", "-t", paneID); err != nil {
-		return fmt.Errorf("killing pane %q: %w (%s)", paneID, err, out)
+		return fmt.Errorf("killing pane %q: %w", paneID, CmdErr(err, out))
 	}
 	return nil
 }
@@ -62,7 +55,7 @@ func KillPane(r Runner, paneID string) error {
 // doing what was asked.
 func RenameSession(r Runner, sessionID, name string) error {
 	if out, err := r.Run("rename-session", "-t", sessionID, "--", name); err != nil {
-		return fmt.Errorf("renaming session %q: %w (%s)", sessionID, err, out)
+		return fmt.Errorf("renaming session %q: %w", sessionID, CmdErr(err, out))
 	}
 	return nil
 }
@@ -71,7 +64,7 @@ func RenameSession(r Runner, sessionID, name string) error {
 // RenameSession for the "--".
 func RenameWindow(r Runner, windowID, name string) error {
 	if out, err := r.Run("rename-window", "-t", windowID, "--", name); err != nil {
-		return fmt.Errorf("renaming window %q: %w (%s)", windowID, err, out)
+		return fmt.Errorf("renaming window %q: %w", windowID, CmdErr(err, out))
 	}
 	return nil
 }
@@ -92,7 +85,7 @@ func NewWindow(r Runner, sessionID, name, root string) (windowID, paneID string,
 	}
 	out, err := r.Run(args...)
 	if err != nil {
-		return "", "", fmt.Errorf("creating window in %q: %w (%s)", sessionID, err, out)
+		return "", "", fmt.Errorf("creating window in %q: %w", sessionID, CmdErr(err, out))
 	}
 	win, pane, ok := strings.Cut(strings.TrimRight(out, "\r"), "|")
 	if !ok {
@@ -111,7 +104,7 @@ func NewWindow(r Runner, sessionID, name, root string) (windowID, paneID string,
 // the window with the given ID.
 func SelectLayout(r Runner, windowID, layout string) error {
 	if out, err := r.Run("select-layout", "-t", windowID, layout); err != nil {
-		return fmt.Errorf("applying layout %q to %q: %w (%s)", layout, windowID, err, out)
+		return fmt.Errorf("applying layout %q to %q: %w", layout, windowID, CmdErr(err, out))
 	}
 	return nil
 }
@@ -120,7 +113,7 @@ func SelectLayout(r Runner, windowID, layout string) error {
 // attach lands there.
 func SelectWindow(r Runner, windowID string) error {
 	if out, err := r.Run("select-window", "-t", windowID); err != nil {
-		return fmt.Errorf("selecting window %q: %w (%s)", windowID, err, out)
+		return fmt.Errorf("selecting window %q: %w", windowID, CmdErr(err, out))
 	}
 	return nil
 }
@@ -128,7 +121,7 @@ func SelectWindow(r Runner, windowID string) error {
 // SelectPane makes paneID the active pane of its window.
 func SelectPane(r Runner, paneID string) error {
 	if out, err := r.Run("select-pane", "-t", paneID); err != nil {
-		return fmt.Errorf("selecting pane %q: %w (%s)", paneID, err, out)
+		return fmt.Errorf("selecting pane %q: %w", paneID, CmdErr(err, out))
 	}
 	return nil
 }
@@ -136,7 +129,7 @@ func SelectPane(r Runner, paneID string) error {
 // ZoomPane toggles the zoomed state of a pane (resize-pane -Z).
 func ZoomPane(r Runner, paneID string) error {
 	if out, err := r.Run("resize-pane", "-Z", "-t", paneID); err != nil {
-		return fmt.Errorf("zooming pane %q: %w (%s)", paneID, err, out)
+		return fmt.Errorf("zooming pane %q: %w", paneID, CmdErr(err, out))
 	}
 	return nil
 }

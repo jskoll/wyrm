@@ -107,67 +107,37 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 	// is twelve send-keys calls collapsed into one.
 	keys := &keyBatch{}
 
-	var id, firstWindowID string
+	// The first window comes from new-session and the rest from new-window:
+	// different commands, different output shapes, and only the later ones leave
+	// a half-built session worth rolling back.
+	first, err := newSession(r, name, cfg.Windows[0], roots[0], env)
+	if err != nil {
+		return "", "", false, err
+	}
+	if first.name != name {
+		// tmux does not always name the session what we asked for: some builds
+		// replace "." and ":" with "_", and a config in a directory called
+		// "example.com" hits that. Reporting the config's name instead of the
+		// real one makes the *next* run fail to find the session and try to
+		// create a duplicate.
+		warnf(stderr, "tmux named the session %q, not %q", first.name, name)
+		name = first.name
+	}
+	id := first.sessionID
+
 	for i, w := range cfg.Windows {
-		var out string
-		var err error
-		var windowID, paneID string
-		if i == 0 {
-			// #{session_name} is captured alongside the IDs because tmux does
-			// not always name the session what we asked for: some builds
-			// replace "." and ":" with "_", and a config in a directory called
-			// "example.com" hits that. Reporting the config's name instead of
-			// the real one makes the *next* run fail to find the session and
-			// try to create a duplicate.
-			// -c is the *first window's* root, not necessarily the session's:
-			// new-session sets both at once, and the pane's directory is the one
-			// a user can see. They differ only when window 0 sets its own root.
-			args := []string{"new-session", "-d", "-P", "-F", "#{session_id}|#{session_name}|#{window_id}|#{pane_id}",
-				"-s", name, "-n", w.Name, "-c", roots[0]}
-			args = append(args, env...)
-			args = append(args, paneProcess(w)...)
-			out, err = r.Run(args...)
-			if err != nil {
-				return "", "", false, fmt.Errorf("creating session: %w (%s)", err, out)
-			}
-			parts := strings.SplitN(out, "|", 4)
-			if len(parts) != 4 {
-				return "", "", false, fmt.Errorf("unexpected tmux output %q", out)
-			}
-			id, windowID, paneID = parts[0], parts[2], parts[3]
-			if err := checkIDs(id, windowID, paneID); err != nil {
-				return "", "", false, fmt.Errorf("creating session: %w", err)
-			}
-			if parts[1] != name {
-				warnf(stderr, "tmux named the session %q, not %q", parts[1], name)
-				name = parts[1]
-			}
-			firstWindowID = windowID
-		} else {
-			// -d keeps the session's active window where it started. Without
-			// it tmux makes each new window current, so a freshly built
-			// session opens on the *last* window in the config rather than the
-			// first (which is what startup_window's default documents).
-			args := []string{"new-window", "-d", "-P", "-F", "#{window_id}|#{pane_id}",
-				"-t", id, "-n", w.Name, "-c", roots[i]}
-			args = append(args, env...)
-			args = append(args, paneProcess(w)...)
-			out, err = r.Run(args...)
-			if err != nil {
-				return "", "", false, rollback(r, id, stderr,
-					fmt.Errorf("creating window %q: %w (%s)", w.Name, err, out))
-			}
-			var ok bool
-			windowID, paneID, ok = strings.Cut(out, "|")
-			if !ok {
-				return "", "", false, rollback(r, id, stderr, fmt.Errorf("unexpected tmux output %q", out))
-			}
-			if err := checkIDs("", windowID, paneID); err != nil {
-				return "", "", false, rollback(r, id, stderr, fmt.Errorf("creating window %q: %w", w.Name, err))
+		windowID, paneID := first.windowID, first.paneID
+		if i > 0 {
+			var werr error
+			windowID, paneID, werr = newWindow(r, id, w, roots[i], env)
+			if werr != nil {
+				return "", "", false, rollback(r, id, stderr, werr)
 			}
 		}
 		_, _ = fmt.Fprintf(stdout, "window %s: %s\n", windowID, w.Name)
-		buildWindow(r, windowID, paneID, w, roots[i], env, keys, stderr)
+		buildWindow(r, windowID, paneID, w, splitCtx{
+			root: roots[i], env: env, preWindow: w.PreWindow, keys: keys,
+		}, stderr)
 	}
 
 	// Every pane now exists, so every target is known: type the lot.
@@ -175,38 +145,78 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 
 	if cfg.Session.StartupWindow != "" {
 		selectStartup(r, id, cfg.Session.StartupWindow, cfg.Session.StartupPane, stderr)
-	} else if firstWindowID != "" {
+	} else if first.windowID != "" {
 		// Every window was created with -d, so window 0 is still current — but
 		// say so explicitly rather than relying on that, and land on its first
 		// pane too (splits are also created with -d).
-		if _, err := r.Run("select-window", "-t", firstWindowID); err != nil {
+		if _, err := r.Run("select-window", "-t", first.windowID); err != nil {
 			warnf(stderr, "failed to select the first window: %v", err)
 		}
 	}
 	return name, id, true, nil
 }
 
-// checkIDs validates the object IDs parsed out of a tmux "-F" response. An
-// empty argument is skipped, so callers can check only the ones they parsed.
-// See tmux.CheckID for why a malformed ID has to be caught here rather than
-// left to fail later.
-func checkIDs(sessionID, windowID, paneID string) error {
-	if sessionID != "" {
-		if err := tmux.CheckID(tmux.SessionSigil, "session", sessionID); err != nil {
-			return err
-		}
+// newIDs is what a session- or window-creating tmux command reports back.
+type newIDs struct {
+	sessionID string
+	// name is what tmux actually called the session, which is not always what
+	// was asked for — see Create.
+	name     string
+	windowID string
+	paneID   string
+}
+
+// newSession creates the session together with its first window.
+//
+// -c is that *first window's* root, not necessarily the session's: new-session
+// sets both at once, and the pane's directory is the one a user can see. They
+// differ only when window 0 sets its own root.
+func newSession(r tmux.Runner, name string, w config.Window, root string, env []string) (newIDs, error) {
+	args := []string{"new-session", "-d", "-P", "-F",
+		"#{session_id}|#{session_name}|#{window_id}|#{pane_id}",
+		"-s", name, "-n", w.Name, "-c", root}
+	args = append(args, env...)
+	args = append(args, paneProcess(w)...)
+
+	out, err := r.Run(args...)
+	if err != nil {
+		return newIDs{}, fmt.Errorf("creating session: %w", tmux.CmdErr(err, out))
 	}
-	if windowID != "" {
-		if err := tmux.CheckID(tmux.WindowSigil, "window", windowID); err != nil {
-			return err
-		}
+	parts := strings.SplitN(out, "|", 4)
+	if len(parts) != 4 {
+		return newIDs{}, fmt.Errorf("unexpected tmux output %q", out)
 	}
-	if paneID != "" {
-		if err := tmux.CheckID(tmux.PaneSigil, "pane", paneID); err != nil {
-			return err
-		}
+	ids := newIDs{sessionID: parts[0], name: parts[1], windowID: parts[2], paneID: parts[3]}
+	if err := tmux.CheckIDs(ids.sessionID, ids.windowID, ids.paneID); err != nil {
+		return newIDs{}, fmt.Errorf("creating session: %w", err)
 	}
-	return nil
+	return ids, nil
+}
+
+// newWindow adds a window to an existing session.
+//
+// -d keeps the session's active window where it started. Without it tmux makes
+// each new window current, so a freshly built session opens on the *last*
+// window in the config rather than the first — which is what startup_window's
+// default documents.
+func newWindow(r tmux.Runner, sessionID string, w config.Window, root string, env []string) (windowID, paneID string, err error) {
+	args := []string{"new-window", "-d", "-P", "-F", "#{window_id}|#{pane_id}",
+		"-t", sessionID, "-n", w.Name, "-c", root}
+	args = append(args, env...)
+	args = append(args, paneProcess(w)...)
+
+	out, err := r.Run(args...)
+	if err != nil {
+		return "", "", fmt.Errorf("creating window %q: %w", w.Name, tmux.CmdErr(err, out))
+	}
+	windowID, paneID, ok := strings.Cut(out, "|")
+	if !ok {
+		return "", "", fmt.Errorf("unexpected tmux output %q", out)
+	}
+	if err := tmux.CheckIDs("", windowID, paneID); err != nil {
+		return "", "", fmt.Errorf("creating window %q: %w", w.Name, err)
+	}
+	return windowID, paneID, nil
 }
 
 // rollback destroys a session whose build failed partway through and returns
@@ -252,7 +262,7 @@ func Kill(r tmux.Runner, cfg *config.Config, stderr io.Writer, opts ...Option) (
 		return name, nil
 	}
 	if out, err := r.Run("kill-session", "-t", id); err != nil {
-		return "", fmt.Errorf("killing session %q: %w (%s)", name, err, out)
+		return "", fmt.Errorf("killing session %q: %w", name, tmux.CmdErr(err, out))
 	}
 	return name, nil
 }
@@ -294,18 +304,19 @@ func paneProcess(w config.Window) []string {
 	return []string{"--", first.Run}
 }
 
-func buildWindow(r tmux.Runner, windowID, initialPane string, w config.Window, root string, env []string, keys *keyBatch, stderr io.Writer) {
+func buildWindow(r tmux.Runner, windowID, initialPane string, w config.Window, ctx splitCtx, stderr io.Writer) {
 	// done tracks the panes pre_window has already been typed into, so it runs
-	// exactly once per pane across the whole window — see sendPreWindow.
-	done := map[string]bool{}
-	ctx := splitCtx{root: root, env: env, preWindow: w.PreWindow, done: done, keys: keys}
+	// exactly once per pane across the whole window — see sendPreWindow. The
+	// caller supplies everything else; this is the one thing scoped to a single
+	// window, so it is created here rather than passed in.
+	ctx.done = map[string]bool{}
 	switch {
 	case len(w.Splits) > 0:
 		applySplits(r, initialPane, w.Splits, ctx, stderr)
 	case len(w.Panes) > 0:
-		applyPanes(r, windowID, initialPane, w, root, env, keys, done, stderr)
+		applyPanes(r, windowID, initialPane, w, ctx, stderr)
 	case w.PreWindow != "":
-		sendPreWindow(keys, initialPane, w.PreWindow, done)
+		sendPreWindow(ctx.keys, initialPane, w.PreWindow, ctx.done)
 	}
 }
 
@@ -413,7 +424,7 @@ func splitPane(r tmux.Runner, target string, s config.Split, root string, env []
 	}
 	out, err := r.Run(args...)
 	if err != nil {
-		return "", fmt.Errorf("%w (%s)", err, out)
+		return "", tmux.CmdErr(err, out)
 	}
 	if err := tmux.CheckID(tmux.PaneSigil, "pane", out); err != nil {
 		return "", err
@@ -423,9 +434,9 @@ func splitPane(r tmux.Runner, target string, s config.Split, root string, env []
 
 // applyPanes implements the legacy flat pane list: panes split alternately
 // h/v off the previously created pane, then a layout evens them out.
-func applyPanes(r tmux.Runner, windowID, initialPane string, w config.Window, root string, env []string, keys *keyBatch, done map[string]bool, stderr io.Writer) {
-	sendPreWindow(keys, initialPane, w.PreWindow, done)
-	keys.add(initialPane, w.Panes[0].Command)
+func applyPanes(r tmux.Runner, windowID, initialPane string, w config.Window, ctx splitCtx, stderr io.Writer) {
+	sendPreWindow(ctx.keys, initialPane, w.PreWindow, ctx.done)
+	ctx.keys.add(initialPane, w.Panes[0].Command)
 
 	current := initialPane
 	for i, p := range w.Panes[1:] {
@@ -434,10 +445,10 @@ func applyPanes(r tmux.Runner, windowID, initialPane string, w config.Window, ro
 			dir = "-v"
 		}
 		args := []string{"split-window", "-d", "-t", current, dir, "-P", "-F", "#{pane_id}"}
-		if root != "" {
-			args = append(args, "-c", root) // see splitPane
+		if ctx.root != "" {
+			args = append(args, "-c", ctx.root) // see splitPane
 		}
-		args = append(args, env...)
+		args = append(args, ctx.env...)
 		out, err := r.Run(args...)
 		if err != nil {
 			warnf(stderr, "failed to split pane: %v (%s)", err, out)
@@ -448,8 +459,8 @@ func applyPanes(r tmux.Runner, windowID, initialPane string, w config.Window, ro
 			continue
 		}
 		current = out
-		sendPreWindow(keys, current, w.PreWindow, done)
-		keys.add(current, p.Command)
+		sendPreWindow(ctx.keys, current, w.PreWindow, ctx.done)
+		ctx.keys.add(current, p.Command)
 	}
 
 	layout := w.Layout

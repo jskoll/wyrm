@@ -87,8 +87,9 @@ func loadAgentStatus(r tmux.Runner, profiles []agent.Profile, skipPane string) t
 		}
 		// A pane that died between listing and capturing is ordinary, and it
 		// stops a batch short — so the ones it cut off are read individually
-		// rather than lost. Panes with no capture simply stay unmarked.
-		contents, _ := tmux.RunOutputsTolerant(r, cmds)
+		// rather than lost. A pane that could not be read comes back empty and,
+		// like a pane with nothing on it, simply stays unmarked.
+		contents := tmux.RunOutputs(r, cmds)
 
 		for i, ref := range candidates {
 			if i >= len(contents) || contents[i] == "" {
@@ -151,15 +152,20 @@ func agentProfiles(settings *config.Settings) ([]agent.Profile, error) {
 }
 
 // agentMark returns the trailing status span for a row, and whether there is
-// one. Busy panes get nothing: see agent.State.NeedsUser.
+// one.
+//
+// agent.State.NeedsUser is the single definition of which states earn a marker;
+// this only chooses the glyph. The two used to be stated separately — a
+// predicate in the domain package and a switch here — which is two places to
+// remember when a state is added.
 func agentMark(state agent.State) (span, bool) {
-	switch state {
-	case agent.StateBlocked:
-		return span{blockedMark, " " + blockedGlyph}, true
-	case agent.StateIdle:
-		return span{idleMark, " " + idleGlyph}, true
+	if !state.NeedsUser() {
+		return span{}, false
 	}
-	return span{}, false
+	if state == agent.StateBlocked {
+		return span{blockedMark, " " + blockedGlyph}, true
+	}
+	return span{idleMark, " " + idleGlyph}, true
 }
 
 // The markers. Two glyphs rather than one because the two states want different

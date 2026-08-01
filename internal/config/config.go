@@ -128,9 +128,15 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
-	if abs, err := filepath.Abs(path); err == nil {
-		cfg.dir = filepath.Dir(abs)
+	// Not a silent fallback: cfg.dir is what a relative session.root resolves
+	// against, so losing it doesn't degrade gracefully — it quietly roots the
+	// session wherever the process happens to be standing, which is the bug
+	// Config.dir exists to prevent.
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolving %s: %w", path, err)
 	}
+	cfg.dir = filepath.Dir(abs)
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}

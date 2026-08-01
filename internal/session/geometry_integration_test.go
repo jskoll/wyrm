@@ -208,22 +208,62 @@ func TestIntegrationSplitPanesUseSessionRoot(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	out, err := r.Run("list-panes", "-t", "rootit", "-a", "-F", "#{pane_id} #{pane_current_path}")
-	if err != nil {
-		t.Fatalf("list-panes: %v (%s)", err, out)
-	}
 	// macOS hands out /var symlinks for temp dirs; compare resolved paths.
-	wantRoot, _ := filepath.EvalSymlinks(root)
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("got %d panes, want 3:\n%s", len(lines), out)
+	wantRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("resolving root: %v", err)
 	}
-	for _, line := range lines {
-		id, path, _ := strings.Cut(line, " ")
-		got, _ := filepath.EvalSymlinks(path)
-		if got != wantRoot {
-			t.Errorf("pane %s is in %q, want the session root %q", id, got, wantRoot)
+	paths := panePaths(t, r, "rootit", "#{pane_id}")
+	if len(paths) != 3 {
+		t.Fatalf("got %d panes, want 3: %v", len(paths), paths)
+	}
+	for id, got := range paths {
+		if got[0] != wantRoot {
+			t.Errorf("pane %s is in %q, want the session root %q", id, got[0], wantRoot)
 		}
+	}
+}
+
+// panePaths reads every pane's resolved working directory for a session, keyed
+// however keyFormat names them.
+//
+// It retries while any path comes back empty. tmux learns a pane's cwd from the
+// process it started, so immediately after a build it may not have one yet —
+// and the faster the build, the likelier that is. Asserting on the empty string
+// produced a confusing "pane is in \".\"" failure roughly one run in twenty,
+// because filepath.EvalSymlinks("") is ".".
+func panePaths(t *testing.T, r tmux.Runner, session, keyFormat string) map[string][]string {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		out, err := r.Run("list-panes", "-s", "-t", session, "-F", keyFormat+"|#{pane_current_path}")
+		if err != nil {
+			t.Fatalf("list-panes: %v (%s)", err, out)
+		}
+		byKey := map[string][]string{}
+		empty := false
+		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+			key, path, ok := strings.Cut(line, "|")
+			if !ok {
+				t.Fatalf("unexpected list-panes line %q", line)
+			}
+			if path == "" {
+				empty = true
+				break
+			}
+			resolved, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				t.Fatalf("resolving pane path %q: %v", path, err)
+			}
+			byKey[key] = append(byKey[key], resolved)
+		}
+		if !empty {
+			return byKey
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("panes still reported no working directory after 3s:\n%s", out)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -265,33 +305,24 @@ func TestIntegrationWindowAndSplitRoots(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	out, err := r.Run("list-panes", "-t", "wrootit", "-a", "-F", "#{window_name}|#{pane_current_path}")
-	if err != nil {
-		t.Fatalf("list-panes: %v (%s)", err, out)
-	}
 	// Grouped by window in tmux's own order rather than keyed by pane_index:
 	// this machine's pane-base-index is 1, and hardcoding 0 would make the test
 	// fail on exactly the setting wyrm targets panes by ID to be immune to.
-	resolved := func(p string) string { s, _ := filepath.EvalSymlinks(p); return s }
-	got := map[string][]string{}
-	var order []string
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		win, path, ok := strings.Cut(line, "|")
-		if !ok {
-			t.Fatalf("unexpected list-panes line %q", line)
+	resolved := func(p string) string {
+		r, err := filepath.EvalSymlinks(p)
+		if err != nil {
+			t.Fatalf("resolving %q: %v", p, err)
 		}
-		if _, seen := got[win]; !seen {
-			order = append(order, win)
-		}
-		got[win] = append(got[win], resolved(path))
+		return r
 	}
+	got := panePaths(t, r, "wrootit", "#{window_name}")
 	want := map[string][]string{
 		"api":   {resolved(filepath.Join(root, "api")), resolved(filepath.Join(root, "api", "deep"))},
 		"web":   {resolved(filepath.Join(root, "web"))},
 		"plain": {resolved(root)},
 	}
-	if len(order) != len(want) {
-		t.Fatalf("got windows %v, want %d of them", order, len(want))
+	if len(got) != len(want) {
+		t.Fatalf("got windows %v, want %d of them", got, len(want))
 	}
 	for win, w := range want {
 		if !reflect.DeepEqual(got[win], w) {

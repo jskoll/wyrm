@@ -6,6 +6,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- tmux errors now lead with tmux's own diagnostic instead of the process exit
+  status: `creating session: duplicate session: web` rather than
+  `creating session: exit status 1 (duplicate session: web)`. The exit status was
+  the one part of that message nobody could act on, and it came first.
+- Internal: the three `list-*` parsers in `internal/tmux` shared a hand-copied
+  split-and-validate loop. They now share one, which also closed a gap —
+  `ListAllPanes` was the only parser that skipped `CheckID`, on exactly the pane
+  IDs the agent scan then uses as `capture-pane` targets.
+- Internal: `session.Create` was 121 lines with a 55-line if/else fork inside its
+  window loop; the two branches are now `newSession` and `newWindow`. The
+  `splitCtx` value introduced in 0.6.0 was only threaded through one of the three
+  builder functions — `buildWindow` and `applyPanes` now take it too, dropping
+  `applyPanes` from nine parameters to six.
+- Internal: `agent.State.NeedsUser` is now the single definition of which states
+  earn a marker; the TUI re-encoded the same rule in a parallel switch.
+
+### Fixed
+- A failure to resolve a config's absolute path was silently ignored, leaving
+  relative `session.root` values to resolve against the process's working
+  directory — the same class of bug as the split-pane roots fixed in 0.6.0.
+- The pane-directory integration tests read `#{pane_current_path}` immediately
+  after building a session, which tmux has not always populated yet; under the
+  load of a full parallel test run this failed roughly one run in twenty. They
+  now wait for it.
+
 ## [0.6.1] - 2026-07-31
 
 ### Changed

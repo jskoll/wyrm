@@ -49,7 +49,7 @@ func List(r tmux.Runner) ([]Session, error) {
 		if tmux.NoServerRunning(err, out) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("listing sessions: %w (%s)", err, out)
+		return nil, fmt.Errorf("listing sessions: %w", tmux.CmdErr(err, out))
 	}
 	var list []Session
 	for _, line := range strings.Split(out, "\n") {
@@ -101,7 +101,7 @@ func sortSessions(s []Session) {
 // tmux kill.
 func Kill(r tmux.Runner, id string) error {
 	if out, err := r.Run("kill-session", "-t", id); err != nil {
-		return fmt.Errorf("killing session %q: %w (%s)", id, err, out)
+		return fmt.Errorf("killing session %q: %w", id, tmux.CmdErr(err, out))
 	}
 	return nil
 }

@@ -212,8 +212,17 @@ func New(runner tmux.Runner, settings *config.Settings) Model {
 // Init loads the initial project and session lists and starts the refresh
 // ticker.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(loadProjects(m.runner, m.settings), loadSessions(m.runner),
-		m.agentCmd(), tick(), listTick())
+	return tea.Batch(append(m.refreshLists(), tick(), listTick())...)
+}
+
+// refreshLists re-reads everything the left column shows. Four places want
+// exactly this — startup, the "R" key, regaining terminal focus, and the list
+// ticker — and they were four copies of the same command set.
+//
+// It returns the commands rather than a tea.Batch of them so callers can splice
+// in their own without nesting one batch inside another.
+func (m Model) refreshLists() []tea.Cmd {
+	return []tea.Cmd{loadProjects(m.runner, m.settings), loadSessions(m.runner), m.agentCmd()}
 }
 
 // --- messages ---
@@ -463,8 +472,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Terminal focus came back: refresh immediately rather than making the
 		// user wait out the rest of a tick for a stale screen.
 		m.blurred = false
-		return m, tea.Batch(loadProjects(m.runner, m.settings), loadSessions(m.runner),
-			m.agentCmd(), m.reloadPreview())
+		return m, tea.Batch(append(m.refreshLists(), m.reloadPreview())...)
 
 	case tea.BlurMsg:
 		m.blurred = true
@@ -492,8 +500,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.blurred || (m.mode != modeNormal && m.mode != modeFilter) {
 			return m, listTick()
 		}
-		return m, tea.Batch(loadProjects(m.runner, m.settings), loadSessions(m.runner),
-			m.agentCmd(), listTick())
+		return m, tea.Batch(append(m.refreshLists(), listTick())...)
 
 	case projectsMsg:
 		if msg.err != nil {
@@ -704,7 +711,7 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	case "R":
-		return m, tea.Batch(loadProjects(m.runner, m.settings), loadSessions(m.runner), m.agentCmd())
+		return m, tea.Batch(m.refreshLists()...)
 	case "m":
 		// Hand the mouse back to the terminal (and take it again). While it's
 		// captured, click-drag selects nothing — this is the way out for anyone

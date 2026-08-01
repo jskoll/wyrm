@@ -86,6 +86,17 @@ func (a *app) dryRunHeader(lines ...string) {
 	}
 }
 
+// teardownDryRun announces a teardown dry run and returns the option that makes
+// session.Kill describe itself instead of acting. kill, kill-by-name, and
+// restart all want exactly this pair, and each had its own copy of the header
+// text — three chances for the wording to drift.
+func (a *app) teardownDryRun() []session.Option {
+	a.dryRunHeader(
+		"dry run: no tmux commands are executed and no",
+		"lifecycle hooks are run.")
+	return []session.Option{session.DryRun(a.stdout)}
+}
+
 // restart tears the session down (running on_project_exit) and builds it
 // again from the current config. Editing a config and wanting the session to
 // match it is the single most common thing to do next, and `wyrm kill && wyrm`
@@ -112,9 +123,7 @@ func (a *app) restart(args []string) error {
 	if *dryRun {
 		// The teardown half consults the real server (see session.Kill's doc),
 		// so a not-running session is reported and only the build is described.
-		a.dryRunHeader("dry run: no tmux commands are executed and no",
-			"lifecycle hooks are run.")
-		if _, kerr := session.Kill(a.runner, cfg, a.stderr, session.DryRun(a.stdout)); kerr != nil {
+		if _, kerr := session.Kill(a.runner, cfg, a.stderr, a.teardownDryRun()...); kerr != nil {
 			_, _ = fmt.Fprintf(a.stderr, "wyrm: nothing to stop (%v)\n", kerr)
 		}
 		dry := tmux.NewDryRun(a.stdout)
@@ -175,9 +184,7 @@ func (a *app) kill(args []string) error {
 
 	var opts []session.Option
 	if *dryRun {
-		a.dryRunHeader("dry run: no tmux commands are executed and no",
-			"lifecycle hooks are run.")
-		opts = append(opts, session.DryRun(a.stdout))
+		opts = a.teardownDryRun()
 	}
 	name, err := session.Kill(a.runner, cfg, a.stderr, opts...)
 	if err != nil {
@@ -192,9 +199,7 @@ func (a *app) kill(args []string) error {
 func (a *app) killByName(settings *config.Settings, target string, dryRun bool) error {
 	var opts []session.Option
 	if dryRun {
-		a.dryRunHeader("dry run: no tmux commands are executed and no",
-			"lifecycle hooks are run.")
-		opts = append(opts, session.DryRun(a.stdout))
+		opts = a.teardownDryRun()
 	}
 
 	if project, found := config.FindProject(settings, target); found {

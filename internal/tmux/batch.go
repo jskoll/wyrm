@@ -3,7 +3,6 @@ package tmux
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -85,7 +84,7 @@ func (e Exec) RunBatch(cmds [][]string) ([]string, error) {
 	if msg == "" {
 		return results, runErr
 	}
-	return results, fmt.Errorf("%w (%s)", runErr, msg)
+	return results, CmdErr(runErr, msg)
 }
 
 // splitOnMarker cuts batch output into one entry per completed command. Lines
@@ -141,26 +140,29 @@ func RunEach(r Runner, cmds [][]string) []error {
 
 	for i := start; i < len(cmds); i++ {
 		if out, err := r.Run(cmds[i]...); err != nil {
-			errs[i] = batchCmdErr(err, out)
+			errs[i] = CmdErr(err, out)
 		}
 	}
 	return errs
 }
 
-// RunOutputsTolerant issues every command and returns each one's output —
-// empty where it failed — alongside the matching errors, both aligned with
-// cmds.
+// RunOutputs issues every command and returns each one's output, aligned with
+// cmds and empty where the command failed.
 //
 // It is RunEach for reads: one tmux process when the Runner batches, with the
 // commands a failure cut short replayed individually so one dead target doesn't
 // discard every result after it. That is the case it exists for — the TUI's
 // agent scan captures a set of panes, any of which may have closed since the
 // list that named them.
-func RunOutputsTolerant(r Runner, cmds [][]string) ([]string, []error) {
+//
+// It returns no errors, deliberately. Every caller so far treats a pane it
+// couldn't read exactly like a pane with nothing on it, so handing back a
+// []error only invited it to be discarded at the call site — which is what the
+// one caller did.
+func RunOutputs(r Runner, cmds [][]string) []string {
 	outs := make([]string, len(cmds))
-	errs := make([]error, len(cmds))
 	if len(cmds) == 0 {
-		return outs, errs
+		return outs
 	}
 
 	start := 0
@@ -168,28 +170,43 @@ func RunOutputsTolerant(r Runner, cmds [][]string) ([]string, []error) {
 		results, err := b.RunBatch(cmds)
 		copy(outs, results)
 		if err == nil && len(results) >= len(cmds) {
-			return outs, errs
+			return outs
 		}
 		start = min(len(results), len(cmds))
 	}
 
 	for i := start; i < len(cmds); i++ {
-		out, err := r.Run(cmds[i]...)
-		if err != nil {
-			errs[i] = batchCmdErr(err, out)
-			continue
+		if out, err := r.Run(cmds[i]...); err == nil {
+			outs[i] = out
 		}
-		outs[i] = out
 	}
-	return outs, errs
+	return outs
 }
 
-func batchCmdErr(err error, out string) error {
-	if out == "" {
+// CmdErr turns a failed Runner call into an error whose message is tmux's own
+// diagnostic.
+//
+// A Runner returns tmux's stderr in place of its stdout on failure, so every
+// call site used to write `fmt.Errorf("...: %w (%s)", err, out)` and produce
+// "creating session: exit status 1 (duplicate session: web)". The exit status
+// is the only part a user can't act on, and it led. This puts the diagnostic
+// first and keeps the original error wrapped, so errors.Is/As still reach
+// ErrNoServer and *exec.ExitError.
+func CmdErr(err error, out string) error {
+	if err == nil {
+		return nil
+	}
+	msg := strings.TrimSpace(out)
+	if msg == "" {
 		return err
 	}
-	if errors.Is(err, ErrNoServer) {
-		return err
-	}
-	return fmt.Errorf("%w (%s)", err, out)
+	return &cmdError{msg: msg, err: err}
 }
+
+type cmdError struct {
+	msg string
+	err error
+}
+
+func (e *cmdError) Error() string { return e.msg }
+func (e *cmdError) Unwrap() error { return e.err }

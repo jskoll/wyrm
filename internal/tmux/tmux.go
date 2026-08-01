@@ -139,7 +139,7 @@ func Attach(target string) error {
 func CurrentSession(r Runner) (id, name string, err error) {
 	out, err := r.Run("display-message", "-p", "-F", "#{session_id}|#{session_name}")
 	if err != nil {
-		return "", "", fmt.Errorf("finding current session: %w (%s)", err, out)
+		return "", "", fmt.Errorf("finding current session: %w", CmdErr(err, out))
 	}
 	id, name, ok := strings.Cut(out, "|")
 	if !ok {
@@ -166,7 +166,7 @@ func FindSessionID(r Runner, name string) (id string, ok bool, err error) {
 		if NoServerRunning(err, out) {
 			return "", false, nil
 		}
-		return "", false, fmt.Errorf("listing sessions: %w (%s)", err, out)
+		return "", false, fmt.Errorf("listing sessions: %w", CmdErr(err, out))
 	}
 	type entry struct{ id, name string }
 	var sessions []entry
