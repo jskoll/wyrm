@@ -32,12 +32,31 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     steps:
+      # The `secrets` context is not available in a job-level `if:`, so the
+      # gate has to be a step. Without a deploy key configured the rest of the
+      # job no-ops and stays green: the GitHub release and the Homebrew tap
+      # have already shipped by this point, and a missing or rotated AUR key
+      # should not paint the whole tag red.
+      - name: Check for an AUR deploy key
+        id: gate
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          if [ -n "$AUR_SSH_PRIVATE_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::AUR_SSH_PRIVATE_KEY is not set — skipping the AUR publish for ${GITHUB_REF_NAME}."
+          fi
+
       - uses: actions/checkout@v7
+        if: steps.gate.outputs.configured == 'true'
 
       # packaging/aur/PKGBUILD in the repo is a template (pkgver=0.0.0,
       # zeroed checksums) — the real values come from this release's own
       # checksums.txt so the AUR package's hashes are never hand-typed.
       - name: Fill in PKGBUILD for this release
+        if: steps.gate.outputs.configured == 'true'
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
@@ -55,6 +74,7 @@ jobs:
             packaging/aur/PKGBUILD > /tmp/PKGBUILD
 
       - name: Publish to the AUR
+        if: steps.gate.outputs.configured == 'true'
         uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
         with:
           pkgname: wyrm-bin
