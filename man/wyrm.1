@@ -1,0 +1,188 @@
+.TH WYRM 1 "2026" "wyrm" "User Commands"
+.SH NAME
+wyrm \- repeatable tmux session layouts from a TOML config
+.SH SYNOPSIS
+.B wyrm
+.RI [ \-config
+.IR PATH ]
+.br
+.B wyrm
+.I COMMAND
+.RI [ ARGS ...]
+.SH DESCRIPTION
+.B wyrm
+builds tmux sessions from a
+.B .wyrm.toml
+config file: nested split trees, lifecycle hooks, and pane-ID targeting so
+layouts come out the same regardless of
+.B base\-index
+/
+.B pane\-base\-index
+settings. Running
+.B wyrm
+with no arguments builds (or attaches to) the session for the config
+discovered in the current directory; see
+.B FILES
+for the discovery order.
+.SH COMMANDS
+.TP
+.BI "wyrm [\-config " PATH ]
+Build or attach the current folder's session. This is the default
+when no subcommand is given.
+.TP
+.BI "wyrm up [\-config " PATH "] [\-n]"
+Same as bare
+.BR wyrm ,
+spelled explicitly.
+.TP
+.BI "wyrm " NAME
+Attach to a running session named
+.I NAME
+if one exists; otherwise start the known project named
+.I NAME
+(local or shared config).
+.TP
+.BI "wyrm restart [\-config " PATH "] [\-n]"
+Stop the session (running
+.B on_project_exit
+first) and build it again from the current config.
+.TP
+.BI "wyrm kill [" NAME "] [\-config " PATH "] [\-n]"
+Destroy the session, running
+.B on_project_exit
+first. With no name, targets the current folder's session; with
+.IR NAME ,
+targets that session (or known project) instead.
+.B \-config
+and a session name are mutually exclusive.
+.TP
+.B wyrm pick
+Fuzzy-pick a running session and attach to it.
+.TP
+.B wyrm tui
+Open the full-screen session manager: browse, preview, kill, rename, and
+start sessions.
+.TP
+.BI "wyrm save [\-config " PATH ]
+Save the running session's current layout as this folder's config.
+Refuses to overwrite an existing config file.
+.TP
+.BI "wyrm edit [\-config " PATH ]
+Open the resolved config in
+.B $EDITOR
+(falling back to
+.BR vi ),
+creating one at the discovery location if none exists yet.
+.TP
+.BI "wyrm validate [\-config " PATH "] [\-strict]"
+Check that the effective config parses and validates, without building a
+session.
+.B \-strict
+exits non-zero if the config has warnings (typos, deprecations).
+.TP
+.BI "wyrm list [\-format " FMT ]
+List running tmux sessions non-interactively.
+.I FMT
+is one of
+.BR table " (default), " json ", " toml ", or " names .
+.TP
+.B wyrm list-configs
+List candidate config file paths: the local file (if present) and every
+config in the shared config directory. Used by shell completion.
+.TP
+.B wyrm migrate-config
+Move the local config file into the shared config directory.
+.TP
+.B wyrm version
+Print the version and exit.
+.TP
+.B wyrm help
+Show a usage overview.
+.PP
+Run any subcommand with
+.B \-h
+to see its own flags.
+.SH OPTIONS
+.TP
+.BI \-config " PATH"
+Path to the config file to use, overriding discovery. Accepted by
+.BR up ", " restart ", " kill ", " save ", " edit ", and " validate .
+.TP
+.B \-n
+Dry run: print the tmux commands and lifecycle hooks that would run,
+without touching tmux. Accepted by
+.BR up ", " restart ", and " kill .
+.TP
+.B \-strict
+With
+.BR validate ,
+exit non-zero if the config has warnings instead of just printing them.
+.TP
+.BI \-format " FMT"
+With
+.BR list ,
+select the output format:
+.BR table ", " json ", " toml ", or " names .
+.SH FILES
+.TP
+.B .wyrm.toml
+The config file wyrm looks for first in the current directory.
+.TP
+.B .tmuxconfig
+Deprecated legacy config name, still read if
+.B .wyrm.toml
+is absent.
+.TP
+.B $XDG_CONFIG_HOME/wyrm/settings.toml
+(falls back to
+.BR ~/.config/wyrm/settings.toml )
+Global settings: local vs. shared config storage, the shared config
+directory, and TUI preferences.
+.TP
+.B $XDG_CONFIG_HOME/wyrm/default.wyrm.toml
+User-supplied replacement for the built-in default config, used when no
+local or shared config is found.
+.TP
+.BI $XDG_CONFIG_HOME/wyrm/ <folder> .wyrm.toml
+A project's config in the shared config directory, when
+.B storage = "shared"
+in the global settings. Populated by
+.B wyrm migrate-config
+or
+.BR "wyrm save" .
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+The command failed (e.g. no running session or known project by that
+name).
+.TP
+.B 2
+Usage error: a bad flag, an unknown
+.BR \-format ,
+or an unexpected argument.
+.SH EXAMPLES
+.TP
+Build or attach using the config in the current directory:
+.B wyrm
+.TP
+Preview what a build would do without touching tmux:
+.B wyrm up \-n
+.TP
+Attach to (or start) a project named "api" from anywhere:
+.B wyrm api
+.TP
+Tear a session down and rebuild it after editing its config:
+.B wyrm restart
+.TP
+List running sessions as JSON for a script:
+.B wyrm list \-format json
+.SH SEE ALSO
+.BR tmux (1)
+.br
+Full documentation and the configuration reference:
+.B https://jskoll.github.io/wyrm/
+.SH AUTHOR
+Jason Skollingsberg and contributors.

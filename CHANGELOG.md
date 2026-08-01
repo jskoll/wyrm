@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- A `wyrm(1)` man page, installed by the Homebrew formula and the new
+  `.deb`/`.rpm` packages built via `nfpm`.
+- Native Linux packaging: tagged releases now build `.deb` and `.rpm`
+  packages (with the completions and man page baked in) alongside the
+  existing tarballs, and publish a `wyrm-bin` package to the AUR.
+
 ### Changed
 - Internal: the TUI's panels are described by one table (`internal/tui/panels.go`)
   instead of nine parallel switch statements spread across four files. Title,

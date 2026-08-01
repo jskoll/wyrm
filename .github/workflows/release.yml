@@ -26,3 +26,40 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+  aur:
+    name: Publish AUR package
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # packaging/aur/PKGBUILD in the repo is a template (pkgver=0.0.0,
+      # zeroed checksums) — the real values come from this release's own
+      # checksums.txt so the AUR package's hashes are never hand-typed.
+      - name: Fill in PKGBUILD for this release
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          checksums="$(curl -fsSL "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/checksums.txt")"
+          amd64_sum="$(printf '%s\n' "$checksums" | grep '_linux_amd64\.tar\.gz$' | awk '{print $1}')"
+          arm64_sum="$(printf '%s\n' "$checksums" | grep '_linux_arm64\.tar\.gz$' | awk '{print $1}')"
+          if [ -z "$amd64_sum" ] || [ -z "$arm64_sum" ]; then
+            echo "missing checksum for one or both linux archives in checksums.txt" >&2
+            exit 1
+          fi
+          sed \
+            -e "s/^pkgver=.*/pkgver=${version}/" \
+            -e "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${amd64_sum}')/" \
+            -e "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('${arm64_sum}')/" \
+            packaging/aur/PKGBUILD > /tmp/PKGBUILD
+
+      - name: Publish to the AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+        with:
+          pkgname: wyrm-bin
+          pkgbuild: /tmp/PKGBUILD
+          commit_username: Jason Skollingsberg
+          commit_email: jskoll@users.noreply.github.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "wyrm-bin ${{ github.ref_name }}"

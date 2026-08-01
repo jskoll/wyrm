@@ -16,9 +16,38 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - completions/*
+      - man/wyrm.1
+      - LICENSE
+      - README.md
 
 checksum:
   name_template: checksums.txt
+
+nfpms:
+  - id: wyrm
+    package_name: wyrm
+    vendor: jskoll
+    homepage: https://github.com/jskoll/wyrm
+    maintainer: "Jason Skollingsberg <jskoll@users.noreply.github.com>"
+    description: "Repeatable tmux session layouts from a TOML config"
+    license: MIT
+    formats: [deb, rpm]
+    section: utils
+    recommends:
+      - tmux
+    contents:
+      - src: completions/wyrm.bash
+        dst: /usr/share/bash-completion/completions/wyrm
+      - src: completions/_wyrm
+        dst: /usr/share/zsh/site-functions/_wyrm
+      - src: completions/wyrm.fish
+        dst: /usr/share/fish/vendor_completions.d/wyrm.fish
+      - src: man/wyrm.1
+        dst: /usr/share/man/man1/wyrm.1
+      - src: LICENSE
+        dst: /usr/share/doc/wyrm/LICENSE
+      - src: README.md
+        dst: /usr/share/doc/wyrm/README.md
 
 changelog:
   use: github
@@ -40,3 +69,4 @@ brews:
       bash_completion.install "completions/wyrm.bash" => "wyrm"
       zsh_completion.install "completions/_wyrm"
       fish_completion.install "completions/wyrm.fish"
+      man1.install "man/wyrm.1"
