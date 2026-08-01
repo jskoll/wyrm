@@ -1,4 +1,4 @@
-# Maintainer: Josh Skoll <jskoll@users.noreply.github.com>
+# Maintainer: Jason Skollingsberg <jskoll@users.noreply.github.com>
 #
 # Template only — pkgver/pkgrel/sha256sums here are placeholders. The
 # release workflow (.github/workflows/aur.yml) fills them in from the

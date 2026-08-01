@@ -28,7 +28,7 @@ nfpms:
     package_name: wyrm
     vendor: jskoll
     homepage: https://github.com/jskoll/wyrm
-    maintainer: "Josh Skoll <jskoll@users.noreply.github.com>"
+    maintainer: "Jason Skollingsberg <jskoll@users.noreply.github.com>"
     description: "Repeatable tmux session layouts from a TOML config"
     license: MIT
     formats: [deb, rpm]

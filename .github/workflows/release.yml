@@ -59,7 +59,7 @@ jobs:
         with:
           pkgname: wyrm-bin
           pkgbuild: /tmp/PKGBUILD
-          commit_username: Josh Skoll
+          commit_username: Jason Skollingsberg
           commit_email: jskoll@users.noreply.github.com
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           commit_message: "wyrm-bin ${{ github.ref_name }}"
