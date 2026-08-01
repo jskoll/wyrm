@@ -134,7 +134,9 @@ jobs:
         run: |
           set -euo pipefail
           wyrm version
-          test -f /usr/share/man/man1/wyrm.1
+          # makepkg's default `zipman` option gzips man pages during
+          # packaging, so the installed file is wyrm.1.gz, not wyrm.1.
+          test -f /usr/share/man/man1/wyrm.1.gz -o -f /usr/share/man/man1/wyrm.1
           test -f /usr/share/bash-completion/completions/wyrm
           pacman -Q tmux
 
