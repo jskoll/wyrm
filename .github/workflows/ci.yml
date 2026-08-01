@@ -58,6 +58,85 @@ jobs:
           distribution: goreleaser
           version: "~> 2"
           args: release --snapshot --clean --skip=publish
+      # test-rpm-install and test-arch-install install from these artifacts, so a
+      # packaging mistake (missing file in `contents:`, a bad `depends`) is caught
+      # here rather than at tag time on a real release.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 1
+
+  # The .rpm from the nfpm block (see .goreleaser.yaml) is only ever
+  # exercised by `dnf install` for real at release time otherwise — this
+  # installs the snapshot build's .rpm on Fedora and checks the result runs.
+  test-rpm-install:
+    name: Install snapshot .rpm on Fedora
+    needs: release-dry-run
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: dnf install the built rpm
+        run: |
+          set -euo pipefail
+          rpm_file="$(ls dist/*.rpm | grep -v -E 'aarch64|arm64')"
+          dnf install -y --nogpgcheck "$rpm_file"
+      - name: Smoke test the installed package
+        run: |
+          set -euo pipefail
+          wyrm version
+          test -f /usr/share/man/man1/wyrm.1
+          test -f /usr/share/bash-completion/completions/wyrm
+          rpm -q --recommends wyrm | grep -qi tmux
+
+  # Same idea for the AUR side: build packaging/aur/PKGBUILD with makepkg
+  # against this run's snapshot tarball (a local file:// source, standing in
+  # for the real GitHub release URL the tag-time job fills in) and install it,
+  # so a broken PKGBUILD is caught on every PR instead of at the next release.
+  test-arch-install:
+    name: Build and install PKGBUILD on Arch
+    needs: release-dry-run
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      # actions/checkout needs git, which base-devel doesn't include. Full
+      # -Syu (not just -Sy) here so the later dependency install makepkg -s
+      # triggers for tmux isn't a partial upgrade against a stale image.
+      - name: Install git
+        run: pacman -Syu --noconfirm git
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Point the PKGBUILD at this run's snapshot tarball
+        run: |
+          set -euo pipefail
+          tarball="$(ls dist/wyrm_*_linux_amd64.tar.gz | head -1)"
+          sha="$(sha256sum "$tarball" | awk '{print $1}')"
+          sed \
+            -e "s/^pkgver=.*/pkgver=0.0.0/" \
+            -e "s#^source_x86_64=.*#source_x86_64=(\"wyrm-bin-0.0.0-x86_64.tar.gz::file://${GITHUB_WORKSPACE}/${tarball}\")#" \
+            -e "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${sha}')/" \
+            packaging/aur/PKGBUILD > PKGBUILD
+      - name: makepkg -si (must run as a non-root user)
+        run: |
+          set -euo pipefail
+          useradd -m builder
+          echo 'builder ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          su builder -c "cd '$GITHUB_WORKSPACE' && makepkg -si --noconfirm"
+      - name: Smoke test the installed package
+        run: |
+          set -euo pipefail
+          wyrm version
+          test -f /usr/share/man/man1/wyrm.1
+          test -f /usr/share/bash-completion/completions/wyrm
+          pacman -Q tmux
 
   lint:
     runs-on: ubuntu-latest
