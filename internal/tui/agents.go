@@ -57,7 +57,11 @@ func loadAgentStatus(r tmux.Runner, profiles []agent.Profile, skipPane string) t
 			windows:  map[string]agent.State{},
 			sessions: map[string]agent.State{},
 		}
-		captures := 0
+		// Pick the panes worth reading first, then read them all at once. The
+		// captures are independent of one another, so on a Runner that batches
+		// this is a single tmux process instead of up to maxAgentCaptures of
+		// them, every listRefreshInterval, for as long as the TUI is open.
+		var candidates []tmux.PaneRef
 		for _, ref := range refs {
 			if !agent.IsAgentPane(ref.Command, profiles) {
 				continue
@@ -68,17 +72,29 @@ func loadAgentStatus(r tmux.Runner, profiles []agent.Profile, skipPane string) t
 			if skipPane != "" && ref.PaneID == skipPane {
 				continue
 			}
-			if captures >= maxAgentCaptures {
+			if len(candidates) >= maxAgentCaptures {
 				break
 			}
-			captures++
-			content, err := tmux.CapturePanePlain(r, ref.PaneID)
-			if err != nil {
-				// A pane that died between listing and capturing is ordinary;
-				// leave it unmarked and carry on with the rest.
+			candidates = append(candidates, ref)
+		}
+		if len(candidates) == 0 {
+			return agentStatusMsg{status: status}
+		}
+
+		cmds := make([][]string, len(candidates))
+		for i, ref := range candidates {
+			cmds[i] = tmux.CapturePanePlainArgs(ref.PaneID)
+		}
+		// A pane that died between listing and capturing is ordinary, and it
+		// stops a batch short — so the ones it cut off are read individually
+		// rather than lost. Panes with no capture simply stay unmarked.
+		contents, _ := tmux.RunOutputsTolerant(r, cmds)
+
+		for i, ref := range candidates {
+			if i >= len(contents) || contents[i] == "" {
 				continue
 			}
-			state := agent.Detect(ref.Command, content, profiles)
+			state := agent.Detect(ref.Command, contents[i], profiles)
 			// Unknown is stored nowhere: it draws no marker and must not win a
 			// rollup, and leaving it out keeps the maps to panes worth showing.
 			if state == agent.StateNone || state == agent.StateUnknown {

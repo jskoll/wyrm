@@ -23,11 +23,17 @@ func CapturePane(r Runner, target string) (string, error) {
 // this, and SGR escapes interleaved with the text would break those matches
 // wherever the pane happens to have colored a word mid-marker.
 func CapturePanePlain(r Runner, target string) (string, error) {
-	out, err := r.Run("capture-pane", "-p", "-t", target)
+	out, err := r.Run(CapturePanePlainArgs(target)...)
 	if err != nil {
 		return "", fmt.Errorf("capturing pane %q: %w (%s)", target, err, out)
 	}
 	return out, nil
+}
+
+// CapturePanePlainArgs is CapturePanePlain's command, for callers assembling a
+// batch of captures rather than issuing one — see RunOutputsTolerant.
+func CapturePanePlainArgs(target string) []string {
+	return []string{"capture-pane", "-p", "-t", target}
 }
 
 // KillWindow removes a window by its window ID (e.g. "@2").

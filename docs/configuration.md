@@ -38,9 +38,11 @@ enabled  = true
 commands = ["claude", "myclaude-wrapper"]
 ```
 
-Agent detection costs one `list-panes` call per refresh plus one `capture-pane`
-for each *matching* pane — panes running an ordinary shell are never captured.
-Set `enabled = false` to stop both.
+Agent detection costs two `tmux` invocations per refresh: one `list-panes` to
+find the candidates, and one batched call that captures all of them together.
+Panes running an ordinary shell are never captured, and the refresh pauses
+entirely while the terminal is unfocused. Set `enabled = false` to stop it
+altogether.
 
 ### Which panes are marked
 

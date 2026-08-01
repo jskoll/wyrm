@@ -102,6 +102,11 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 	}
 	env := envArgs(cfg.Session.Env)
 
+	// Commands are collected while the layout is built and typed in one tmux
+	// process afterwards — see keyBatch. In a three-window, six-pane build that
+	// is twelve send-keys calls collapsed into one.
+	keys := &keyBatch{}
+
 	var id, firstWindowID string
 	for i, w := range cfg.Windows {
 		var out string
@@ -162,8 +167,11 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 			}
 		}
 		_, _ = fmt.Fprintf(stdout, "window %s: %s\n", windowID, w.Name)
-		buildWindow(r, windowID, paneID, w, roots[i], env, stderr)
+		buildWindow(r, windowID, paneID, w, roots[i], env, keys, stderr)
 	}
+
+	// Every pane now exists, so every target is known: type the lot.
+	keys.flush(r, stderr)
 
 	if cfg.Session.StartupWindow != "" {
 		selectStartup(r, id, cfg.Session.StartupWindow, cfg.Session.StartupPane, stderr)
@@ -286,18 +294,18 @@ func paneProcess(w config.Window) []string {
 	return []string{"--", first.Run}
 }
 
-func buildWindow(r tmux.Runner, windowID, initialPane string, w config.Window, root string, env []string, stderr io.Writer) {
+func buildWindow(r tmux.Runner, windowID, initialPane string, w config.Window, root string, env []string, keys *keyBatch, stderr io.Writer) {
 	// done tracks the panes pre_window has already been typed into, so it runs
 	// exactly once per pane across the whole window — see sendPreWindow.
 	done := map[string]bool{}
-	ctx := splitCtx{root: root, env: env, preWindow: w.PreWindow, done: done}
+	ctx := splitCtx{root: root, env: env, preWindow: w.PreWindow, done: done, keys: keys}
 	switch {
 	case len(w.Splits) > 0:
 		applySplits(r, initialPane, w.Splits, ctx, stderr)
 	case len(w.Panes) > 0:
-		applyPanes(r, windowID, initialPane, w, root, env, done, stderr)
+		applyPanes(r, windowID, initialPane, w, root, env, keys, done, stderr)
 	case w.PreWindow != "":
-		sendPreWindow(r, initialPane, w.PreWindow, done, stderr)
+		sendPreWindow(keys, initialPane, w.PreWindow, done)
 	}
 }
 
@@ -309,6 +317,7 @@ type splitCtx struct {
 	env       []string
 	preWindow string
 	done      map[string]bool
+	keys      *keyBatch
 }
 
 // applySplits walks a split tree. Each entry with a type splits the pane of
@@ -352,19 +361,19 @@ func applySplits(r tmux.Runner, basePane string, splits []config.Split, ctx spli
 	// *new* pane, so the loop below never touches basePane — but it is still a
 	// pane of this window, so pre_window still applies to it. At nested levels
 	// basePane is the parent's pane, already in done, so this is a no-op there.
-	sendPreWindow(r, basePane, ctx.preWindow, ctx.done, stderr)
+	sendPreWindow(ctx.keys, basePane, ctx.preWindow, ctx.done)
 
 	for i, s := range splits {
 		pane := panes[i]
 		if pane == "" {
 			continue
 		}
-		sendPreWindow(r, pane, ctx.preWindow, ctx.done, stderr)
+		sendPreWindow(ctx.keys, pane, ctx.preWindow, ctx.done)
 		// A pane created with `run` has no shell to type into: the process is
 		// already what the pane is. splitPane (or paneProcess, for the window's
 		// initial pane) has started it.
 		if s.Run == "" {
-			sendKeys(r, pane, s.Command, stderr)
+			ctx.keys.add(pane, s.Command)
 		} else {
 			// Its own pane has no shell, but it can still parent children.
 			ctx.done[pane] = true
@@ -414,9 +423,9 @@ func splitPane(r tmux.Runner, target string, s config.Split, root string, env []
 
 // applyPanes implements the legacy flat pane list: panes split alternately
 // h/v off the previously created pane, then a layout evens them out.
-func applyPanes(r tmux.Runner, windowID, initialPane string, w config.Window, root string, env []string, done map[string]bool, stderr io.Writer) {
-	sendPreWindow(r, initialPane, w.PreWindow, done, stderr)
-	sendKeys(r, initialPane, w.Panes[0].Command, stderr)
+func applyPanes(r tmux.Runner, windowID, initialPane string, w config.Window, root string, env []string, keys *keyBatch, done map[string]bool, stderr io.Writer) {
+	sendPreWindow(keys, initialPane, w.PreWindow, done)
+	keys.add(initialPane, w.Panes[0].Command)
 
 	current := initialPane
 	for i, p := range w.Panes[1:] {
@@ -439,8 +448,8 @@ func applyPanes(r tmux.Runner, windowID, initialPane string, w config.Window, ro
 			continue
 		}
 		current = out
-		sendPreWindow(r, current, w.PreWindow, done, stderr)
-		sendKeys(r, current, p.Command, stderr)
+		sendPreWindow(keys, current, w.PreWindow, done)
+		keys.add(current, p.Command)
 	}
 
 	layout := w.Layout
@@ -461,18 +470,44 @@ func applyPanes(r tmux.Runner, windowID, initialPane string, w config.Window, ro
 // its parent's pane as its own first entry) and can leave one unvisited (a
 // first entry with a type splits the window's initial pane and lands
 // everything in the new one).
-func sendPreWindow(r tmux.Runner, target, preWindow string, done map[string]bool, stderr io.Writer) {
+func sendPreWindow(keys *keyBatch, target, preWindow string, done map[string]bool) {
 	if preWindow == "" || target == "" || done[target] {
 		return
 	}
 	done[target] = true
-	sendKeys(r, target, preWindow, stderr)
+	keys.add(target, preWindow)
 }
 
-// sendKeys types a command into the target pane. Commands starting with "#"
-// are comments and are skipped.
-func sendKeys(r tmux.Runner, target, command string, stderr io.Writer) {
-	if command == "" || strings.HasPrefix(command, "#") {
+// keySend is one command to type into one pane: the literal text and the Enter
+// that submits it.
+type keySend struct {
+	target, command string
+}
+
+// keyBatch collects every command a build will type, so they can all be issued
+// in one tmux process at the end instead of two processes per pane.
+//
+// Deferring them is safe because a pane's ID is known the moment it is created
+// and never changes — nothing later in the build alters where a command should
+// land. It is also slightly *safer* than typing as we go: the shells have had
+// longer to start by the time anything is sent.
+type keyBatch struct {
+	sends []keySend
+}
+
+// add queues a command. Commands starting with "#" are comments and are
+// skipped, as is the empty string.
+func (k *keyBatch) add(target, command string) {
+	if command == "" || strings.HasPrefix(command, "#") || target == "" {
+		return
+	}
+	k.sends = append(k.sends, keySend{target: target, command: command})
+}
+
+// flush issues everything queued and warns about whatever failed, one warning
+// per command rather than one per tmux call.
+func (k *keyBatch) flush(r tmux.Runner, stderr io.Writer) {
+	if len(k.sends) == 0 {
 		return
 	}
 	// -l types the argument literally and "--" ends the flag list. Without
@@ -480,13 +515,26 @@ func sendKeys(r tmux.Runner, target, command string, stderr io.Writer) {
 	// happens to be one ("up", "space", "tab", "c-c") is sent as that key
 	// instead of typed, and a command starting with "-" is taken for a flag.
 	// Enter is then sent separately, as an actual key.
-	if out, err := r.Run("send-keys", "-t", target, "-l", "--", command); err != nil {
-		warnf(stderr, "failed to run %q in %s: %v (%s)", command, target, err, out)
-		return
+	cmds := make([][]string, 0, len(k.sends)*2)
+	for _, s := range k.sends {
+		cmds = append(cmds,
+			[]string{"send-keys", "-t", s.target, "-l", "--", s.command},
+			[]string{"send-keys", "-t", s.target, "Enter"})
 	}
-	if out, err := r.Run("send-keys", "-t", target, "Enter"); err != nil {
-		warnf(stderr, "failed to run %q in %s: %v (%s)", command, target, err, out)
+
+	errs := tmux.RunEach(r, cmds)
+	for i, s := range k.sends {
+		// Either half failing means the command didn't run as typed; report it
+		// once, naming the command rather than the tmux call.
+		if err := errs[i*2]; err != nil {
+			warnf(stderr, "failed to run %q in %s: %v", s.command, s.target, err)
+			continue
+		}
+		if err := errs[i*2+1]; err != nil {
+			warnf(stderr, "failed to run %q in %s: %v", s.command, s.target, err)
+		}
 	}
+	k.sends = nil
 }
 
 // selectStartup focuses the session's startup window (given by name or index)

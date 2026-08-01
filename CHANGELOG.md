@@ -6,6 +6,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-07-31
+
+### Changed
+- Building a session issues far fewer tmux processes. Commands are collected
+  while the layout is walked and typed in a single `tmux` invocation at the end,
+  instead of two processes per pane. Measured against a real server on a
+  three-window, six-pane config: **20 processes → 9**.
+- The TUI's agent scan reads every candidate pane in one tmux process rather
+  than one per pane — up to 16, every three seconds, for as long as the TUI is
+  open.
+- Batching is opt-in per Runner (`tmux.BatchRunner`), so the dry-run recorder
+  and every test double keep working unchanged, and `wyrm up -n` still prints
+  one line per tmux command.
+- tmux abandons a batch at its first failure, which would silently cancel every
+  command behind a single dead pane. Commands the batch never reached are
+  replayed individually, preserving the warn-and-continue policy; commands that
+  already succeeded are never re-issued, since replaying a `send-keys` would
+  type its text a second time.
+
+### Fixed
+- `go.mod` still required `golang.org/x/term` after `internal/picker` was
+  removed in 0.6.0. CI now fails on an untidy `go.mod`.
+
 ## [0.6.0] - 2026-07-31
 
 ### Fixed
@@ -560,7 +583,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/jskoll/wyrm/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/jskoll/wyrm/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/jskoll/wyrm/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/jskoll/wyrm/compare/v0.4.1...v0.5.0
