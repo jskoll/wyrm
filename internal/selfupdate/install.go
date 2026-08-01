@@ -1,0 +1,37 @@
+package selfupdate
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+// Install atomically replaces the file at path with data, preserving mode.
+// It writes to a temp file in path's directory and renames over the
+// original, so a crash never leaves a half-written binary — and so the
+// replacement works even though path is the binary currently running: a
+// POSIX rename repoints the directory entry without disturbing a process
+// still executing the old inode.
+func Install(path string, data []byte, mode os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".wyrm-update-*")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }() // no-op once the rename below succeeds
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("writing %s: %w", tmpPath, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("writing %s: %w", tmpPath, err)
+	}
+	if err := os.Chmod(tmpPath, mode); err != nil {
+		return fmt.Errorf("setting permissions on %s: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("replacing %s: %w", path, err)
+	}
+	return nil
+}

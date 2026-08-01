@@ -15,7 +15,7 @@
 # not "--config"), hence "-o" (old-style option) below rather than fish's
 # usual "-l" (GNU-style long option).
 
-set -l subcommands up restart kill pick tui save edit validate list list-configs migrate-config version help
+set -l subcommands up restart kill pick tui save edit validate list list-configs migrate-config selfupdate version help
 
 # Don't fall back to filename completion.
 complete -c wyrm -f
@@ -32,6 +32,7 @@ complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a validate -
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a list -d 'list running tmux sessions'
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a list-configs -d 'list candidate config file paths'
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a migrate-config -d 'move the local config into the shared dir'
+complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a selfupdate -d 'download and install the latest release'
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a version -d 'print version and exit'
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a help -d 'show help'
 # ...and running session names (bare `wyrm <name>` attaches by name).
@@ -40,3 +41,5 @@ complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a '(wyrm lis
 # Subcommand flags.
 complete -c wyrm -n '__fish_seen_subcommand_from up restart kill edit validate' -o config -d 'config file path' -r -a '(wyrm list-configs 2>/dev/null)'
 complete -c wyrm -n '__fish_seen_subcommand_from list' -o format -d 'output format' -x -a 'table json toml names'
+complete -c wyrm -n '__fish_seen_subcommand_from selfupdate' -o check -d 'report an available update without installing it'
+complete -c wyrm -n '__fish_seen_subcommand_from selfupdate' -o version -d 'install this version instead of the latest' -x

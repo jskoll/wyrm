@@ -92,6 +92,7 @@ wyrm validate               # check the effective config parses and validates (-
 wyrm list                   # list running tmux sessions non-interactively
 wyrm list-configs           # list candidate config file paths (used by shell completion)
 wyrm migrate-config         # move the local config into the shared config directory
+wyrm selfupdate             # download and install the latest release (-check, -version V)
 wyrm version                # print version
 wyrm help                   # usage overview
 ```

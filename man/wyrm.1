@@ -93,6 +93,16 @@ config in the shared config directory. Used by shell completion.
 .B wyrm migrate-config
 Move the local config file into the shared config directory.
 .TP
+.BI "wyrm selfupdate [\-check] [\-version " VERSION ]
+Download the latest wyrm release from GitHub, verify it against the
+release's published checksums, and replace the running binary in place.
+.B \-check
+reports whether an update is available without installing it.
+.BI \-version " VERSION"
+installs that version instead of the latest.
+Refuses if the running binary looks package-managed (Homebrew, dpkg, rpm,
+or pacman/AUR); use that package manager's own upgrade command instead.
+.TP
 .B wyrm version
 Print the version and exit.
 .TP

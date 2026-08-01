@@ -31,7 +31,7 @@ _wyrm_complete() {
             ;;
     esac
 
-    local subcommands="up restart kill pick tui save edit validate list list-configs migrate-config version help"
+    local subcommands="up restart kill pick tui save edit validate list list-configs migrate-config selfupdate version help"
 
     # First token: a subcommand, or a running session name to attach to.
     if [[ "$COMP_CWORD" -eq 1 ]]; then
@@ -48,6 +48,7 @@ _wyrm_complete() {
         case "$cmd" in
             up|restart|kill|edit|validate) COMPREPLY=($(compgen -W "-config" -- "$cur")) ;;
             list) COMPREPLY=($(compgen -W "-format" -- "$cur")) ;;
+            selfupdate) COMPREPLY=($(compgen -W "-check -version" -- "$cur")) ;;
             *) COMPREPLY=() ;;
         esac
         return

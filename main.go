@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"regexp"
 	"runtime/debug"
@@ -31,6 +32,11 @@ type app struct {
 	runner         tmux.Runner
 	insideTmux     func() bool
 	attach         func(string) error
+
+	// httpClient is used only by selfupdate. Left nil in the normal
+	// construction path below, where it defaults to http.DefaultClient;
+	// tests point it at an httptest server instead.
+	httpClient *http.Client
 }
 
 // exitErr is a subcommand failure carrying an explicit exit status. A nil Err
@@ -126,6 +132,8 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 		return a.report(a.listConfigs(args[1:]))
 	case "migrate-config":
 		return a.report(a.migrateConfig(args[1:]))
+	case "selfupdate":
+		return a.report(a.selfupdate(args[1:]))
 	default:
 		if strings.HasPrefix(cmd, "-") {
 			// A bare flag with no subcommand (e.g. `wyrm -config x`) drives the
@@ -198,6 +206,7 @@ Usage:
   wyrm list [-format FMT]    list running sessions (FMT: table, json, toml, names)
   wyrm list-configs          list candidate config file paths (used by shell completion)
   wyrm migrate-config        move the local config into the shared config directory
+  wyrm selfupdate            download and install the latest release (-check, -version V)
   wyrm version               print version and exit
   wyrm help                  show this help
 
@@ -296,7 +305,7 @@ func (a *app) resolveConfig(settings *config.Settings, explicitPath string) (*co
 // power the "did you mean" hint in attachByName.
 var knownSubcommands = []string{
 	"up", "restart", "kill", "pick", "tui", "save", "edit", "validate",
-	"list", "list-configs", "migrate-config", "version", "help",
+	"list", "list-configs", "migrate-config", "selfupdate", "version", "help",
 }
 
 // nearestSubcommand returns the known subcommand closest to name by edit
