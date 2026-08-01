@@ -103,6 +103,13 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     steps:
+      # The archlinux Docker image's pacman.conf sets NoExtract on
+      # usr/share/man/* (and similar docs) for every package, to keep the
+      # image small — a real Arch install doesn't have this, so without
+      # removing it here the smoke test's man-page check would fail for an
+      # environment reason that has nothing to do with the PKGBUILD.
+      - name: Let this image actually install man pages
+        run: sed -i '/^NoExtract/d' /etc/pacman.conf
       # actions/checkout needs git, which base-devel doesn't include. Full
       # -Syu (not just -Sy) here so the later dependency install makepkg -s
       # triggers for tmux isn't a partial upgrade against a stale image.
@@ -134,10 +141,8 @@ jobs:
         run: |
           set -euo pipefail
           wyrm version
-          echo "--- pkg/wyrm-bin (what makepkg packaged, pre-strip of build dir) ---"
-          find pkg/wyrm-bin -type f 2>&1 || true
-          echo "--- /usr/share/man and /usr/share/bash-completion (what's actually installed) ---"
-          find /usr/share/man /usr/share/bash-completion -type f 2>&1 || true
+          # makepkg's default `zipman` option gzips man pages during
+          # packaging, so match by prefix rather than the exact filename.
           find /usr/share/man/man1 -maxdepth 1 -name 'wyrm.1*' | grep -q .
           test -f /usr/share/bash-completion/completions/wyrm
           pacman -Q tmux
