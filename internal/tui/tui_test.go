@@ -100,8 +100,8 @@ func TestSessionsMsgLoadsWindows(t *testing.T) {
 	}}
 	m := New(r, nil)
 	m, cmd := update(m, sessionsMsg{sessions: []sessions.Session{{ID: "$1", Name: "alpha", Windows: 1}}})
-	if len(m.sessions) != 1 || m.sessionCur != 0 {
-		t.Fatalf("sessions not stored: %+v cur=%d", m.sessions, m.sessionCur)
+	if len(m.sessions) != 1 || m.cur[panelSessions] != 0 {
+		t.Fatalf("sessions not stored: %+v cur=%d", m.sessions, m.cur[panelSessions])
 	}
 	msg := run(cmd)
 	wm, ok := msg.(windowsMsg)
@@ -116,14 +116,14 @@ func TestSessionsMsgLoadsWindows(t *testing.T) {
 func TestWindowsMsgPicksActiveWindow(t *testing.T) {
 	m := New(nopRunner(), nil)
 	m.sessions = []sessions.Session{{ID: "$1", Name: "alpha"}}
-	m.sessionCur = 0
+	m.cur[panelSessions] = 0
 	windows := []tmux.WindowInfo{
 		{Index: 0, ID: "@1", Active: false, Name: "one"},
 		{Index: 1, ID: "@2", Active: true, Name: "two"},
 	}
 	m, cmd := update(m, windowsMsg{sessionID: "$1", windows: windows})
-	if m.windowCur != 1 {
-		t.Errorf("windowCur = %d, want 1 (the active window)", m.windowCur)
+	if m.cur[panelWindows] != 1 {
+		t.Errorf("windowCur = %d, want 1 (the active window)", m.cur[panelWindows])
 	}
 	// It should follow up by loading the active window's panes.
 	pm, ok := run(cmd).(panesMsg)
@@ -135,7 +135,7 @@ func TestWindowsMsgPicksActiveWindow(t *testing.T) {
 func TestStaleWindowsMsgIgnored(t *testing.T) {
 	m := New(nopRunner(), nil)
 	m.sessions = []sessions.Session{{ID: "$1"}, {ID: "$2"}}
-	m.sessionCur = 0 // current session is $1
+	m.cur[panelSessions] = 0 // current session is $1
 	before := m.windows
 	m, cmd := update(m, windowsMsg{sessionID: "$2", windows: []tmux.WindowInfo{{ID: "@9"}}})
 	if len(m.windows) != len(before) {
@@ -149,7 +149,7 @@ func TestStaleWindowsMsgIgnored(t *testing.T) {
 func TestPreviewMsgSetsContent(t *testing.T) {
 	m := New(nopRunner(), nil)
 	m.panes = []tmux.PaneInfo{{ID: "%1", Command: "nvim"}}
-	m.paneCur = 0
+	m.cur[panelPanes] = 0
 	m, _ = update(m, previewMsg{paneID: "%1", content: "hello world"})
 	if m.preview != "hello world" {
 		t.Errorf("preview = %q, want %q", m.preview, "hello world")
@@ -164,15 +164,15 @@ func TestNavigationResetsChildCursors(t *testing.T) {
 	m := New(r, nil)
 	m.focus = panelSessions
 	m.sessions = []sessions.Session{{ID: "$1"}, {ID: "$2"}}
-	m.sessionCur = 0
-	m.windowCur = 3
-	m.paneCur = 2
+	m.cur[panelSessions] = 0
+	m.cur[panelWindows] = 3
+	m.cur[panelPanes] = 2
 	m, cmd := update(m, key("down")) // move to $2
-	if m.sessionCur != 1 {
-		t.Fatalf("sessionCur = %d, want 1", m.sessionCur)
+	if m.cur[panelSessions] != 1 {
+		t.Fatalf("sessionCur = %d, want 1", m.cur[panelSessions])
 	}
-	if m.windowCur != -1 || m.paneCur != -1 {
-		t.Errorf("child cursors not reset: windowCur=%d paneCur=%d", m.windowCur, m.paneCur)
+	if m.cur[panelWindows] != -1 || m.cur[panelPanes] != -1 {
+		t.Errorf("child cursors not reset: windowCur=%d paneCur=%d", m.cur[panelWindows], m.cur[panelPanes])
 	}
 	if run(cmd) == nil {
 		t.Errorf("moving session should trigger a window reload")
@@ -183,7 +183,7 @@ func TestEnterSetsPendingAttachAndQuits(t *testing.T) {
 	m := New(nopRunner(), nil)
 	m.focus = panelSessions
 	m.sessions = []sessions.Session{{ID: "$7", Name: "target"}}
-	m.sessionCur = 0
+	m.cur[panelSessions] = 0
 	m, cmd := update(m, key("enter"))
 	if m.pendingAttach != "$7" {
 		t.Errorf("pendingAttach = %q, want $7", m.pendingAttach)
@@ -197,7 +197,7 @@ func TestSelfPanePreviewSuppressed(t *testing.T) {
 	m := New(nopRunner(), nil)
 	m.selfPane = "%1"
 	m.panes = []tmux.PaneInfo{{ID: "%1", Command: "wyrm"}}
-	m.paneCur = 0
+	m.cur[panelPanes] = 0
 	cmd := m.reloadPreview()
 	if cmd != nil {
 		t.Error("reloadPreview should not capture the pane wyrm runs in")
@@ -228,7 +228,7 @@ func compactModel() Model {
 	m.focus = panelSessions
 	m.sessions = []sessions.Session{{ID: "$1", Name: "alpha"}, {ID: "$2", Name: "beta"}}
 	m.windows = []tmux.WindowInfo{{Index: 0, ID: "@1", Name: "code"}}
-	m.sessionCur, m.windowCur = 0, 0
+	m.cur[panelSessions], m.cur[panelWindows] = 0, 0
 	m.width, m.height, m.ready = 100, 40, true
 	return m
 }
@@ -367,7 +367,7 @@ func TestCompactFilterEnterAttaches(t *testing.T) {
 func TestFullFilterEnterOnlyClosesTheFilter(t *testing.T) {
 	m := New(nopRunner(), nil)
 	m.sessions = []sessions.Session{{ID: "$1", Name: "alpha"}, {ID: "$2", Name: "beta"}}
-	m.sessionCur, m.focus = 0, panelSessions
+	m.cur[panelSessions], m.focus = 0, panelSessions
 	m.width, m.height, m.ready = 100, 40, true
 	m, _ = update(m, key("/"))
 	for _, r := range "bet" {
@@ -389,7 +389,7 @@ func TestFullFilterEnterOnlyClosesTheFilter(t *testing.T) {
 func TestTickersIdleWhileBlurred(t *testing.T) {
 	m := New(nopRunner(), nil)
 	m.panes = []tmux.PaneInfo{{ID: "%1", Command: "nvim"}}
-	m.paneCur = 0
+	m.cur[panelPanes] = 0
 	m.previewSrc = previewPane
 
 	m, _ = update(m, tea.BlurMsg{})
@@ -428,7 +428,7 @@ func TestTickersIdleWhileBlurred(t *testing.T) {
 func TestTickersWorkWhileFocused(t *testing.T) {
 	m := New(nopRunner(), nil)
 	m.panes = []tmux.PaneInfo{{ID: "%1", Command: "nvim"}}
-	m.paneCur = 0
+	m.cur[panelPanes] = 0
 	m.previewSrc = previewPane
 
 	_, cmd := m.Update(tickMsg{})
@@ -498,4 +498,70 @@ func containsSessions(msgs []tea.Msg) bool {
 		}
 	}
 	return false
+}
+
+// TestProjectsSelectionDoesNotResetTheCascade guards a mistake that is easy to
+// make once the cascade is table-driven: treating "every panel after this one"
+// as the child set.
+//
+// Projects is a sibling list of configs, not the parent of the running
+// Sessions. Moving it changes the preview and nothing else — resetting the
+// session/window/pane cursors would yank the user off the session they had
+// selected just because they scrolled the config list.
+func TestProjectsSelectionDoesNotResetTheCascade(t *testing.T) {
+	m := New(nopRunner(), nil)
+	m.focus = panelProjects
+	m.projects = []Project{{Name: "a", Path: "/a"}, {Name: "b", Path: "/b"}}
+	m.sessions = []sessions.Session{{ID: "$1"}, {ID: "$2"}}
+	m.windows = []tmux.WindowInfo{{ID: "@1"}, {ID: "@2"}}
+	m.panes = []tmux.PaneInfo{{ID: "%1"}, {ID: "%2"}}
+	m.cur = [numPanels]int{panelProjects: 0, panelSessions: 1, panelWindows: 1, panelPanes: 1}
+
+	m, _ = update(m, key("down"))
+
+	if m.cur[panelProjects] != 1 {
+		t.Fatalf("projects cursor = %d, want it to have moved", m.cur[panelProjects])
+	}
+	for _, tc := range []struct {
+		p    panel
+		name string
+	}{
+		{panelSessions, "sessions"}, {panelWindows, "windows"}, {panelPanes, "panes"},
+	} {
+		if m.cur[tc.p] != 1 {
+			t.Errorf("%s cursor = %d, want 1 — moving Projects must not reset it", tc.name, m.cur[tc.p])
+		}
+	}
+}
+
+// The real cascade still has to work: Sessions resets Windows and Panes, and
+// Windows resets Panes.
+func TestSessionAndWindowSelectionResetTheirChildren(t *testing.T) {
+	base := func() Model {
+		m := New(nopRunner(), nil)
+		m.sessions = []sessions.Session{{ID: "$1"}, {ID: "$2"}}
+		m.windows = []tmux.WindowInfo{{ID: "@1"}, {ID: "@2"}}
+		m.panes = []tmux.PaneInfo{{ID: "%1"}, {ID: "%2"}}
+		m.cur = [numPanels]int{panelSessions: 0, panelWindows: 1, panelPanes: 1}
+		return m
+	}
+
+	m := base()
+	m.focus = panelSessions
+	m, _ = update(m, key("down"))
+	if m.cur[panelWindows] != -1 || m.cur[panelPanes] != -1 {
+		t.Errorf("after moving Sessions: windows=%d panes=%d, want both -1",
+			m.cur[panelWindows], m.cur[panelPanes])
+	}
+
+	m = base()
+	m.focus = panelWindows
+	m.cur[panelWindows] = 0
+	m, _ = update(m, key("down"))
+	if m.cur[panelPanes] != -1 {
+		t.Errorf("after moving Windows: panes=%d, want -1", m.cur[panelPanes])
+	}
+	if m.cur[panelSessions] != 0 {
+		t.Errorf("moving Windows changed the Sessions cursor to %d", m.cur[panelSessions])
+	}
 }

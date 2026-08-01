@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Internal: the TUI's panels are described by one table (`internal/tui/panels.go`)
+  instead of nine parallel switch statements spread across four files. Title,
+  row count, rows, footer hints, context menu, what `x` kills, which panel it
+  feeds, and what to reload were each a separate four-case switch; adding a
+  panel meant finding all nine. The four `*Cur` fields likewise became one array
+  indexed by panel — two of the nine switches (`cursorFor` and `focusedCursor`)
+  were the same switch written twice. `Model` drops from 42 fields to 36.
 - tmux errors now lead with tmux's own diagnostic instead of the process exit
   status: `creating session: duplicate session: web` rather than
   `creating session: exit status 1 (duplicate session: web)`. The exit status was

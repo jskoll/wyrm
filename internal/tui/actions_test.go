@@ -18,7 +18,7 @@ func modelWithData(r tmux.Runner) Model {
 	m.sessions = []sessions.Session{{ID: "$1", Name: "webapp"}}
 	m.windows = []tmux.WindowInfo{{Index: 0, ID: "@1", Name: "code"}}
 	m.panes = []tmux.PaneInfo{{ID: "%1", Index: 0, Command: "nvim"}}
-	m.sessionCur, m.windowCur, m.paneCur = 0, 0, 0
+	m.cur[panelSessions], m.cur[panelWindows], m.cur[panelPanes] = 0, 0, 0
 	return m
 }
 

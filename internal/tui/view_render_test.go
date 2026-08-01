@@ -123,17 +123,17 @@ func TestFilteredPanelUsesFilterAccent(t *testing.T) {
 	m.focus = panelSessions
 	m.sessions = []sessions.Session{{ID: "$1", Name: "webapp", Windows: 1}}
 
-	if out := m.renderSessions(30, 6); strings.Contains(out, filterFgSGR) {
+	if out := m.renderPanel(panelSessions, 30, 6); strings.Contains(out, filterFgSGR) {
 		t.Errorf("unfiltered panel should not use the filter accent:\n%q", out)
 	}
 
 	m.filtering = true
 	m.filter = "web"
-	if out := m.renderSessions(30, 6); !strings.Contains(out, filterFgSGR) {
+	if out := m.renderPanel(panelSessions, 30, 6); !strings.Contains(out, filterFgSGR) {
 		t.Errorf("filtered panel should use the filter accent:\n%q", out)
 	}
 	// The filter belongs to the focused panel only.
-	if out := m.renderWindows(30, 6); strings.Contains(out, filterFgSGR) {
+	if out := m.renderPanel(panelWindows, 30, 6); strings.Contains(out, filterFgSGR) {
 		t.Errorf("unfocused panel should not use the filter accent:\n%q", out)
 	}
 }

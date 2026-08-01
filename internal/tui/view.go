@@ -179,23 +179,18 @@ func panelHeights(bodyH int, counts []int, slack int) []int {
 	return heights
 }
 
-// renderPanel dispatches to the renderer for p. One entry point, so View can
-// walk whatever panel set the model shows without knowing which is which.
+// renderPanel draws p, taking its title, rows and empty-state hint from the
+// panel table — so View walks whatever panel set the model shows without
+// knowing which is which, and a new panel needs no case here.
 func (m Model) renderPanel(p panel, outerW, outerH int) string {
-	switch p {
-	case panelProjects:
-		return m.renderProjects(outerW, outerH)
-	case panelSessions:
-		return m.renderSessions(outerW, outerH)
-	case panelWindows:
-		return m.renderWindows(outerW, outerH)
-	case panelPanes:
-		return m.renderPanes(outerW, outerH)
+	spec := p.spec()
+	if spec.rows == nil {
+		return ""
 	}
-	return ""
+	return m.renderListBox(p, spec.title, spec.rows(m), m.cur[p], outerW, outerH, spec.empty)
 }
 
-func (m Model) renderProjects(outerW, outerH int) string {
+func projectRows(m Model) [][]span {
 	projects := m.visibleProjects()
 	rows := make([][]span, len(projects))
 	for i, p := range projects {
@@ -210,10 +205,10 @@ func (m Model) renderProjects(outerW, outerH int) string {
 			rows[i] = appendAgentMark(rows[i], m.agents.session(p.SessionID))
 		}
 	}
-	return m.renderListBox(panelProjects, "Projects", rows, m.projectCur, outerW, outerH, "no wyrm configs found")
+	return rows
 }
 
-func (m Model) renderSessions(outerW, outerH int) string {
+func sessionRows(m Model) [][]span {
 	sessions := m.visibleSessions()
 	rows := make([][]span, len(sessions))
 	for i, s := range sessions {
@@ -227,10 +222,10 @@ func (m Model) renderSessions(outerW, outerH int) string {
 			{hintStyle, fmt.Sprintf("(%dw)", s.Windows)},
 		}, m.agents.session(s.ID))
 	}
-	return m.renderListBox(panelSessions, "Sessions", rows, m.sessionCur, outerW, outerH, "no running sessions")
+	return rows
 }
 
-func (m Model) renderWindows(outerW, outerH int) string {
+func windowRows(m Model) [][]span {
 	windows := m.visibleWindows()
 	rows := make([][]span, len(windows))
 	for i, w := range windows {
@@ -243,10 +238,10 @@ func (m Model) renderWindows(outerW, outerH int) string {
 			plain(" " + name),
 		}, m.agents.window(w.ID))
 	}
-	return m.renderListBox(panelWindows, "Windows", rows, m.windowCur, outerW, outerH, "")
+	return rows
 }
 
-func (m Model) renderPanes(outerW, outerH int) string {
+func paneRows(m Model) [][]span {
 	panes := m.visiblePanes()
 	rows := make([][]span, len(panes))
 	for i, p := range panes {
@@ -255,7 +250,7 @@ func (m Model) renderPanes(outerW, outerH int) string {
 			plain(" " + p.Command),
 		}, m.agents.pane(p.ID))
 	}
-	return m.renderListBox(panelPanes, "Panes", rows, m.paneCur, outerW, outerH, "")
+	return rows
 }
 
 // appendAgentMark adds the trailing "waiting for you" glyph to a row, if the
@@ -586,18 +581,10 @@ func (m Model) renderHelpOverlay() string {
 
 // helpKeys returns the contextual key hints for the focused panel.
 func (m Model) helpKeys() string {
-	const nav = "tab/1-4: focus  jk: move  /: filter  R: reload  ?: help  q: quit"
-	switch m.focus {
-	case panelProjects:
-		return "↵: start/attach  e: edit  x: stop  " + nav
-	case panelSessions:
-		return "↵: attach  x: kill  r: rename  n: new-win  " + nav
-	case panelWindows:
-		return "↵: attach  x: kill  r: rename  n: new-win  L: layout  " + nav
-	case panelPanes:
-		return "↵: attach  x: kill  z: zoom  " + nav
+	if keys := m.focus.spec().keys; keys != "" {
+		return keys
 	}
-	return nav
+	return navKeys
 }
 
 // viewport returns the [start,end) slice of a list of length n that keeps

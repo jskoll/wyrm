@@ -17,20 +17,20 @@ func projectModel(r *funcRunner, path string) Model {
 	m := New(r, nil)
 	m.focus = panelProjects
 	m.projects = []Project{{Name: "webapp", Path: path}}
-	m.projectCur = 0
+	m.cur[panelProjects] = 0
 	m.previewSrc = previewConfig
 	return m
 }
 
 func TestProjectsMsgClampsCursor(t *testing.T) {
 	m := New(nopRunner(), nil)
-	m.projectCur = 5
+	m.cur[panelProjects] = 5
 	m, _ = update(m, projectsMsg{projects: []Project{{Name: "a"}, {Name: "b"}}})
 	if len(m.projects) != 2 {
 		t.Fatalf("projects = %d, want 2", len(m.projects))
 	}
-	if m.projectCur != 1 {
-		t.Errorf("projectCur = %d, want clamped to 1", m.projectCur)
+	if m.cur[panelProjects] != 1 {
+		t.Errorf("projectCur = %d, want clamped to 1", m.cur[panelProjects])
 	}
 }
 

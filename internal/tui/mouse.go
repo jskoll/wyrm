@@ -65,7 +65,7 @@ func (m Model) wheel(msg tea.MouseMsg, delta int) (tea.Model, tea.Cmd) {
 		m.focus = h.panel
 		cmd = m.updatePreview()
 	}
-	next, moveCmd := m.setCursor(h.panel, m.cursorFor(h.panel)+delta)
+	next, moveCmd := m.setCursor(h.panel, m.cur[h.panel]+delta)
 	return next, tea.Batch(cmd, moveCmd)
 }
 
@@ -89,7 +89,7 @@ func (m Model) leftClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if h.row < 0 {
 		// The panel's chrome: focus it, but leave the selection alone.
-		m.clickCount = 0
+		m.lastClick.counted = 0
 		return m, tea.Batch(cmds...)
 	}
 
@@ -98,26 +98,26 @@ func (m Model) leftClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	if m.isDoubleClick(msg, h) {
-		m.clickCount = 0
+		m.lastClick.counted = 0
 		activated, cmd := m.activateSelection()
 		return activated, tea.Batch(append(cmds, cmd)...)
 	}
-	m.clickCount = 1
-	m.lastClickAt = m.now()
-	m.lastClickPanel, m.lastClickRow = h.panel, h.row
+	m.lastClick.counted = 1
+	m.lastClick.at = m.now()
+	m.lastClick.panel, m.lastClick.row = h.panel, h.row
 	return m, tea.Batch(cmds...)
 }
 
 // isDoubleClick reports whether this press completes a double click: a previous
 // press on the same row of the same panel, recently enough.
 func (m Model) isDoubleClick(_ tea.MouseMsg, h hit) bool {
-	if m.clickCount == 0 {
+	if m.lastClick.counted == 0 {
 		return false
 	}
-	if m.lastClickPanel != h.panel || m.lastClickRow != h.row {
+	if m.lastClick.panel != h.panel || m.lastClick.row != h.row {
 		return false
 	}
-	return m.now().Sub(m.lastClickAt) <= doubleClickWindow
+	return m.now().Sub(m.lastClick.at) <= doubleClickWindow
 }
 
 // activateSelection is the click equivalent of Enter.
@@ -137,7 +137,7 @@ func (m Model) rightClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.err = nil
-	m.clickCount = 0
+	m.lastClick.counted = 0
 
 	var cmds []tea.Cmd
 	if m.focus != h.panel {

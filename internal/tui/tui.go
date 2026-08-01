@@ -54,6 +54,9 @@ const (
 	panelWindows
 	panelPanes
 	numPanels
+
+	// noPanel is "no such panel", used by childOf to end the cascade.
+	noPanel panel = -1
 )
 
 // previewSource tracks what the main panel is currently showing, so the ticker
@@ -64,6 +67,17 @@ const (
 	previewPane previewSource = iota
 	previewConfig
 )
+
+// clickState remembers the previous mouse press, which is the whole of what a
+// double click needs to recognise itself: same row, same panel, recently
+// enough. counted is 0 or 1 — the click that would make it 2 is dispatched as
+// an activation instead of being counted.
+type clickState struct {
+	counted int
+	at      time.Time
+	panel   panel
+	row     int
+}
 
 // mode is the input mode: normal navigation, a yes/no confirm modal (for
 // destructive kills), a text-entry prompt (rename / new-window), the help
@@ -96,10 +110,17 @@ type Model struct {
 	windows  []tmux.WindowInfo
 	panes    []tmux.PaneInfo
 
-	projectCur int
-	sessionCur int
-	windowCur  int
-	paneCur    int
+	// cur is each panel's selected row, indexed by panel.
+	//
+	// The four lists above stay separately typed — they hold genuinely
+	// different things — but the cursors are four ints with identical
+	// semantics, and holding them apart meant every question about "the
+	// selection" became a switch. Two of those switches (cursorFor and
+	// focusedCursor) were the same switch written twice.
+	//
+	// -1 means "not chosen yet": the first load of a panel then snaps to
+	// whatever tmux says is active rather than to row 0.
+	cur [numPanels]int
 
 	preview      string
 	previewTitle string
@@ -158,12 +179,8 @@ type Model struct {
 	// terminal, so it has to be surrenderable without restarting the TUI.
 	mouseOn bool
 
-	// Double-click tracking. clickCount is 0 or 1: the click that would make it
-	// 2 is dispatched as an activation instead of being counted.
-	clickCount     int
-	lastClickAt    time.Time
-	lastClickPanel panel
-	lastClickRow   int
+	// lastClick is what a double click is measured against — see clickState.
+	lastClick clickState
 
 	// clock reads the current time, so tests can drive the double-click window
 	// without sleeping. nil means time.Now — see Model.now.
@@ -183,8 +200,9 @@ type Model struct {
 	pendingAttach string
 }
 
-// New builds a Model backed by runner. windowCur/paneCur start at -1 so the
-// first load of each snaps to the active window/pane rather than index 0.
+// New builds a Model backed by runner. The Windows and Panes cursors start at
+// -1 so the first load of each snaps to the active window/pane rather than
+// index 0.
 // Focus starts on Sessions rather than the first panel: the common reason to
 // open the TUI is to reach a running session, and it makes the initial preview
 // a live pane capture instead of a config file.
@@ -201,8 +219,7 @@ func New(runner tmux.Runner, settings *config.Settings) Model {
 		runner:        runner,
 		settings:      settings,
 		focus:         panelSessions,
-		windowCur:     -1,
-		paneCur:       -1,
+		cur:           [numPanels]int{panelWindows: -1, panelPanes: -1},
 		selfPane:      os.Getenv("TMUX_PANE"),
 		mouseOn:       settings.MouseEnabled(),
 		agentProfiles: profiles,
@@ -393,53 +410,38 @@ func (m Model) panelIndex(p panel) int {
 	return -1
 }
 
-// panelLen is the number of rows currently displayed in a panel.
-func (m Model) panelLen(p panel) int {
-	switch p {
-	case panelProjects:
-		return len(m.visibleProjects())
-	case panelSessions:
-		return len(m.visibleSessions())
-	case panelWindows:
-		return len(m.visibleWindows())
-	case panelPanes:
-		return len(m.visiblePanes())
-	}
-	return 0
-}
-
 // --- selection accessors ---
 
 func (m Model) currentProject() (Project, bool) {
 	list := m.visibleProjects()
-	if m.projectCur < 0 || m.projectCur >= len(list) {
+	if m.cur[panelProjects] < 0 || m.cur[panelProjects] >= len(list) {
 		return Project{}, false
 	}
-	return list[m.projectCur], true
+	return list[m.cur[panelProjects]], true
 }
 
 func (m Model) currentSession() (sessions.Session, bool) {
 	list := m.visibleSessions()
-	if m.sessionCur < 0 || m.sessionCur >= len(list) {
+	if m.cur[panelSessions] < 0 || m.cur[panelSessions] >= len(list) {
 		return sessions.Session{}, false
 	}
-	return list[m.sessionCur], true
+	return list[m.cur[panelSessions]], true
 }
 
 func (m Model) currentWindow() (tmux.WindowInfo, bool) {
 	list := m.visibleWindows()
-	if m.windowCur < 0 || m.windowCur >= len(list) {
+	if m.cur[panelWindows] < 0 || m.cur[panelWindows] >= len(list) {
 		return tmux.WindowInfo{}, false
 	}
-	return list[m.windowCur], true
+	return list[m.cur[panelWindows]], true
 }
 
 func (m Model) currentPane() (tmux.PaneInfo, bool) {
 	list := m.visiblePanes()
-	if m.paneCur < 0 || m.paneCur >= len(list) {
+	if m.cur[panelPanes] < 0 || m.cur[panelPanes] >= len(list) {
 		return tmux.PaneInfo{}, false
 	}
-	return list[m.paneCur], true
+	return list[m.cur[panelPanes]], true
 }
 
 // --- update ---
@@ -508,7 +510,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.projects = msg.projects
-		m.projectCur = clamp(m.projectCur, m.panelLen(panelProjects))
+		m.cur[panelProjects] = clamp(m.cur[panelProjects], m.panelLen(panelProjects))
 		if m.focus == panelProjects {
 			return m, m.updatePreview()
 		}
@@ -543,7 +545,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = nil
 		m.sessions = msg.sessions
-		m.sessionCur = clamp(m.sessionCur, m.panelLen(panelSessions))
+		m.cur[panelSessions] = clamp(m.cur[panelSessions], m.panelLen(panelSessions))
 		return m, m.reloadWindows()
 
 	case windowsMsg:
@@ -556,7 +558,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.windows = msg.windows
-		m.windowCur = activeOrClamp(m.windowCur, m.visibleWindows())
+		m.cur[panelWindows] = activeOrClamp(m.cur[panelWindows], m.visibleWindows())
 		return m, m.reloadPanes()
 
 	case panesMsg:
@@ -568,7 +570,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.panes = msg.panes
-		m.paneCur = activePaneOrClamp(m.paneCur, m.visiblePanes())
+		m.cur[panelPanes] = activePaneOrClamp(m.cur[panelPanes], m.visiblePanes())
 		return m, m.reloadPreview()
 
 	case previewMsg:
@@ -655,24 +657,8 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // clampFocused keeps the focused panel's cursor inside its visible list and
 // reloads whatever depends on it.
 func (m Model) clampFocused() (tea.Model, tea.Cmd) {
-	n := m.panelLen(m.focus)
-	switch m.focus {
-	case panelProjects:
-		m.projectCur = clamp(m.projectCur, n)
-		return m, m.updatePreview()
-	case panelSessions:
-		m.sessionCur = clamp(m.sessionCur, n)
-		m.windowCur, m.paneCur = -1, -1
-		return m, m.reloadWindows()
-	case panelWindows:
-		m.windowCur = clamp(m.windowCur, n)
-		m.paneCur = -1
-		return m, m.reloadPanes()
-	case panelPanes:
-		m.paneCur = clamp(m.paneCur, n)
-		return m, m.reloadPreview()
-	}
-	return m, nil
+	m.cur[m.focus] = clamp(m.cur[m.focus], m.panelLen(m.focus))
+	return m, m.selectionChanged(m.focus)
 }
 
 // handleHelpKey scrolls the help overlay or closes it. Only esc/q/?/Ctrl-C
@@ -845,42 +831,18 @@ func (m Model) attachToSelection() (tea.Model, tea.Cmd) {
 }
 
 // startKill opens a confirm modal for the destructive kill appropriate to the
-// focused panel.
+// focused panel. What that is — the action and the wording — comes from the
+// panel table; this only puts the modal up.
 func (m Model) startKill() (tea.Model, tea.Cmd) {
-	switch m.focus {
-	case panelProjects:
-		p, ok := m.currentProject()
-		if !ok || !p.Running {
-			return m, nil
-		}
-		m.pending = pendingAction{op: opKillProject, path: p.Path}
-		m.confirmPrompt = "Stop project '" + p.Name + "' (runs on_project_exit)?  (y/n)"
-	case panelSessions:
-		s, ok := m.currentSession()
-		if !ok {
-			return m, nil
-		}
-		m.pending = pendingAction{op: opKillSession, sessionID: s.ID}
-		m.confirmPrompt = "Kill session '" + s.Name + "'?  (y/n)"
-	case panelWindows:
-		s, sok := m.currentSession()
-		w, wok := m.currentWindow()
-		if !sok || !wok {
-			return m, nil
-		}
-		m.pending = pendingAction{op: opKillWindow, sessionID: s.ID, windowID: w.ID}
-		m.confirmPrompt = "Kill window '" + w.Name + "'?  (y/n)"
-	case panelPanes:
-		w, wok := m.currentWindow()
-		p, pok := m.currentPane()
-		if !wok || !pok {
-			return m, nil
-		}
-		m.pending = pendingAction{op: opKillPane, windowID: w.ID, paneID: p.ID}
-		m.confirmPrompt = "Kill pane " + p.ID + " (" + p.Command + ")?  (y/n)"
-	default:
+	f := m.focus.spec().kill
+	if f == nil {
 		return m, nil
 	}
+	pending, prompt, ok := f(m)
+	if !ok {
+		return m, nil
+	}
+	m.pending, m.confirmPrompt = pending, prompt
 	m.mode = modeConfirm
 	return m, nil
 }
@@ -1022,22 +984,7 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // moveCursor moves the selection in the focused panel by delta and reloads the
 // dependent panels/preview.
 func (m Model) moveCursor(delta int) (tea.Model, tea.Cmd) {
-	return m.moveCursorTo(m.focusedCursor() + delta)
-}
-
-// focusedCursor is the focused panel's current index.
-func (m Model) focusedCursor() int {
-	switch m.focus {
-	case panelProjects:
-		return m.projectCur
-	case panelSessions:
-		return m.sessionCur
-	case panelWindows:
-		return m.windowCur
-	case panelPanes:
-		return m.paneCur
-	}
-	return 0
+	return m.moveCursorTo(m.cur[m.focus] + delta)
 }
 
 // moveCursorTo sets the focused panel's selection, clamping to the ends rather
@@ -1055,43 +1002,41 @@ func (m Model) setCursor(p panel, next int) (tea.Model, tea.Cmd) {
 	if n == 0 {
 		return m, nil
 	}
-	if next < 0 {
-		next = 0
+	next = clampTo(next, n)
+	if next == m.cur[p] {
+		return m, nil
 	}
-	if next >= n {
-		next = n - 1
+	m.cur[p] = next
+	return m, m.selectionChanged(p)
+}
+
+// selectionChanged resets the panels that hang off p and returns the command
+// that reloads them.
+//
+// The cascade used to be spelled out per panel in both setCursor and
+// clampFocused, four cases each. Resetting a child to -1 rather than 0 is what
+// makes the reload snap to whatever tmux reports as active instead of to the
+// first row. Which panel feeds which, and what to re-fetch, come from the panel
+// table — see panels.go.
+func (m *Model) selectionChanged(p panel) tea.Cmd {
+	for child := p.spec().child; child != noPanel; child = child.spec().child {
+		m.cur[child] = -1
 	}
-	switch p {
-	case panelProjects:
-		if next == m.projectCur {
-			return m, nil
-		}
-		m.projectCur = next
-		return m, m.updatePreview()
-	case panelSessions:
-		if next == m.sessionCur {
-			return m, nil
-		}
-		m.sessionCur = next
-		// Parent changed: snap the child selections to the new session's
-		// active window/pane on reload.
-		m.windowCur, m.paneCur = -1, -1
-		return m, m.reloadWindows()
-	case panelWindows:
-		if next == m.windowCur {
-			return m, nil
-		}
-		m.windowCur = next
-		m.paneCur = -1
-		return m, m.reloadPanes()
-	case panelPanes:
-		if next == m.paneCur {
-			return m, nil
-		}
-		m.paneCur = next
-		return m, m.reloadPreview()
+	if f := p.spec().reload; f != nil {
+		return f(m)
 	}
-	return m, nil
+	return nil
+}
+
+// clampTo keeps an index inside [0, n).
+func clampTo(i, n int) int {
+	if i < 0 {
+		return 0
+	}
+	if i >= n {
+		return n - 1
+	}
+	return i
 }
 
 func (m *Model) reloadWindows() tea.Cmd {

@@ -79,9 +79,9 @@ func TestSelectedRowHighlightSpansWholeRow(t *testing.T) {
 		{Index: 0, ID: "@1", Name: "editor"},
 		{Index: 1, ID: "@2", Name: "server"},
 	}
-	m.windowCur = 0
+	m.cur[panelWindows] = 0
 
-	rendered := m.renderWindows(30, 8)
+	rendered := m.renderPanel(panelWindows, 30, 8)
 	line := selectedLine(t, rendered, "editor")
 
 	// After the last reset in the line there must be no un-highlighted text:
@@ -117,9 +117,9 @@ func TestSelectedRowKeepsSpanForeground(t *testing.T) {
 	m.ready = true
 	m.focus = panelWindows
 	m.windows = []tmux.WindowInfo{{Index: 0, ID: "@1", Name: "editor"}}
-	m.windowCur = 0
+	m.cur[panelWindows] = 0
 
-	line := selectedLine(t, m.renderWindows(30, 8), "editor")
+	line := selectedLine(t, m.renderPanel(panelWindows, 30, 8), "editor")
 	idxAt := strings.Index(line, "0:")
 	if idxAt < 0 {
 		t.Fatalf("window index missing from row:\n%q", line)
@@ -146,9 +146,9 @@ func TestUnselectedRowHasNoHighlight(t *testing.T) {
 		{Index: 0, ID: "@1", Name: "editor"},
 		{Index: 1, ID: "@2", Name: "server"},
 	}
-	m.windowCur = 0
+	m.cur[panelWindows] = 0
 
-	line := selectedLine(t, m.renderWindows(30, 8), "server")
+	line := selectedLine(t, m.renderPanel(panelWindows, 30, 8), "server")
 	if strings.Contains(line, bgSGR(t, DefaultTheme().Selected)) {
 		t.Errorf("unselected row should not be highlighted:\n%q", line)
 	}

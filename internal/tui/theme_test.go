@@ -145,9 +145,9 @@ func TestSetThemeChangesRenderedColors(t *testing.T) {
 	m.width, m.height, m.ready = 100, 40, true
 	m.focus = panelWindows
 	m.windows = []tmux.WindowInfo{{Index: 0, ID: "@1", Name: "editor"}}
-	m.windowCur = 0
+	m.cur[panelWindows] = 0
 
-	out := m.renderWindows(30, 8)
+	out := m.renderPanel(panelWindows, 30, 8)
 	if want := fgSGR(t, custom.Index); !strings.Contains(out, want) {
 		t.Errorf("window index not rendered in the themed color %s:\n%q", custom.Index, out)
 	}

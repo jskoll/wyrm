@@ -34,56 +34,65 @@ type menuEntry struct {
 // menuFor returns the actions available for the current selection in p, or nil
 // when there's nothing to act on. The entries mirror the panel's footer hints:
 // a menu offering an action the panel doesn't otherwise have would be a second,
-// divergent set of bindings.
+// divergent set of bindings. Both come from the panel table — see panels.go.
 func (m Model) menuFor(p panel) []menuEntry {
-	switch p {
-	case panelProjects:
-		proj, ok := m.currentProject()
-		if !ok {
-			return nil
-		}
-		entries := []menuEntry{
-			{menuStart, "Start / attach", "↵"},
-			{menuEdit, "Edit config", "e"},
-		}
-		// Stopping a project that isn't running is the one action here that
-		// would fail rather than no-op, so it's offered only when it applies.
-		if proj.Running {
-			entries = append(entries, menuEntry{menuKill, "Stop project", "x"})
-		}
-		return entries
-	case panelSessions:
-		if _, ok := m.currentSession(); !ok {
-			return nil
-		}
-		return []menuEntry{
-			{menuAttach, "Attach", "↵"},
-			{menuRename, "Rename session", "r"},
-			{menuNewWindow, "New window", "n"},
-			{menuKill, "Kill session", "x"},
-		}
-	case panelWindows:
-		if _, ok := m.currentWindow(); !ok {
-			return nil
-		}
-		return []menuEntry{
-			{menuAttach, "Attach here", "↵"},
-			{menuRename, "Rename window", "r"},
-			{menuNewWindow, "New window", "n"},
-			{menuLayout, "Cycle layout", "L"},
-			{menuKill, "Kill window", "x"},
-		}
-	case panelPanes:
-		if _, ok := m.currentPane(); !ok {
-			return nil
-		}
-		return []menuEntry{
-			{menuAttach, "Attach here", "↵"},
-			{menuZoom, "Toggle zoom", "z"},
-			{menuKill, "Kill pane", "x"},
-		}
+	if f := p.spec().menu; f != nil {
+		return f(m)
 	}
 	return nil
+}
+
+func projectMenu(m Model) []menuEntry {
+	proj, ok := m.currentProject()
+	if !ok {
+		return nil
+	}
+	entries := []menuEntry{
+		{menuStart, "Start / attach", "↵"},
+		{menuEdit, "Edit config", "e"},
+	}
+	// Stopping a project that isn't running is the one action here that would
+	// fail rather than no-op, so it's offered only when it applies.
+	if proj.Running {
+		entries = append(entries, menuEntry{menuKill, "Stop project", "x"})
+	}
+	return entries
+}
+
+func sessionMenu(m Model) []menuEntry {
+	if _, ok := m.currentSession(); !ok {
+		return nil
+	}
+	return []menuEntry{
+		{menuAttach, "Attach", "↵"},
+		{menuRename, "Rename session", "r"},
+		{menuNewWindow, "New window", "n"},
+		{menuKill, "Kill session", "x"},
+	}
+}
+
+func windowMenu(m Model) []menuEntry {
+	if _, ok := m.currentWindow(); !ok {
+		return nil
+	}
+	return []menuEntry{
+		{menuAttach, "Attach here", "↵"},
+		{menuRename, "Rename window", "r"},
+		{menuNewWindow, "New window", "n"},
+		{menuLayout, "Cycle layout", "L"},
+		{menuKill, "Kill window", "x"},
+	}
+}
+
+func paneMenu(m Model) []menuEntry {
+	if _, ok := m.currentPane(); !ok {
+		return nil
+	}
+	return []menuEntry{
+		{menuAttach, "Attach here", "↵"},
+		{menuZoom, "Toggle zoom", "z"},
+		{menuKill, "Kill pane", "x"},
+	}
 }
 
 // openMenu builds the menu for panel p anchored at the click point. It reports
@@ -116,7 +125,7 @@ func (m Model) openMenuAtSelection() (tea.Model, tea.Cmd) {
 	g := m.geometry()
 	top, bottom := g.boxes[m.focus].listRows()
 
-	cur := m.cursorFor(m.focus)
+	cur := m.cur[m.focus]
 	start, _ := viewport(cur, m.panelLen(m.focus), bottom-top)
 	y := top + (cur - start)
 	if y < top {

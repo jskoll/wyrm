@@ -56,13 +56,13 @@ func TestFilterOnlyAppliesToFocusedPanel(t *testing.T) {
 // end, and the selection has to keep meaning what's under it.
 func TestFilterClampsSelection(t *testing.T) {
 	m := filterModel()
-	m.sessionCur = 2
+	m.cur[panelSessions] = 2
 	m, _ = update(m, key("/"))
 	for _, r := range "web" {
 		m, _ = update(m, key(string(r)))
 	}
-	if m.sessionCur >= len(m.visibleSessions()) {
-		t.Fatalf("sessionCur = %d, out of range for %d visible", m.sessionCur, len(m.visibleSessions()))
+	if m.cur[panelSessions] >= len(m.visibleSessions()) {
+		t.Fatalf("sessionCur = %d, out of range for %d visible", m.cur[panelSessions], len(m.visibleSessions()))
 	}
 	s, ok := m.currentSession()
 	if !ok || s.Name != "web-frontend" {
@@ -96,12 +96,12 @@ func TestFilterShownInFooter(t *testing.T) {
 func TestGAndGJumpToEnds(t *testing.T) {
 	m := filterModel()
 	m, _ = update(m, key("G"))
-	if m.sessionCur != 2 {
-		t.Errorf("sessionCur = %d after G, want the last entry (2)", m.sessionCur)
+	if m.cur[panelSessions] != 2 {
+		t.Errorf("sessionCur = %d after G, want the last entry (2)", m.cur[panelSessions])
 	}
 	m, _ = update(m, key("g"))
-	if m.sessionCur != 0 {
-		t.Errorf("sessionCur = %d after g, want the first entry (0)", m.sessionCur)
+	if m.cur[panelSessions] != 0 {
+		t.Errorf("sessionCur = %d after g, want the first entry (0)", m.cur[panelSessions])
 	}
 }
 
@@ -109,9 +109,9 @@ func TestGAndGJumpToEnds(t *testing.T) {
 // on the last row, not do nothing.
 func TestMoveCursorClampsRatherThanRefusing(t *testing.T) {
 	m := filterModel()
-	m.sessionCur = 1
+	m.cur[panelSessions] = 1
 	m, _ = update(m, key("pgdown"))
-	if m.sessionCur != 2 {
-		t.Errorf("sessionCur = %d after pgdown, want it clamped to the last entry", m.sessionCur)
+	if m.cur[panelSessions] != 2 {
+		t.Errorf("sessionCur = %d after pgdown, want it clamped to the last entry", m.cur[panelSessions])
 	}
 }

@@ -35,7 +35,7 @@ func mouseModel(t *testing.T) Model {
 	}
 	// New starts these at -1 so the first load can snap to the active
 	// window/pane; by the time anyone can click, a load has landed.
-	m.windowCur, m.paneCur = 0, 0
+	m.cur[panelWindows], m.cur[panelPanes] = 0, 0
 	return m
 }
 
@@ -49,7 +49,7 @@ func click(x, y int, button tea.MouseButton) tea.MouseMsg {
 func rowY(m Model, p panel, idx int) int {
 	g := m.geometry()
 	top, bottom := g.boxes[p].listRows()
-	start, _ := viewport(m.cursorFor(p), m.panelLen(p), bottom-top)
+	start, _ := viewport(m.cur[p], m.panelLen(p), bottom-top)
 	return top + (idx - start)
 }
 
@@ -64,7 +64,7 @@ func TestHitTestMatchesRenderedRows(t *testing.T) {
 		top, bottom := g.boxes[p].listRows()
 		n := m.panelLen(p)
 		listH := bottom - top
-		start, end := viewport(m.cursorFor(p), n, listH)
+		start, end := viewport(m.cur[p], n, listH)
 
 		for idx := start; idx < end; idx++ {
 			y := top + (idx - start)
@@ -95,12 +95,12 @@ func TestHitTestFollowsAScrolledPanel(t *testing.T) {
 	for i := 0; i < 60; i++ {
 		m.sessions = append(m.sessions, sessions.Session{ID: "$" + string(rune('a'+i%26)), Name: "s"})
 	}
-	m.sessionCur = 45
+	m.cur[panelSessions] = 45
 	m.focus = panelSessions
 
 	g := m.geometry()
 	top, bottom := g.boxes[panelSessions].listRows()
-	start, _ := viewport(m.sessionCur, len(m.sessions), bottom-top)
+	start, _ := viewport(m.cur[panelSessions], len(m.sessions), bottom-top)
 	if start == 0 {
 		t.Fatal("expected the sessions panel to be scrolled")
 	}
@@ -165,8 +165,8 @@ func TestClickFocusesPanelAndSelectsRow(t *testing.T) {
 	if m.focus != panelWindows {
 		t.Errorf("focus = %d, want panelWindows", m.focus)
 	}
-	if m.windowCur != 1 {
-		t.Errorf("windowCur = %d, want 1", m.windowCur)
+	if m.cur[panelWindows] != 1 {
+		t.Errorf("windowCur = %d, want 1", m.cur[panelWindows])
 	}
 }
 
@@ -175,7 +175,7 @@ func TestClickFocusesPanelAndSelectsRow(t *testing.T) {
 func TestClickOnChromeFocusesWithoutSelecting(t *testing.T) {
 	m := mouseModel(t)
 	m.focus = panelSessions
-	m.paneCur = 1
+	m.cur[panelPanes] = 1
 
 	g := m.geometry()
 	next, _ := m.Update(click(2, g.boxes[panelPanes].y0+1, tea.MouseButtonLeft)) // title row
@@ -184,8 +184,8 @@ func TestClickOnChromeFocusesWithoutSelecting(t *testing.T) {
 	if m.focus != panelPanes {
 		t.Errorf("focus = %d, want panelPanes", m.focus)
 	}
-	if m.paneCur != 1 {
-		t.Errorf("paneCur = %d, want it left at 1", m.paneCur)
+	if m.cur[panelPanes] != 1 {
+		t.Errorf("paneCur = %d, want it left at 1", m.cur[panelPanes])
 	}
 }
 
@@ -247,19 +247,19 @@ func TestDoubleClickRequiresTheSameRow(t *testing.T) {
 func TestWheelMovesTheHoveredPanel(t *testing.T) {
 	m := mouseModel(t)
 	m.focus = panelSessions
-	m.sessionCur = 0
+	m.cur[panelSessions] = 0
 
 	y := rowY(m, panelSessions, 1)
 	next, _ := m.Update(tea.MouseMsg{X: 2, Y: y, Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
 	m = next.(Model)
-	if m.sessionCur != 1 {
-		t.Errorf("sessionCur = %d, want 1 after wheel down", m.sessionCur)
+	if m.cur[panelSessions] != 1 {
+		t.Errorf("sessionCur = %d, want 1 after wheel down", m.cur[panelSessions])
 	}
 
 	next, _ = m.Update(tea.MouseMsg{X: 2, Y: y, Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
 	m = next.(Model)
-	if m.sessionCur != 0 {
-		t.Errorf("sessionCur = %d, want 0 after wheel up", m.sessionCur)
+	if m.cur[panelSessions] != 0 {
+		t.Errorf("sessionCur = %d, want 0 after wheel up", m.cur[panelSessions])
 	}
 }
 
@@ -295,7 +295,7 @@ func TestMouseIgnoredWhenDisabled(t *testing.T) {
 func TestMouseIgnoredBehindAModal(t *testing.T) {
 	m := mouseModel(t)
 	m.focus = panelSessions
-	m.sessionCur = 0
+	m.cur[panelSessions] = 0
 	next, _ := m.Update(key("x")) // opens the kill confirm
 	m = next.(Model)
 	if m.mode != modeConfirm {
@@ -305,8 +305,8 @@ func TestMouseIgnoredBehindAModal(t *testing.T) {
 	next, _ = m.Update(click(2, rowY(m, panelSessions, 2), tea.MouseButtonLeft))
 	m = next.(Model)
 
-	if m.sessionCur != 0 {
-		t.Errorf("sessionCur = %d, want it unchanged behind the modal", m.sessionCur)
+	if m.cur[panelSessions] != 0 {
+		t.Errorf("sessionCur = %d, want it unchanged behind the modal", m.cur[panelSessions])
 	}
 	if m.pending.sessionID != "$1" {
 		t.Errorf("pending target = %q, want it unchanged", m.pending.sessionID)

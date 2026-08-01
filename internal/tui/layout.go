@@ -116,26 +116,10 @@ func (m Model) rowAt(p panel, box panelBox, y int) int {
 		return -1
 	}
 	listH := bottom - top
-	start, _ := viewport(m.cursorFor(p), n, listH)
+	start, _ := viewport(m.cur[p], n, listH)
 	idx := start + (y - top)
 	if idx >= n {
 		return -1
 	}
 	return idx
-}
-
-// cursorFor is the current selection index of any panel — the panel-addressed
-// counterpart of focusedCursor.
-func (m Model) cursorFor(p panel) int {
-	switch p {
-	case panelProjects:
-		return m.projectCur
-	case panelSessions:
-		return m.sessionCur
-	case panelWindows:
-		return m.windowCur
-	case panelPanes:
-		return m.paneCur
-	}
-	return 0
 }

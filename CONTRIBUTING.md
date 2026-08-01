@@ -35,6 +35,8 @@ internal/freeze/   the reverse of session: a live tmux layout -> a config
 internal/agent/    classifying what an AI agent in a pane is doing
 internal/editor/   resolving $EDITOR, shared by `wyrm edit` and the TUI
 internal/tui/      the Bubble Tea session manager (wyrm tui and wyrm pick)
+                   panels.go is the table describing each panel — add a panel
+                   there rather than in a switch
 ```
 
 Each verb in `cmd_*.go` returns an `error`; `app.report` in `main.go` is the one

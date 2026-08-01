@@ -28,8 +28,8 @@ func TestRightClickOpensMenuOnTheClickedRow(t *testing.T) {
 	}
 	// The menu must act on the row under the pointer, not on the previous
 	// selection — this is the whole point of selecting before opening.
-	if m.windowCur != 1 {
-		t.Errorf("windowCur = %d, want 1", m.windowCur)
+	if m.cur[panelWindows] != 1 {
+		t.Errorf("windowCur = %d, want 1", m.cur[panelWindows])
 	}
 	if len(m.menu) == 0 {
 		t.Error("expected menu entries for the Windows panel")
@@ -65,14 +65,14 @@ func TestMenuEntriesPerPanel(t *testing.T) {
 func TestProjectMenuOffersStopOnlyWhenRunning(t *testing.T) {
 	m := mouseModel(t)
 
-	m.projectCur = 0 // not running
+	m.cur[panelProjects] = 0 // not running
 	for _, e := range m.menuFor(panelProjects) {
 		if e.op == menuKill {
 			t.Error("a stopped project should not offer Stop")
 		}
 	}
 
-	m.projectCur = 1 // running
+	m.cur[panelProjects] = 1 // running
 	found := false
 	for _, e := range m.menuFor(panelProjects) {
 		if e.op == menuKill {
@@ -121,7 +121,7 @@ func TestMenuEscCloses(t *testing.T) {
 // opens, rather than killing outright.
 func TestMenuKillOpensTheConfirmModal(t *testing.T) {
 	m := mouseModel(t)
-	m.sessionCur = 1
+	m.cur[panelSessions] = 1
 	next, _ := m.Update(rightClick(3, rowY(m, panelSessions, 1)))
 	m = next.(Model)
 
@@ -177,7 +177,7 @@ func TestClickOutsideMenuDismissesIt(t *testing.T) {
 
 func TestClickOnMenuEntryRunsIt(t *testing.T) {
 	m := mouseModel(t)
-	m.sessionCur = 0
+	m.cur[panelSessions] = 0
 	next, _ := m.Update(rightClick(3, rowY(m, panelSessions, 0)))
 	m = next.(Model)
 
@@ -287,7 +287,7 @@ func TestOverlayIgnoresOutOfRangeRows(t *testing.T) {
 func TestMenuKeyOpensOnTheSelection(t *testing.T) {
 	m := mouseModel(t)
 	m.focus = panelWindows
-	m.windowCur = 1
+	m.cur[panelWindows] = 1
 
 	next, _ := m.Update(key("M"))
 	m = next.(Model)
