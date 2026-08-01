@@ -1,0 +1,31 @@
+# Maintainer: Josh Skoll <jskoll@users.noreply.github.com>
+#
+# Template only — pkgver/pkgrel/sha256sums here are placeholders. The
+# release workflow (.github/workflows/aur.yml) fills them in from the
+# tagged release's checksums.txt and pushes the result to the AUR; this
+# file in the main repo is never updated by CI, so it always reads
+# "next release, unfilled" rather than drifting from the last publish.
+pkgname=wyrm-bin
+pkgver=0.0.0
+pkgrel=1
+pkgdesc="Repeatable tmux session layouts from a TOML config"
+arch=('x86_64' 'aarch64')
+url="https://github.com/jskoll/wyrm"
+license=('MIT')
+depends=('tmux')
+provides=('wyrm')
+conflicts=('wyrm')
+source_x86_64=("$pkgname-$pkgver-x86_64.tar.gz::https://github.com/jskoll/wyrm/releases/download/v$pkgver/wyrm_${pkgver}_linux_amd64.tar.gz")
+source_aarch64=("$pkgname-$pkgver-aarch64.tar.gz::https://github.com/jskoll/wyrm/releases/download/v$pkgver/wyrm_${pkgver}_linux_arm64.tar.gz")
+sha256sums_x86_64=('0000000000000000000000000000000000000000000000000000000000000000')
+sha256sums_aarch64=('0000000000000000000000000000000000000000000000000000000000000000')
+
+package() {
+  cd "$srcdir"
+  install -Dm755 wyrm "$pkgdir/usr/bin/wyrm"
+  install -Dm644 man/wyrm.1 "$pkgdir/usr/share/man/man1/wyrm.1"
+  install -Dm644 completions/wyrm.bash "$pkgdir/usr/share/bash-completion/completions/wyrm"
+  install -Dm644 completions/_wyrm "$pkgdir/usr/share/zsh/site-functions/_wyrm"
+  install -Dm644 completions/wyrm.fish "$pkgdir/usr/share/fish/vendor_completions.d/wyrm.fish"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

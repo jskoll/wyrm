@@ -49,6 +49,21 @@ name = "code"
 brew install jskoll/tap/wyrm
 ```
 
+On Arch Linux, from the AUR:
+
+```sh
+yay -S wyrm-bin   # or: paru -S wyrm-bin
+```
+
+On Debian/Ubuntu or Fedora/RHEL, grab the `.deb`/`.rpm` from the
+[latest release](https://github.com/jskoll/wyrm/releases/latest) and install
+it directly:
+
+```sh
+sudo dpkg -i wyrm_*_linux_amd64.deb        # Debian/Ubuntu
+sudo dnf install ./wyrm_*_linux_amd64.rpm  # Fedora/RHEL
+```
+
 Or via Go:
 
 ```sh
