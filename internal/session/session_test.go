@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
@@ -121,17 +122,29 @@ func TestCreateSplitTree(t *testing.T) {
 		t.Error("created = false, want true")
 	}
 
-	// Note the ordering: both siblings at the top level are created before
-	// the nested child, so the child splits %2 at its full size rather than
-	// after a later sibling has already carved it up. pre_window is typed once
-	// per pane, and every command goes through "send-keys -l --" plus a
-	// separate Enter so a command that looks like a key name is still typed.
+	// Note two orderings here.
+	//
+	// Both siblings at the top level are created before the nested child, so
+	// the child splits %2 at its full size rather than after a later sibling
+	// has already carved it up.
+	//
+	// And every pane is created before anything is typed: commands are
+	// collected during the walk and issued together at the end, which lets a
+	// batching Runner send them in one tmux process (see keyBatch). This mock
+	// doesn't batch, so they appear individually — the commands and their
+	// targets are unchanged either way, only the grouping moved.
+	//
+	// pre_window is typed once per pane, and every command goes through
+	// "send-keys -l --" plus a separate Enter so a command that looks like a
+	// key name is still typed.
 	want := []string{
 		"list-sessions -F #{session_id}|#{session_name}",
 		"new-session -d -P -F #{session_id}|#{session_name}|#{window_id}|#{pane_id} -s proj -n editor -c /tmp/proj",
 		// second entry splits the initial pane %1 -> %2 (breadth first)
 		"split-window -d -t %1 -h -P -F #{pane_id} -c /tmp/proj -l 30%",
-		// first split entry: no type, reuses initial pane %1
+		// child splits its parent %2 -> %3
+		"split-window -d -t %2 -v -P -F #{pane_id} -c /tmp/proj",
+		// now the collected commands, in walk order
 		"send-keys -t %1 -l -- nvm use 18",
 		"send-keys -t %1 Enter",
 		"send-keys -t %1 -l -- nvim",
@@ -140,8 +153,6 @@ func TestCreateSplitTree(t *testing.T) {
 		"send-keys -t %2 Enter",
 		"send-keys -t %2 -l -- npm run dev",
 		"send-keys -t %2 Enter",
-		// child splits its parent %2 -> %3
-		"split-window -d -t %2 -v -P -F #{pane_id} -c /tmp/proj",
 		"send-keys -t %3 -l -- nvm use 18",
 		"send-keys -t %3 Enter",
 		"send-keys -t %3 -l -- npm test",
@@ -677,3 +688,152 @@ func TestCreatePassesEnv(t *testing.T) {
 		}
 	}
 }
+
+// batchingRunner is a fakeRunner that also implements tmux.BatchRunner, so a
+// test can see that the build actually batches rather than quietly falling back
+// to one call per command — which is what every other mock here does.
+type batchingRunner struct {
+	fakeRunner
+	batches [][][]string
+	// direct records only the calls issued one at a time, so a test can tell a
+	// batched command from one that bypassed the batch. RunBatch reuses
+	// fakeRunner.Run to fabricate outputs, which would otherwise make the two
+	// indistinguishable.
+	direct  []string
+	inBatch bool
+}
+
+func (b *batchingRunner) Run(args ...string) (string, error) {
+	if !b.inBatch {
+		b.direct = append(b.direct, strings.Join(args, " "))
+	}
+	return b.fakeRunner.Run(args...)
+}
+
+func (b *batchingRunner) RunBatch(cmds [][]string) ([]string, error) {
+	b.batches = append(b.batches, cmds)
+	b.inBatch = true
+	defer func() { b.inBatch = false }()
+	outs := make([]string, 0, len(cmds))
+	for _, c := range cmds {
+		out, err := b.Run(c...)
+		if err != nil {
+			return outs, err
+		}
+		outs = append(outs, out)
+	}
+	return outs, nil
+}
+
+// TestCreateBatchesEveryCommandIntoOneCall is the point of the whole exercise:
+// a six-pane build issued twelve send-keys processes, and now issues one batch.
+func TestCreateBatchesEveryCommandIntoOneCall(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{
+			{Name: "a", Splits: []config.Split{
+				{Command: "one"}, {Type: "h", Command: "two"}, {Type: "v", Command: "three"},
+			}},
+			{Name: "b", Splits: []config.Split{{Command: "four"}, {Type: "h", Command: "five"}}},
+			{Name: "c", Splits: []config.Split{{Command: "six"}}},
+		},
+	}
+
+	r := &batchingRunner{}
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if len(r.batches) != 1 {
+		t.Fatalf("issued %d batches, want exactly 1", len(r.batches))
+	}
+	// Six commands, each a literal plus an Enter.
+	if got := len(r.batches[0]); got != 12 {
+		t.Errorf("batch held %d commands, want 12", got)
+	}
+	for _, c := range r.batches[0] {
+		if c[0] != "send-keys" {
+			t.Errorf("batch contained a non-send-keys command %v", c)
+		}
+	}
+	// And nothing was typed outside the batch.
+	for _, c := range r.direct {
+		if strings.HasPrefix(c, "send-keys") {
+			t.Errorf("send-keys issued outside the batch: %q", c)
+		}
+	}
+}
+
+// A pane that dies mid-build must not cancel the commands queued after it, and
+// must not cause an already-typed command to be typed a second time.
+func TestCreateReplaysOnlyAfterAFailedSend(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{{Name: "w", Splits: []config.Split{
+			{Command: "first"}, {Type: "h", Command: "second"}, {Type: "v", Command: "third"},
+		}}},
+	}
+
+	// Fail the send to %2 — the middle pane — however it is issued.
+	r := &partialBatchRunner{failTarget: "%2"}
+	var stderr bytes.Buffer
+	if _, _, _, err := Create(r, cfg, io.Discard, &stderr); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	typed := r.typed()
+	// %1 and %3 still got their commands: one bad pane doesn't cancel the rest.
+	for _, want := range []string{"first", "third"} {
+		if !slices.Contains(typed, want) {
+			t.Errorf("%q was never typed; typed=%v", want, typed)
+		}
+	}
+	// Nothing was typed twice — replaying a send-keys would duplicate input.
+	seen := map[string]int{}
+	for _, c := range typed {
+		seen[c]++
+	}
+	for c, n := range seen {
+		if n > 1 {
+			t.Errorf("%q was typed %d times, want once", c, n)
+		}
+	}
+	if !strings.Contains(stderr.String(), "second") {
+		t.Errorf("stderr = %q, want a warning naming the command that failed", stderr.String())
+	}
+}
+
+// partialBatchRunner batches, but fails any send-keys aimed at failTarget —
+// which stops the batch there, exactly as tmux does.
+type partialBatchRunner struct {
+	fakeRunner
+	failTarget string
+	sent       []string
+}
+
+func (p *partialBatchRunner) send(args []string) (string, error) {
+	if args[0] == "send-keys" && args[2] == p.failTarget {
+		return "can't find pane", errors.New("exit status 1")
+	}
+	// Record only the literal half, which carries the command text.
+	if args[0] == "send-keys" && len(args) > 5 && args[3] == "-l" {
+		p.sent = append(p.sent, args[5])
+	}
+	return p.fakeRunner.Run(args...)
+}
+
+func (p *partialBatchRunner) Run(args ...string) (string, error) { return p.send(args) }
+
+func (p *partialBatchRunner) RunBatch(cmds [][]string) ([]string, error) {
+	outs := make([]string, 0, len(cmds))
+	for _, c := range cmds {
+		out, err := p.send(c)
+		if err != nil {
+			return outs, err // tmux abandons the rest of the batch
+		}
+		outs = append(outs, out)
+	}
+	return outs, nil
+}
+
+func (p *partialBatchRunner) typed() []string { return p.sent }

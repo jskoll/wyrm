@@ -69,6 +69,14 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
       - name: gofmt
         run: test -z "$(gofmt -l .)"
+      # Deleting a package can orphan a dependency, and nothing else notices:
+      # removing internal/picker left golang.org/x/term in go.mod through a
+      # whole release. An untidy go.mod is cosmetic, but it is also the kind of
+      # thing that should never need a human to spot.
+      - name: go mod tidy is clean
+        run: |
+          go mod tidy
+          git diff --exit-code --stat go.mod go.sum
 
   # Dependabot bumps modules on a schedule, but a vulnerability disclosed
   # against a version already pinned here would otherwise go unnoticed until

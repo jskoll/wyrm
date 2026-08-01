@@ -43,9 +43,15 @@ mistake in how the command was typed (exit 2) and a plain error for a failure
 (exit 1).
 
 Everything that talks to tmux goes through `tmux.Runner`, so it can be driven
-by a recording mock in tests. `main.run` takes its stdio, runner, and attach
-function as parameters for the same reason — the whole CLI is testable without
-a tmux server.
+by a recording mock in tests. A Runner may additionally implement
+`tmux.BatchRunner` to issue several commands in one process; callers reach that
+through `tmux.RunEach` / `tmux.RunOutputsTolerant`, which fall back to one call
+each, so a mock only ever needs `Run`. Note that *embedding* `tmux.Exec` in a
+test double promotes its `RunBatch` — hold it in a named field if the double is
+meant not to batch.
+
+`main.run` takes its stdio, runner, and attach function as parameters for the
+same reason — the whole CLI is testable without a tmux server.
 
 New behavior should come with a unit test against the mocked `tmux.Runner`
 (assert the exact command sequence) and, where it changes real tmux

@@ -342,3 +342,101 @@ func TestIntegrationRunStartsProcessDirectly(t *testing.T) {
 	}
 	t.Errorf("pane commands = %q, want both panes running sleep directly", out)
 }
+
+// TestIntegrationBatchedBuildSpawnsFewerProcesses measures the thing the
+// batching exists for: how many times wyrm forks tmux to build a session.
+//
+// It counts by wrapping the real Exec rather than trusting a mock, because the
+// whole optimization lives in Exec.RunBatch — a mock that doesn't implement
+// BatchRunner would pass this while proving nothing.
+func TestIntegrationBatchedBuildSpawnsFewerProcesses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+
+	root := t.TempDir()
+	cfg := func(name string) *config.Config {
+		return &config.Config{
+			Session: config.Session{Name: name, Root: root},
+			Windows: []config.Window{
+				{Name: "a", Splits: []config.Split{
+					{Command: "echo one"}, {Type: "h", Command: "echo two"}, {Type: "v", Command: "echo three"},
+				}},
+				{Name: "b", Splits: []config.Split{{Command: "echo four"}, {Type: "h", Command: "echo five"}}},
+				{Name: "c", Splits: []config.Split{{Command: "echo six"}}},
+			},
+		}
+	}
+
+	base := tmux.Exec{SocketName: fmt.Sprintf("wyrm-spawn-it-%d", os.Getpid())}
+	t.Cleanup(func() { _, _ = base.Run("kill-server") })
+
+	batched := &spawnCounter{Exec: base}
+	if _, _, _, err := session.Create(batched, cfg("spawnbatched"), io.Discard, io.Discard); err != nil {
+		t.Fatalf("Create (batched): %v", err)
+	}
+
+	// The same build through a Runner that cannot batch, for the comparison.
+	unbatched := &noBatchCounter{exec: base}
+	if _, _, _, err := session.Create(unbatched, cfg("spawnplain"), io.Discard, io.Discard); err != nil {
+		t.Fatalf("Create (unbatched): %v", err)
+	}
+
+	t.Logf("processes: batched=%d unbatched=%d", batched.n, unbatched.n)
+	if batched.n >= unbatched.n {
+		t.Errorf("batched build spawned %d processes, unbatched %d — batching saved nothing",
+			batched.n, unbatched.n)
+	}
+	// Twelve send-keys collapse into one, so the saving is at least eleven.
+	if saved := unbatched.n - batched.n; saved < 11 {
+		t.Errorf("batching saved only %d processes, want at least 11", saved)
+	}
+
+	// And both sessions must have come out identical.
+	for _, name := range []string{"spawnbatched", "spawnplain"} {
+		out, err := base.Run("list-panes", "-s", "-t", name, "-F", "#{window_name}|#{pane_id}")
+		if err != nil {
+			t.Fatalf("list-panes %s: %v (%s)", name, err, out)
+		}
+		if n := len(strings.Split(strings.TrimSpace(out), "\n")); n != 6 {
+			t.Errorf("session %s has %d panes, want 6", name, n)
+		}
+	}
+}
+
+// spawnCounter counts tmux processes, batching included.
+type spawnCounter struct {
+	tmux.Exec
+	n int
+}
+
+func (s *spawnCounter) Run(args ...string) (string, error) {
+	s.n++
+	return s.Exec.Run(args...)
+}
+
+func (s *spawnCounter) RunBatch(cmds [][]string) ([]string, error) {
+	s.n++
+	return s.Exec.RunBatch(cmds)
+}
+
+// noBatchCounter deliberately does not implement tmux.BatchRunner, so RunEach
+// falls back to one process per command.
+//
+// It holds Exec in a named field rather than embedding it: embedding would
+// *promote* Exec.RunBatch onto this type, making it satisfy BatchRunner after
+// all — and the batch would then run through Exec directly, uncounted. The
+// first version of this test did exactly that and reported the unbatched build
+// as the cheaper one.
+type noBatchCounter struct {
+	exec tmux.Exec
+	n    int
+}
+
+func (s *noBatchCounter) Run(args ...string) (string, error) {
+	s.n++
+	return s.exec.Run(args...)
+}

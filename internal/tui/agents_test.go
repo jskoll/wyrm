@@ -328,3 +328,83 @@ func TestListAllPanesNoServer(t *testing.T) {
 		t.Errorf("no server should be an empty result, got %v / %v", refs, err)
 	}
 }
+
+// batchingAgentRunner answers capture-pane in batches, so a test can see that
+// the scan reads every pane in one process rather than one process per pane.
+type batchingAgentRunner struct {
+	funcRunner
+	batches  int
+	direct   int
+	failPane string
+}
+
+func (b *batchingAgentRunner) Run(args ...string) (string, error) {
+	if args[0] == "capture-pane" {
+		b.direct++
+	}
+	return b.funcRunner.Run(args...)
+}
+
+func (b *batchingAgentRunner) RunBatch(cmds [][]string) ([]string, error) {
+	b.batches++
+	outs := make([]string, 0, len(cmds))
+	for _, c := range cmds {
+		if b.failPane != "" && c[len(c)-1] == b.failPane {
+			return outs, errors.New("can't find pane")
+		}
+		out, err := b.funcRunner.Run(c...)
+		if err != nil {
+			return outs, err
+		}
+		outs = append(outs, out)
+	}
+	return outs, nil
+}
+
+// The scan runs every listRefreshInterval for as long as the TUI is open, so
+// reading N panes used to cost N tmux processes on a timer. Now it costs one.
+func TestAgentScanBatchesCaptures(t *testing.T) {
+	r := &batchingAgentRunner{funcRunner: agentRunner(
+		"$1|@1|%1|claude\n$1|@1|%2|claude\n$1|@2|%3|claude\n$1|@2|%4|zsh\n",
+		map[string]string{"%1": waitingPane, "%2": workingPane, "%3": donePane},
+	)}
+
+	status := run(loadAgentStatus(r, nil, "")).(agentStatusMsg).status
+	if r.batches != 1 {
+		t.Errorf("issued %d batches, want 1", r.batches)
+	}
+	if r.direct != 0 {
+		t.Errorf("issued %d capture-pane calls outside the batch, want 0", r.direct)
+	}
+	// The shell pane is never captured, so the batch holds only the agents.
+	if got := status.pane("%1"); got != agent.StateBlocked {
+		t.Errorf("%%1 = %v, want blocked", got)
+	}
+	if got := status.pane("%3"); got != agent.StateIdle {
+		t.Errorf("%%3 = %v, want idle", got)
+	}
+}
+
+// A pane that closed between the listing and the capture stops the batch there.
+// The panes after it must still be read, or one dead pane would blank every
+// marker behind it.
+func TestAgentScanSurvivesAPaneDyingMidBatch(t *testing.T) {
+	r := &batchingAgentRunner{
+		funcRunner: agentRunner(
+			"$1|@1|%1|claude\n$1|@1|%2|claude\n$1|@2|%3|claude\n",
+			map[string]string{"%1": waitingPane, "%3": donePane},
+		),
+		failPane: "%2",
+	}
+
+	status := run(loadAgentStatus(r, nil, "")).(agentStatusMsg).status
+	if got := status.pane("%1"); got != agent.StateBlocked {
+		t.Errorf("%%1 = %v, want blocked (it was read before the failure)", got)
+	}
+	if got := status.pane("%3"); got != agent.StateIdle {
+		t.Errorf("%%3 = %v, want idle (it must be replayed after the failure)", got)
+	}
+	if got := status.pane("%2"); got != agent.StateNone {
+		t.Errorf("%%2 = %v, want none — the pane is gone", got)
+	}
+}
