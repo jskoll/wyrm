@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the run, including the final `attach-session` handoff, honors it.
 - `-d` on `wyrm up` and `wyrm restart`: build (or reattach to) the session
   without attaching.
+- `session.on_project_first_start` / `on_project_restart`: alongside
+  `on_project_start`, which always fires, exactly one of these now also
+  fires — distinguishing a project's genuine first-ever start from a later
+  one. Tracked in a new `~/.config/wyrm/state.toml`, so it survives a
+  `wyrm kill` and holds across process runs.
+- `session.enable_pane_titles` (plus `pane_title_position`/`pane_title_format`):
+  turns on tmux's live pane-border status line for the session.
 
 ### Fixed
 - `tmux.Attach` ignored `SocketName` entirely — a session built on a named

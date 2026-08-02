@@ -25,6 +25,27 @@ type Option func(*options)
 type options struct {
 	dryRun     bool
 	transcript io.Writer
+	history    HookHistory
+}
+
+// HookHistory tells Create whether a project has started a session before,
+// so it can choose between on_project_first_start and on_project_restart —
+// a distinction Create has no way to make on its own, since FindSessionID
+// only answers "is one running now", not "has one ever run". Implemented by
+// *internal/state.Store; session takes the interface rather than importing
+// that package directly, so the two stay decoupled.
+type HookHistory interface {
+	// Started reports whether dir has started a session before.
+	Started(dir string) bool
+	// MarkStarted records dir as started.
+	MarkStarted(dir string) error
+}
+
+// WithHistory supplies the record Create consults to fire
+// on_project_first_start or on_project_restart. Without it, neither hook
+// ever fires — there is no sensible default for "has this ever started".
+func WithHistory(h HookHistory) Option {
+	return func(o *options) { o.history = h }
 }
 
 // DryRun makes Create and Kill describe the lifecycle hooks they would run —
@@ -89,6 +110,7 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 	if err := runHook(o, cfg.Session.OnProjectStart, root, "on_project_start", stderr); err != nil {
 		warnf(stderr, "on_project_start failed: %v", err)
 	}
+	runFirstStartOrRestartHook(o, cfg, root, stderr)
 
 	// Every window's root is resolved up front so a bad one fails before any
 	// tmux state exists, rather than half way through a build.
@@ -142,6 +164,8 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 
 	// Every pane now exists, so every target is known: type the lot.
 	keys.flush(r, stderr)
+
+	enablePaneTitles(r, id, cfg.Session, stderr)
 
 	if cfg.Session.StartupWindow != "" {
 		selectStartup(r, id, cfg.Session.StartupWindow, cfg.Session.StartupPane, stderr)
@@ -548,6 +572,36 @@ func (k *keyBatch) flush(r tmux.Runner, stderr io.Writer) {
 	k.sends = nil
 }
 
+// defaultPaneTitleFormat mirrors tmux's own pane-border-format default
+// closely enough to be useful without configuring anything beyond
+// enable_pane_titles = true.
+const defaultPaneTitleFormat = "#{pane_index}: #{pane_current_command}"
+
+// enablePaneTitles turns on tmux's live pane-border status line for the
+// session, if the config asked for it. It's cosmetic — a failure here
+// leaves a fully usable session — so it warns and continues rather than
+// aborting the build, same as every other per-pane failure in this package.
+func enablePaneTitles(r tmux.Runner, sessionID string, s config.Session, stderr io.Writer) {
+	if s.EnablePaneTitles == nil || !*s.EnablePaneTitles {
+		return
+	}
+	position := s.PaneTitlePosition
+	if position == "" {
+		position = "top"
+	}
+	if out, err := r.Run("set-option", "-t", sessionID, "pane-border-status", position); err != nil {
+		warnf(stderr, "failed to enable pane titles: %v", tmux.CmdErr(err, out))
+		return
+	}
+	format := s.PaneTitleFormat
+	if format == "" {
+		format = defaultPaneTitleFormat
+	}
+	if out, err := r.Run("set-option", "-t", sessionID, "pane-border-format", format); err != nil {
+		warnf(stderr, "failed to set pane title format: %v", tmux.CmdErr(err, out))
+	}
+}
+
 // selectStartup focuses the session's startup window (given by name or index)
 // and, optionally, a pane within it. Both are resolved to tmux object IDs
 // (@window, %pane) via list-windows/list-panes rather than assembled into a
@@ -655,6 +709,37 @@ func runHook(o options, hook, dir, label string, stderr io.Writer) error {
 		return err
 	}
 	return nil
+}
+
+// runFirstStartOrRestartHook fires exactly one of on_project_first_start /
+// on_project_restart, alongside the on_project_start that always fires — see
+// HookHistory. It is a no-op without a history (nothing to consult) or for a
+// config with no on-disk identity (cfg.Dir() == ""; the built-in default or
+// one built in memory), since there is no meaningful "has this project
+// started before" for either.
+//
+// The MarkStarted write is skipped under dry-run: describing what would
+// happen must not itself change what "first start" means for the real run
+// that follows.
+func runFirstStartOrRestartHook(o options, cfg *config.Config, root string, stderr io.Writer) {
+	if o.history == nil || cfg.Dir() == "" {
+		return
+	}
+	if o.history.Started(cfg.Dir()) {
+		if err := runHook(o, cfg.Session.OnProjectRestart, root, "on_project_restart", stderr); err != nil {
+			warnf(stderr, "on_project_restart failed: %v", err)
+		}
+		return
+	}
+	if err := runHook(o, cfg.Session.OnProjectFirstStart, root, "on_project_first_start", stderr); err != nil {
+		warnf(stderr, "on_project_first_start failed: %v", err)
+	}
+	if o.dryRun {
+		return
+	}
+	if err := o.history.MarkStarted(cfg.Dir()); err != nil {
+		warnf(stderr, "failed to record project start: %v", err)
+	}
 }
 
 func warnf(w io.Writer, format string, args ...any) {

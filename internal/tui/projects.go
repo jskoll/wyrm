@@ -10,6 +10,7 @@ import (
 	"github.com/jskoll/wyrm/internal/editor"
 	"github.com/jskoll/wyrm/internal/session"
 	"github.com/jskoll/wyrm/internal/sessions"
+	"github.com/jskoll/wyrm/internal/state"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
@@ -90,7 +91,11 @@ func startProjectCmd(r tmux.Runner, path string) tea.Cmd {
 		if err != nil {
 			return projectStartedMsg{err: err}
 		}
-		_, id, _, err := session.Create(r, cfg, io.Discard, io.Discard)
+		hist, err := state.Load()
+		if err != nil {
+			return projectStartedMsg{err: err}
+		}
+		_, id, _, err := session.Create(r, cfg, io.Discard, io.Discard, session.WithHistory(hist))
 		return projectStartedMsg{sessionID: id, err: err}
 	}
 }

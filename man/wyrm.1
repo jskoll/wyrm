@@ -159,6 +159,16 @@ and TUI preferences.
 User-supplied replacement for the built-in default config, used when no
 local or shared config is found.
 .TP
+.B $XDG_CONFIG_HOME/wyrm/state.toml
+(falls back to
+.BR ~/.config/wyrm/state.toml )
+Tracks which project directories have ever started a session, so
+.B on_project_first_start
+and
+.B on_project_restart
+can tell a project's genuine first start from a later one. Written
+automatically; not meant to be edited by hand.
+.TP
 .BI $XDG_CONFIG_HOME/wyrm/ <folder> .wyrm.toml
 A project's config in the shared config directory, when
 .B storage = "shared"

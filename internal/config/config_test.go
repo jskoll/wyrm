@@ -118,6 +118,11 @@ name = "w"
   type = "h"
     [[windows.splits.children]]
     type = "sideways"`, `unknown type "sideways"`},
+		{"bad pane title position", `[session]
+name = "x"
+pane_title_position = "middle"
+[[windows]]
+name = "w"`, `pane_title_position must be "top" or "bottom"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -382,8 +387,13 @@ name = "s"
 root = "."
 on_project_start = "true"
 on_project_exit = "true"
+on_project_first_start = "true"
+on_project_restart = "true"
 startup_window = "w"
 startup_pane = 0
+enable_pane_titles = true
+pane_title_position = "top"
+pane_title_format = "#{pane_index}"
 
 [[windows]]
 name = "w"

@@ -53,13 +53,31 @@ func (c *Config) Warnings() []string { return c.warnings }
 
 // Session describes the tmux session and its lifecycle hooks.
 type Session struct {
-	Name           string            `toml:"name,omitempty"`
-	Root           string            `toml:"root,omitempty"`
-	OnProjectStart string            `toml:"on_project_start,omitempty"`
-	OnProjectExit  string            `toml:"on_project_exit,omitempty"`
-	StartupWindow  string            `toml:"startup_window,omitempty"`
-	StartupPane    *int              `toml:"startup_pane,omitempty"` // nil = unset; 0 is a valid pane
-	Env            map[string]string `toml:"env,omitempty"`
+	Name           string `toml:"name,omitempty"`
+	Root           string `toml:"root,omitempty"`
+	OnProjectStart string `toml:"on_project_start,omitempty"`
+	OnProjectExit  string `toml:"on_project_exit,omitempty"`
+	// OnProjectFirstStart and OnProjectRestart run alongside OnProjectStart —
+	// which always fires on a fresh build — distinguishing a project's
+	// genuine first-ever start from a later one. Which fires is decided by
+	// session.HookHistory, threaded in from outside this package: Create has
+	// no way to tell the two apart on its own without it.
+	OnProjectFirstStart string            `toml:"on_project_first_start,omitempty"`
+	OnProjectRestart    string            `toml:"on_project_restart,omitempty"`
+	StartupWindow       string            `toml:"startup_window,omitempty"`
+	StartupPane         *int              `toml:"startup_pane,omitempty"` // nil = unset; 0 is a valid pane
+	Env                 map[string]string `toml:"env,omitempty"`
+
+	// EnablePaneTitles turns on tmux's live pane-border status line
+	// (pane-border-status/-format) for the session. Nil means off, matching
+	// tmux's own default.
+	EnablePaneTitles *bool `toml:"enable_pane_titles,omitempty"`
+	// PaneTitlePosition is "top" (default) or "bottom". Validated in
+	// (*Config).validate.
+	PaneTitlePosition string `toml:"pane_title_position,omitempty"`
+	// PaneTitleFormat is a tmux format string; empty uses
+	// "#{pane_index}: #{pane_current_command}".
+	PaneTitleFormat string `toml:"pane_title_format,omitempty"`
 }
 
 // Window is one tmux window, laid out either by a split tree or a flat pane
@@ -214,6 +232,11 @@ func (c *Config) validate() error {
 	// keeps `wyrm validate` from blessing a config `wyrm` will not build.
 	if len(c.Windows) == 0 {
 		return errors.New("config defines no windows (add at least one [[windows]])")
+	}
+	switch c.Session.PaneTitlePosition {
+	case "", "top", "bottom":
+	default:
+		return fmt.Errorf("session.pane_title_position must be %q or %q, got %q", "top", "bottom", c.Session.PaneTitlePosition)
 	}
 	for _, w := range c.Windows {
 		if err := validateSplits(w.Name, w.Splits); err != nil {

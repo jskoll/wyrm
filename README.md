@@ -518,8 +518,13 @@ session instead of nesting one tmux inside another.
 | `root` | string | `.` | Working directory for every window; `$VAR` is expanded |
 | `on_project_start` | string | — | Shell command run (via your $SHELL, or sh, in `root`) before the session is created |
 | `on_project_exit` | string | — | Shell command run before `wyrm kill` destroys the session |
+| `on_project_first_start` | string | — | Runs alongside `on_project_start`, but only the very first time this project is ever started (tracked in `~/.config/wyrm/state.toml`) |
+| `on_project_restart` | string | — | Runs alongside `on_project_start` on every start after the first |
 | `startup_window` | string | first window | Window (name or index) to focus after creation. Without it the session opens on the first window, focused on its first pane |
 | `startup_pane` | int | — | Pane to focus within `startup_window` (uses your `pane-base-index`) |
+| `enable_pane_titles` | bool | `false` | Turn on tmux's live pane-border status line (`pane-border-status`/`-format`) |
+| `pane_title_position` | string | `top` | `top` or `bottom`; only meaningful with `enable_pane_titles` |
+| `pane_title_format` | string | `#{pane_index}: #{pane_current_command}` | tmux format string for the pane-border line |
 
 At least one of `name` / `root` is required.
 

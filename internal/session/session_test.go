@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/jskoll/wyrm/internal/config"
+	"github.com/jskoll/wyrm/internal/tmux"
 )
 
 // fakeRunner records every tmux invocation and fabricates the outputs the
@@ -412,6 +414,221 @@ func TestCreateOnProjectStartFailureStillCreates(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "on_project_start failed") {
 		t.Errorf("stderr = %q, want on_project_start failure warning", stderr.String())
+	}
+}
+
+// fakeHistory is a minimal in-memory HookHistory, standing in for
+// *internal/state.Store without pulling in that package's file I/O.
+type fakeHistory struct {
+	started map[string]bool
+	marked  []string // every dir MarkStarted was called with, in order
+}
+
+func (h *fakeHistory) Started(dir string) bool { return h.started[dir] }
+
+func (h *fakeHistory) MarkStarted(dir string) error {
+	h.marked = append(h.marked, dir)
+	if h.started == nil {
+		h.started = map[string]bool{}
+	}
+	h.started[dir] = true
+	return nil
+}
+
+// loadConfig writes body to a temp .wyrm.toml and loads it through
+// config.Load, so the resulting Config has Dir() populated — a config built
+// as a struct literal (as most of this file's tests do) has no on-disk
+// identity, but that's exactly the identity runFirstStartOrRestartHook keys
+// on, so these tests need the real thing.
+func loadConfig(t *testing.T, body string) *config.Config {
+	t.Helper()
+	dir := t.TempDir()
+	path := dir + "/.wyrm.toml"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	return cfg
+}
+
+func TestCreateFirstStartFiresOnceThenRestart(t *testing.T) {
+	body := "[session]\nname = \"proj\"\nroot = \".\"\n" +
+		"on_project_first_start = \"echo first\"\non_project_restart = \"echo restart\"\n" +
+		"[[windows]]\nname = \"w\"\n"
+	cfg := loadConfig(t, body)
+	hist := &fakeHistory{}
+
+	r := &fakeRunner{}
+	var stderr bytes.Buffer
+	if _, _, _, err := Create(r, cfg, io.Discard, &stderr, WithHistory(hist)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "running on_project_first_start") {
+		t.Errorf("stderr = %q, want on_project_first_start to run", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "on_project_restart") {
+		t.Errorf("stderr = %q, want on_project_restart NOT to run on a genuine first start", stderr.String())
+	}
+	if len(hist.marked) != 1 || hist.marked[0] != cfg.Dir() {
+		t.Errorf("marked = %v, want exactly [%q]", hist.marked, cfg.Dir())
+	}
+
+	// Simulate a second build of the same project (e.g. after `wyrm kill`):
+	// history now says it has started before, so restart fires instead.
+	r2 := &fakeRunner{}
+	var stderr2 bytes.Buffer
+	if _, _, _, err := Create(r2, cfg, io.Discard, &stderr2, WithHistory(hist)); err != nil {
+		t.Fatalf("second Create: %v", err)
+	}
+	if !strings.Contains(stderr2.String(), "running on_project_restart") {
+		t.Errorf("stderr = %q, want on_project_restart to run on a later start", stderr2.String())
+	}
+	if strings.Contains(stderr2.String(), "on_project_first_start") {
+		t.Errorf("stderr = %q, want on_project_first_start NOT to run again", stderr2.String())
+	}
+	if len(hist.marked) != 1 {
+		t.Errorf("marked = %v, want MarkStarted not called again", hist.marked)
+	}
+}
+
+func TestCreateNoHistoryNeitherHookFires(t *testing.T) {
+	body := "[session]\nname = \"proj\"\nroot = \".\"\n" +
+		"on_project_first_start = \"echo first\"\non_project_restart = \"echo restart\"\n" +
+		"[[windows]]\nname = \"w\"\n"
+	cfg := loadConfig(t, body)
+
+	r := &fakeRunner{}
+	var stderr bytes.Buffer
+	if _, _, _, err := Create(r, cfg, io.Discard, &stderr); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if strings.Contains(stderr.String(), "on_project_first_start") || strings.Contains(stderr.String(), "on_project_restart") {
+		t.Errorf("stderr = %q, want neither hook without WithHistory", stderr.String())
+	}
+}
+
+func TestCreateDryRunDoesNotMarkStarted(t *testing.T) {
+	body := "[session]\nname = \"proj\"\nroot = \".\"\n" +
+		"on_project_first_start = \"echo first\"\n[[windows]]\nname = \"w\"\n"
+	cfg := loadConfig(t, body)
+	hist := &fakeHistory{}
+
+	var out bytes.Buffer
+	dry := tmux.NewDryRun(&out)
+	if _, _, _, err := Create(dry, cfg, io.Discard, io.Discard, DryRun(&out), WithHistory(hist)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if !strings.Contains(out.String(), "on_project_first_start") {
+		t.Errorf("transcript = %q, want mention of on_project_first_start", out.String())
+	}
+	if len(hist.marked) != 0 {
+		t.Errorf("marked = %v, want dry run not to record a start", hist.marked)
+	}
+}
+
+func TestCreateNoOnDiskIdentitySkipsHooks(t *testing.T) {
+	// A Config built as a literal (no config.Load) has Dir() == "" — the
+	// built-in-default/in-memory case, which has no meaningful "has this
+	// started before".
+	cfg := &config.Config{
+		Session: config.Session{
+			Name: "proj", Root: "/tmp/proj",
+			OnProjectFirstStart: "echo first", OnProjectRestart: "echo restart",
+		},
+		Windows: []config.Window{{Name: "w"}},
+	}
+	hist := &fakeHistory{}
+	r := &fakeRunner{}
+	var stderr bytes.Buffer
+	if _, _, _, err := Create(r, cfg, io.Discard, &stderr, WithHistory(hist)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if strings.Contains(stderr.String(), "on_project_first_start") || strings.Contains(stderr.String(), "on_project_restart") {
+		t.Errorf("stderr = %q, want neither hook for a config with no on-disk identity", stderr.String())
+	}
+	if len(hist.marked) != 0 {
+		t.Errorf("marked = %v, want nothing recorded", hist.marked)
+	}
+}
+
+func TestEnablePaneTitles(t *testing.T) {
+	on := true
+	cfg := &config.Config{
+		Session: config.Session{
+			Name: "proj", Root: "/tmp/proj",
+			EnablePaneTitles: &on,
+		},
+		Windows: []config.Window{{Name: "w"}},
+	}
+	r := &fakeRunner{}
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	var gotPosition, gotFormat string
+	for _, c := range r.calls {
+		if len(c) >= 5 && c[0] == "set-option" && c[3] == "pane-border-status" {
+			gotPosition = c[4]
+		}
+		if len(c) >= 5 && c[0] == "set-option" && c[3] == "pane-border-format" {
+			gotFormat = c[4]
+		}
+	}
+	if gotPosition != "top" {
+		t.Errorf("pane-border-status = %q, want default %q", gotPosition, "top")
+	}
+	if gotFormat != defaultPaneTitleFormat {
+		t.Errorf("pane-border-format = %q, want default %q", gotFormat, defaultPaneTitleFormat)
+	}
+}
+
+func TestEnablePaneTitlesCustomPositionAndFormat(t *testing.T) {
+	on := true
+	cfg := &config.Config{
+		Session: config.Session{
+			Name: "proj", Root: "/tmp/proj",
+			EnablePaneTitles:  &on,
+			PaneTitlePosition: "bottom",
+			PaneTitleFormat:   "#{pane_current_path}",
+		},
+		Windows: []config.Window{{Name: "w"}},
+	}
+	r := &fakeRunner{}
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	var gotPosition, gotFormat string
+	for _, c := range r.calls {
+		if len(c) >= 5 && c[0] == "set-option" && c[3] == "pane-border-status" {
+			gotPosition = c[4]
+		}
+		if len(c) >= 5 && c[0] == "set-option" && c[3] == "pane-border-format" {
+			gotFormat = c[4]
+		}
+	}
+	if gotPosition != "bottom" {
+		t.Errorf("pane-border-status = %q, want %q", gotPosition, "bottom")
+	}
+	if gotFormat != "#{pane_current_path}" {
+		t.Errorf("pane-border-format = %q, want %q", gotFormat, "#{pane_current_path}")
+	}
+}
+
+func TestPaneTitlesOffByDefault(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{{Name: "w"}},
+	}
+	r := &fakeRunner{}
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for _, c := range r.calls {
+		if len(c) > 0 && c[0] == "set-option" {
+			t.Errorf("set-option called with pane titles unset: %v", c)
+		}
 	}
 }
 

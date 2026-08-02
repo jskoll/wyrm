@@ -126,11 +126,34 @@ file uses the same `[session]` / `[[windows]]` format documented below.
 | `root` | string | `.` | Default working directory for every window and pane; `~` and `$VAR` are expanded |
 | `on_project_start` | string | — | Shell command run (via your $SHELL, or sh, in `root`) before the session is created |
 | `on_project_exit` | string | — | Shell command run before `wyrm kill` destroys the session |
+| `on_project_first_start` | string | — | Runs alongside `on_project_start`, but only the very first time this project is ever started |
+| `on_project_restart` | string | — | Runs alongside `on_project_start` on every start after the first |
 | `startup_window` | string | first window | Window (name or index) to focus after creation. Without it the session opens on the first window, focused on its first pane |
 | `startup_pane` | int | — | Pane to focus within `startup_window` (uses your `pane-base-index`) |
 | `env` | table | — | Environment variables set in every pane of the session (below) |
+| `enable_pane_titles` | bool | `false` | Turn on tmux's live pane-border status line for the session |
+| `pane_title_position` | string | `top` | `top` or `bottom` |
+| `pane_title_format` | string | `#{pane_index}: #{pane_current_command}` | tmux format string shown on the pane-border line |
 
 At least one of `name` / `root` is required.
+
+### `on_project_first_start` / `on_project_restart`
+
+`on_project_start` always fires on a fresh build. Alongside it, exactly one
+of these two also fires, based on whether this project (identified by its
+config file's directory) has ever started a session before — tracked in
+`~/.config/wyrm/state.toml` (`$XDG_CONFIG_HOME/wyrm/state.toml` if set), so
+the distinction survives a `wyrm kill` and holds across process runs, not
+just within one.
+
+```toml
+[session]
+on_project_first_start = "npm install"   # only the very first time
+on_project_restart     = "npm run migrate"  # every start after that
+```
+
+Neither fires for a config with no on-disk identity — the built-in default,
+or one loaded some other way than from a file.
 
 ### `[session.env]`
 

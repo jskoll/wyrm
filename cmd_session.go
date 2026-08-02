@@ -10,6 +10,7 @@ import (
 	"github.com/jskoll/wyrm/internal/config"
 	"github.com/jskoll/wyrm/internal/session"
 	"github.com/jskoll/wyrm/internal/sessions"
+	"github.com/jskoll/wyrm/internal/state"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
@@ -42,11 +43,16 @@ func (a *app) up(args []string) error {
 		return err
 	}
 
-	if *dryRun {
-		return a.dryRunBuild(cfg)
+	hist, err := state.Load()
+	if err != nil {
+		return err
 	}
 
-	name, sessionID, created, err := session.Create(a.runner, cfg, a.stdout, a.stderr)
+	if *dryRun {
+		return a.dryRunBuild(cfg, hist)
+	}
+
+	name, sessionID, created, err := session.Create(a.runner, cfg, a.stdout, a.stderr, session.WithHistory(hist))
 	if err != nil {
 		return err
 	}
@@ -74,13 +80,13 @@ func (a *app) reportCreated(name string, created bool) {
 // the small amount of machinery — session.Create takes a tmux.Runner, so a
 // recording one covers the tmux half, and session.DryRun covers the hooks,
 // which never go through the Runner at all.
-func (a *app) dryRunBuild(cfg *config.Config) error {
+func (a *app) dryRunBuild(cfg *config.Config, hist session.HookHistory) error {
 	a.dryRunHeader(
 		"dry run: no tmux commands are executed, no lifecycle",
 		"hooks are run, and an already-running session is not",
 		"consulted.")
 	dry := tmux.NewDryRun(a.stdout)
-	_, _, _, err := session.Create(dry, cfg, io.Discard, a.stderr, session.DryRun(a.stdout))
+	_, _, _, err := session.Create(dry, cfg, io.Discard, a.stderr, session.DryRun(a.stdout), session.WithHistory(hist))
 	return err
 }
 
@@ -126,6 +132,11 @@ func (a *app) restart(args []string) error {
 		return err
 	}
 
+	hist, err := state.Load()
+	if err != nil {
+		return err
+	}
+
 	if *dryRun {
 		// The teardown half consults the real server (see session.Kill's doc),
 		// so a not-running session is reported and only the build is described.
@@ -133,7 +144,7 @@ func (a *app) restart(args []string) error {
 			_, _ = fmt.Fprintf(a.stderr, "wyrm: nothing to stop (%v)\n", kerr)
 		}
 		dry := tmux.NewDryRun(a.stdout)
-		_, _, _, err := session.Create(dry, cfg, io.Discard, a.stderr, session.DryRun(a.stdout))
+		_, _, _, err := session.Create(dry, cfg, io.Discard, a.stderr, session.DryRun(a.stdout), session.WithHistory(hist))
 		return err
 	}
 
@@ -145,7 +156,7 @@ func (a *app) restart(args []string) error {
 		_, _ = fmt.Fprintf(a.stdout, "killed session %s\n", name)
 	}
 
-	name, sessionID, _, err := session.Create(a.runner, cfg, a.stdout, a.stderr)
+	name, sessionID, _, err := session.Create(a.runner, cfg, a.stdout, a.stderr, session.WithHistory(hist))
 	if err != nil {
 		return err
 	}
@@ -293,7 +304,12 @@ func (a *app) startProject(project config.Project) error {
 		_, _ = fmt.Fprintln(a.stderr, "wyrm: warning: "+msg)
 	}
 
-	name, sessionID, created, err := session.Create(a.runner, cfg, a.stdout, a.stderr)
+	hist, err := state.Load()
+	if err != nil {
+		return err
+	}
+
+	name, sessionID, created, err := session.Create(a.runner, cfg, a.stdout, a.stderr, session.WithHistory(hist))
 	if err != nil {
 		return err
 	}

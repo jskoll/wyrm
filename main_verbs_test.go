@@ -102,6 +102,44 @@ func TestRunUpDryRunDoesNotExecuteHooks(t *testing.T) {
 	}
 }
 
+// TestRunUpFirstStartThenRestartFiresCorrectHook is the CLI-level version of
+// internal/session's history test: a project's genuine first `wyrm up` fires
+// on_project_first_start, and a later `wyrm restart` of the same project
+// (real persistent state, not a same-process approximation) fires
+// on_project_restart instead — proving state.Load/MarkStarted are actually
+// wired into the up/restart command paths, not just Create's own signature.
+func TestRunUpFirstStartThenRestartFiresCorrectHook(t *testing.T) {
+	cfg := localConfig[:strings.Index(localConfig, "[[windows]]")] +
+		"on_project_first_start = \"true\"\non_project_restart = \"true\"\n\n" +
+		localConfig[strings.Index(localConfig, "[[windows]]"):]
+	writeLocalConfig(t, cfg)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"up"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, func(string) error { return nil })
+	if code != 0 {
+		t.Fatalf("up: exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "running on_project_first_start") {
+		t.Errorf("up stderr = %q, want on_project_first_start to run", stderr.String())
+	}
+
+	// restart kills (no session was ever really created by the fakeRunner, so
+	// "nothing to stop" is expected) and rebuilds — by now the project is
+	// recorded as started, so this build should fire restart, not first_start.
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"restart"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, func(string) error { return nil })
+	if code != 0 {
+		t.Fatalf("restart: exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "running on_project_restart") {
+		t.Errorf("restart stderr = %q, want on_project_restart to run", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "on_project_first_start") {
+		t.Errorf("restart stderr = %q, want on_project_first_start NOT to run again", stderr.String())
+	}
+}
+
 // TestRunKillDryRunDoesNotExecuteHooks is the teardown half. Unlike a build,
 // the session lookup is genuinely performed — it names what would be killed —
 // so this also checks the kill-session itself is withheld.
