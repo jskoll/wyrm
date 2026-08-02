@@ -11,6 +11,15 @@ import (
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
+// pl builds one list-panes -a fixture line in tmux.ListAllPanes' format
+// (session_id, session_name, window_id, window_index, window_name, pane_id,
+// pane_index, command, \x01-separated). Session/window names and indices
+// are irrelevant to agent detection, so this fills in placeholders and
+// varies only the IDs and command every caller here actually cares about.
+func pl(sessionID, windowID, paneID, command string) string {
+	return sessionID + "\x01s\x01" + windowID + "\x010\x01w\x01" + paneID + "\x010\x01" + command + "\n"
+}
+
 // agentRunner fakes a server with the given panes, returning canned capture
 // output per pane ID.
 func agentRunner(panes string, captures map[string]string) funcRunner {
@@ -37,10 +46,10 @@ const donePane = "⏺ All set.\n✻ Worked for 8s\n❯\n  -- INSERT --"
 
 func TestLoadAgentStatusClassifiesAndRollsUp(t *testing.T) {
 	r := agentRunner(
-		"$1|@1|%1|claude\n"+ // blocked
-			"$1|@1|%2|zsh\n"+ // not an agent, never captured
-			"$1|@2|%3|claude\n"+ // busy
-			"$2|@3|%4|claude\n", // idle
+		pl("$1", "@1", "%1", "claude")+ // blocked
+			pl("$1", "@1", "%2", "zsh")+ // not an agent, never captured
+			pl("$1", "@2", "%3", "claude")+ // busy
+			pl("$2", "@3", "%4", "claude"), // idle
 		map[string]string{"%1": waitingPane, "%3": workingPane, "%4": donePane},
 	)
 
@@ -84,7 +93,7 @@ func TestLoadAgentStatusCapturesOnlyAgentPanes(t *testing.T) {
 	r := funcRunner{fn: func(args ...string) (string, error) {
 		switch args[0] {
 		case "list-panes":
-			return "$1|@1|%1|claude\n$1|@1|%2|zsh\n$1|@1|%3|vim\n", nil
+			return pl("$1", "@1", "%1", "claude") + pl("$1", "@1", "%2", "zsh") + pl("$1", "@1", "%3", "vim"), nil
 		case "capture-pane":
 			captured = append(captured, args[len(args)-1])
 		}
@@ -104,7 +113,7 @@ func TestLoadAgentStatusSkipsSelfPane(t *testing.T) {
 	r := funcRunner{fn: func(args ...string) (string, error) {
 		switch args[0] {
 		case "list-panes":
-			return "$1|@1|%1|claude\n$1|@1|%9|claude\n", nil
+			return pl("$1", "@1", "%1", "claude") + pl("$1", "@1", "%9", "claude"), nil
 		case "capture-pane":
 			captured = append(captured, args[len(args)-1])
 		}
@@ -124,7 +133,7 @@ func TestLoadAgentStatusSkipsSelfPane(t *testing.T) {
 // scan must still complete.
 func TestLoadAgentStatusToleratesAVanishedPane(t *testing.T) {
 	r := agentRunner(
-		"$1|@1|%1|claude\n$1|@1|%2|claude\n",
+		pl("$1", "@1", "%1", "claude")+pl("$1", "@1", "%2", "claude"),
 		map[string]string{"%2": waitingPane}, // %1 errors
 	)
 
@@ -141,7 +150,7 @@ func TestLoadAgentStatusToleratesAVanishedPane(t *testing.T) {
 // someone running Claude Code under a wrapper name. The patterns stay the
 // shipped ones, which is the whole point of the distinction from profiles.
 func TestAgentCommandsWidenTheBuiltInProfile(t *testing.T) {
-	r := agentRunner("$1|@1|%1|myclaude\n", map[string]string{"%1": waitingPane})
+	r := agentRunner(pl("$1", "@1", "%1", "myclaude"), map[string]string{"%1": waitingPane})
 
 	def, err := agentProfiles(nil)
 	if err != nil {
@@ -169,7 +178,7 @@ func TestAgentProfilesClassifyByTheirOwnPatterns(t *testing.T) {
 	const aiderBusy = "> refactor the parser\napplying edits… 12 files\n[working]"
 	const aiderIdle = "> refactor the parser\napplied 3 edits\naider> "
 	r := agentRunner(
-		"$1|@1|%1|aider\n$1|@1|%2|claude\n",
+		pl("$1", "@1", "%1", "aider")+pl("$1", "@1", "%2", "claude"),
 		map[string]string{"%1": aiderBusy, "%2": waitingPane},
 	)
 
@@ -194,7 +203,7 @@ func TestAgentProfilesClassifyByTheirOwnPatterns(t *testing.T) {
 	}
 
 	// And the idle side, on evidence rather than by elimination.
-	r2 := agentRunner("$1|@1|%1|aider\n", map[string]string{"%1": aiderIdle})
+	r2 := agentRunner(pl("$1", "@1", "%1", "aider"), map[string]string{"%1": aiderIdle})
 	if got := run(loadAgentStatus(r2, profiles, "")).(agentStatusMsg).status.pane("%1"); got != agent.StateIdle {
 		t.Errorf("aider at its prompt = %v, want idle", got)
 	}
@@ -233,7 +242,7 @@ func TestAgentProfileBusyPattern(t *testing.T) {
 	if err != nil {
 		t.Fatalf("agentProfiles: %v", err)
 	}
-	r := agentRunner("$1|@1|%1|bot\n", map[string]string{"%1": "output\nthinking 42s"})
+	r := agentRunner(pl("$1", "@1", "%1", "bot"), map[string]string{"%1": "output\nthinking 42s"})
 	if got := run(loadAgentStatus(r, profiles, "")).(agentStatusMsg).status.pane("%1"); got != agent.StateBusy {
 		t.Errorf("pane = %v, want busy from the custom pattern", got)
 	}
@@ -365,7 +374,7 @@ func (b *batchingAgentRunner) RunBatch(cmds [][]string) ([]string, error) {
 // reading N panes used to cost N tmux processes on a timer. Now it costs one.
 func TestAgentScanBatchesCaptures(t *testing.T) {
 	r := &batchingAgentRunner{funcRunner: agentRunner(
-		"$1|@1|%1|claude\n$1|@1|%2|claude\n$1|@2|%3|claude\n$1|@2|%4|zsh\n",
+		pl("$1", "@1", "%1", "claude")+pl("$1", "@1", "%2", "claude")+pl("$1", "@2", "%3", "claude")+pl("$1", "@2", "%4", "zsh"),
 		map[string]string{"%1": waitingPane, "%2": workingPane, "%3": donePane},
 	)}
 
@@ -391,7 +400,7 @@ func TestAgentScanBatchesCaptures(t *testing.T) {
 func TestAgentScanSurvivesAPaneDyingMidBatch(t *testing.T) {
 	r := &batchingAgentRunner{
 		funcRunner: agentRunner(
-			"$1|@1|%1|claude\n$1|@1|%2|claude\n$1|@2|%3|claude\n",
+			pl("$1", "@1", "%1", "claude")+pl("$1", "@1", "%2", "claude")+pl("$1", "@2", "%3", "claude"),
 			map[string]string{"%1": waitingPane, "%3": donePane},
 		),
 		failPane: "%2",

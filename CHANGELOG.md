@@ -48,6 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   shouldn't block on, like waiting for a port to open. wyrm has no plugin
   system by design; this rounds out the hooks that already cover what one
   would typically be for.
+- `f` in `wyrm tui`: a searchable, whole-server pane list — the flat view
+  tmux's own `choose-tree -Z` gives you, which the Sessions → Windows →
+  Panes hierarchy doesn't. Type to narrow (session, window, and command all
+  match), `Enter` attaches directly. Full TUI only.
 
 ### Fixed
 - `tmux.Attach` ignored `SocketName` entirely — a session built on a named

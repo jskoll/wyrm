@@ -275,6 +275,55 @@ func TestListPanesCommandError(t *testing.T) {
 	}
 }
 
+func TestListAllPanes(t *testing.T) {
+	r := stubRunner{out: "$1\x01webapp\x01@1\x010\x01code\x01%1\x010\x01nvim\n" +
+		"$1\x01webapp\x01@2\x011\x01server\x01%2\x010\x01npm\n"}
+	refs, err := ListAllPanes(r)
+	if err != nil {
+		t.Fatalf("ListAllPanes: %v", err)
+	}
+	want := []PaneRef{
+		{SessionID: "$1", SessionName: "webapp", WindowID: "@1", WindowIndex: 0, WindowName: "code", PaneID: "%1", PaneIndex: 0, Command: "nvim"},
+		{SessionID: "$1", SessionName: "webapp", WindowID: "@2", WindowIndex: 1, WindowName: "server", PaneID: "%2", PaneIndex: 0, Command: "npm"},
+	}
+	if len(refs) != len(want) {
+		t.Fatalf("ListAllPanes returned %d refs, want %d", len(refs), len(want))
+	}
+	for i := range want {
+		if refs[i] != want[i] {
+			t.Errorf("refs[%d] = %+v, want %+v", i, refs[i], want[i])
+		}
+	}
+}
+
+// TestListAllPanesNameContainingPipe guards the reason ListAllPanes parses
+// its own output instead of going through records: a session or window name
+// containing a literal "|" must not corrupt the fields around it, since "|"
+// is an ordinary character in a tmux name, not a reserved one.
+func TestListAllPanesNameContainingPipe(t *testing.T) {
+	r := stubRunner{out: "$1\x01web|app\x01@1\x010\x01code|review\x01%1\x010\x01nvim\n"}
+	refs, err := ListAllPanes(r)
+	if err != nil {
+		t.Fatalf("ListAllPanes: %v", err)
+	}
+	if len(refs) != 1 {
+		t.Fatalf("ListAllPanes returned %d refs, want 1", len(refs))
+	}
+	if refs[0].SessionName != "web|app" {
+		t.Errorf("SessionName = %q, want %q", refs[0].SessionName, "web|app")
+	}
+	if refs[0].WindowName != "code|review" {
+		t.Errorf("WindowName = %q, want %q", refs[0].WindowName, "code|review")
+	}
+}
+
+func TestListAllPanesCommandError(t *testing.T) {
+	r := stubRunner{out: "boom", err: errors.New("exit status 1")}
+	if _, err := ListAllPanes(r); err == nil {
+		t.Error("ListAllPanes with a failing command: want error, got nil")
+	}
+}
+
 func TestListPanesMalformedLine(t *testing.T) {
 	r := stubRunner{out: "not-enough-fields"}
 	if _, err := ListPanes(r, "@1"); err == nil {

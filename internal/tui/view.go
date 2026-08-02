@@ -98,6 +98,9 @@ func (m Model) View() string {
 	if m.ready && m.mode == modeHelp {
 		return m.renderHelpOverlay()
 	}
+	if m.ready && m.mode == modeFindPane {
+		return m.renderFindPaneOverlay()
+	}
 
 	if !m.ready || m.width < minWidth || m.height < m.minHeight() {
 		return fmt.Sprintf("wyrm: terminal too small (need at least %dx%d, have %dx%d)",
@@ -441,6 +444,7 @@ var helpSections = []helpSection{
 		{"PgUp / PgDn", "move the selection a screenful"},
 		{"g / G", "jump to the first / last entry"},
 		{"/", "filter the focused panel"},
+		{"f", "find a pane anywhere (full TUI)"},
 		{"Esc", "clear the filter"},
 		{"R", "reload the project and session lists"},
 		{"M", "open the context menu for the selection"},
@@ -588,6 +592,68 @@ func (m Model) renderHelpOverlay() string {
 	}
 
 	box := focusedBorder.Padding(0, 1).Render(lipgloss.JoinVertical(lipgloss.Left, title, body, footer))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// findPaneVisible is how many rows modeFindPane's list can show: border (2)
+// + title (1) + query line (1) + footer (1).
+func (m Model) findPaneVisible() int {
+	v := m.height - 5
+	if v < 1 {
+		v = 1
+	}
+	return v
+}
+
+// findPaneRowWidth caps a row's rendered width, the same way the help
+// overlay leaves margin around a centered box rather than spanning the
+// full terminal.
+func (m Model) findPaneRowWidth() int {
+	w := m.width - 12
+	if w > 100 {
+		w = 100
+	}
+	if w < 20 {
+		w = 20
+	}
+	return w
+}
+
+// renderFindPaneOverlay draws the whole-server pane search (modeFindPane):
+// a centered box with the typed query, a scrollable list of every pane on
+// the server that matches it, and Enter/Esc in the footer — the same
+// centered-overlay shape as the help screen, sized to the terminal the
+// same way.
+func (m Model) renderFindPaneOverlay() string {
+	list := m.visibleAllPanes()
+	rowW := m.findPaneRowWidth()
+	visible := m.findPaneVisible()
+	start, end := viewport(m.findPaneCur, len(list), visible)
+
+	title := focusedTitle.Render("wyrm — find pane")
+	query := filterStyle.Render(truncate("/"+m.findPaneQuery+"_", rowW))
+
+	var lines []string
+	if len(list) == 0 {
+		lines = append(lines, hintStyle.Render("no matching panes"))
+	}
+	for i := start; i < end; i++ {
+		p := list[i]
+		row := []span{
+			plain(p.SessionName + " ▸ "),
+			{indexMark, fmt.Sprintf("%d:", p.WindowIndex)},
+			plain(p.WindowName + " ▸ "),
+			{indexMark, fmt.Sprintf("%d", p.PaneIndex)},
+			plain("  " + p.Command),
+		}
+		lines = append(lines, renderRow(row, rowW, selectedRow, i == m.findPaneCur))
+	}
+	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
+
+	footer := hintStyle.Render(fmt.Sprintf("%d/%d panes  ·  ↑↓ move  ·  enter attach  ·  esc close",
+		len(list), len(m.allPanes)))
+
+	box := focusedBorder.Padding(0, 1).Render(lipgloss.JoinVertical(lipgloss.Left, title, query, body, footer))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 

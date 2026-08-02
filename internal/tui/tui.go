@@ -94,6 +94,15 @@ const (
 	// overlay flag because it captures the keys it shares with normal mode
 	// (j/k/enter) while it's open.
 	modeMenu
+	// modeFindPane is the flat, whole-server pane search ("f") — every pane
+	// on every session in one filterable list, the thing tmux's own
+	// choose-tree -Z gives you and the panel hierarchy (Sessions -> Windows
+	// -> Panes) doesn't: reaching a pane three levels deep still means
+	// drilling down one panel at a time. It's an overlay like modeHelp, not
+	// a fifth panel — it doesn't fit the Projects/Sessions/Windows/Panes
+	// cascade's parent-child relationships, and full-TUI only (wyrm pick's
+	// compact form is deliberately the two-panel Sessions/Windows chooser).
+	modeFindPane
 )
 
 // Model is the Bubble Tea model for the TUI. It is a plain value type; Update
@@ -141,6 +150,15 @@ type Model struct {
 	promptTitle   string          // label shown in modePrompt
 	textInput     textinput.Model // active in modePrompt
 	helpScroll    int             // top line offset of the help overlay (modeHelp)
+
+	// findPane* backs modeFindPane: the whole-server pane list, the typed
+	// filter (typing is always "on" here, unlike modeFilter's separate
+	// filtering flag — the mode has no other purpose), and the selected row
+	// in the filtered list. Kept apart from the four panel lists/cur array
+	// since this isn't one of the panelSpecs-described panels.
+	allPanes      []tmux.PaneRef
+	findPaneQuery string
+	findPaneCur   int
 
 	// layoutIdx rotates through cycleLayouts on "L", and layoutWindow is the
 	// window it belongs to. Keeping them together makes the cycle per-window:
@@ -267,6 +285,12 @@ type previewMsg struct {
 	err     error
 }
 
+// allPanesMsg carries a fresh whole-server pane listing for modeFindPane.
+type allPanesMsg struct {
+	panes []tmux.PaneRef
+	err   error
+}
+
 type tickMsg time.Time
 
 // listTickMsg drives the slower project/session refresh — see
@@ -300,6 +324,15 @@ func loadPreview(r tmux.Runner, paneID string) tea.Cmd {
 	return func() tea.Msg {
 		out, err := tmux.CapturePane(r, paneID)
 		return previewMsg{paneID: paneID, content: out, err: err}
+	}
+}
+
+// loadAllPanes fetches the whole-server pane list for modeFindPane, in the
+// one round trip tmux.ListAllPanes already costs the agent scan.
+func loadAllPanes(r tmux.Runner) tea.Cmd {
+	return func() tea.Msg {
+		refs, err := tmux.ListAllPanes(r)
+		return allPanesMsg{panes: refs, err: err}
 	}
 }
 
@@ -376,6 +409,24 @@ func (m Model) visiblePanes() []tmux.PaneInfo {
 	out := make([]tmux.PaneInfo, 0, len(m.panes))
 	for _, p := range m.panes {
 		if _, ok := sessions.FuzzyMatch(f, p.ID+" "+p.Command); ok {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// visibleAllPanes narrows the whole-server pane list (modeFindPane) by
+// findPaneQuery. Matched against session name, window name, and command
+// together, since that's the context a flat list needs to disambiguate
+// what would otherwise be identical-looking rows across sessions.
+func (m Model) visibleAllPanes() []tmux.PaneRef {
+	if m.findPaneQuery == "" {
+		return m.allPanes
+	}
+	out := make([]tmux.PaneRef, 0, len(m.allPanes))
+	for _, p := range m.allPanes {
+		target := p.SessionName + " " + p.WindowName + " " + p.Command
+		if _, ok := sessions.FuzzyMatch(m.findPaneQuery, target); ok {
 			out = append(out, p)
 		}
 	}
@@ -573,6 +624,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cur[panelPanes] = activePaneOrClamp(m.cur[panelPanes], m.visiblePanes())
 		return m, m.reloadPreview()
 
+	case allPanesMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.allPanes = msg.panes
+		m.findPaneCur = clamp(m.findPaneCur, len(m.visibleAllPanes()))
+		return m, nil
+
 	case previewMsg:
 		if m.previewSrc != previewPane {
 			return m, nil
@@ -610,6 +670,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleFilterKey(msg)
 	case modeMenu:
 		return m.handleMenuKey(msg)
+	case modeFindPane:
+		return m.handleFindPaneKey(msg)
 	}
 	// Any key clears a reported error, so the footer returns to the key hints
 	// once it's been seen.
@@ -659,6 +721,57 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) clampFocused() (tea.Model, tea.Cmd) {
 	m.cur[m.focus] = clamp(m.cur[m.focus], m.panelLen(m.focus))
 	return m, m.selectionChanged(m.focus)
+}
+
+// handleFindPaneKey drives modeFindPane: typing narrows the whole-server
+// pane list immediately (there is no separate "browsing, not filtering"
+// state here, unlike the panel filter), arrows move the selection, Enter
+// attaches directly to the selected pane's session/window/pane, and Esc
+// drops back to the normal panel hierarchy.
+func (m Model) handleFindPaneKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEnter:
+		return m.attachToFindPaneSelection()
+	case tea.KeyEsc, tea.KeyCtrlC:
+		m.mode = modeNormal
+		m.findPaneQuery = ""
+		return m, nil
+	case tea.KeyUp, tea.KeyCtrlP:
+		m.findPaneCur = clampTo(m.findPaneCur-1, len(m.visibleAllPanes()))
+		return m, nil
+	case tea.KeyDown, tea.KeyCtrlN:
+		m.findPaneCur = clampTo(m.findPaneCur+1, len(m.visibleAllPanes()))
+		return m, nil
+	case tea.KeyBackspace:
+		if m.findPaneQuery != "" {
+			m.findPaneQuery = m.findPaneQuery[:len(m.findPaneQuery)-1]
+		}
+		m.findPaneCur = clamp(m.findPaneCur, len(m.visibleAllPanes()))
+		return m, nil
+	case tea.KeyRunes, tea.KeySpace:
+		m.findPaneQuery += string(msg.Runes)
+		if msg.Type == tea.KeySpace {
+			m.findPaneQuery += " "
+		}
+		m.findPaneCur = clamp(m.findPaneCur, len(m.visibleAllPanes()))
+		return m, nil
+	}
+	return m, nil
+}
+
+// attachToFindPaneSelection resolves the selected row in modeFindPane
+// straight to its session/window/pane, the same selectTargetCmd sequence
+// Enter on the Panes panel already uses — just addressed directly instead
+// of via the cascade's own selected-session/selected-window chain.
+func (m Model) attachToFindPaneSelection() (tea.Model, tea.Cmd) {
+	list := m.visibleAllPanes()
+	if m.findPaneCur < 0 || m.findPaneCur >= len(list) {
+		return m, nil
+	}
+	ref := list[m.findPaneCur]
+	m.pendingAttach = ref.SessionID
+	m.mode = modeNormal
+	return m, tea.Sequence(selectTargetCmd(m.runner, ref.WindowID, ref.PaneID), tea.Quit)
 }
 
 // handleHelpKey scrolls the help overlay or closes it. Only esc/q/?/Ctrl-C
@@ -774,6 +887,17 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeHelp
 		m.helpScroll = 0
 		return m, nil
+	case "f":
+		// Full TUI only — wyrm pick's compact form is deliberately the
+		// two-panel Sessions/Windows chooser, and a whole-server pane
+		// search doesn't fit that scope.
+		if m.compact {
+			return m, nil
+		}
+		m.mode = modeFindPane
+		m.findPaneQuery = ""
+		m.findPaneCur = 0
+		return m, loadAllPanes(m.runner)
 	}
 	return m, nil
 }

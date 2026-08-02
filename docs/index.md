@@ -252,6 +252,7 @@ already running.
 |---|---|
 | `Tab` / `Shift-Tab`, `1`–`4` | move focus between panels |
 | `↑` / `↓`, `j` / `k` | move the selection in the focused panel |
+| `f` | find a pane across every session at once |
 | `Enter` | attach — lands on the exact window/pane under the cursor (or, on Projects, starts/attaches the config's session) |
 | `x` | kill the focused session / window / pane (or, on Projects, stop the session running `on_project_exit`) — with a confirm |
 | `r` | rename the focused session or window |

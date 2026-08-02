@@ -363,6 +363,7 @@ already running.
 | `↑` / `↓`, `j` / `k` | move the selection in the focused panel |
 | `PgUp` / `PgDn`, `g` / `G` | move a screenful / jump to the first or last entry |
 | `/` | filter the focused panel (`Esc` clears it) |
+| `f` | find a pane across every session at once — see below |
 | `Enter` | attach — lands on the exact window/pane under the cursor (or, on Projects, starts/attaches the config's session) |
 | `x` | kill the focused session / window / pane (or, on Projects, stop the session running `on_project_exit`) — with a confirm |
 | `r` | rename the focused session or window |
@@ -389,6 +390,17 @@ floating session manager over your current work:
 # ~/.tmux.conf — prefix + g opens the session manager in a popup
 bind g display-popup -d "#{pane_current_path}" -w 80% -h 80% -E "wyrm tui"
 ```
+
+### Finding a pane across every session
+
+The four panels drill down one level at a time — Sessions → Windows → Panes
+— which means reaching a specific pane three sessions away still means
+navigating there step by step. `f` skips that: it opens a searchable list of
+every pane on the server at once (session ▸ window ▸ pane, with its running
+command), the same job tmux's own `choose-tree -Z` does. Type to narrow,
+`↑`/`↓` to move, `Enter` to attach directly to that pane, `Esc` to close.
+Full-TUI only — `wyrm pick`'s compact form stays the two-panel chooser it's
+meant to be.
 
 ### Mouse
 

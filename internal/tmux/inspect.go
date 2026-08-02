@@ -104,22 +104,43 @@ func ListWindows(r Runner, sessionID string) ([]WindowInfo, error) {
 }
 
 // PaneRef locates one pane within the whole tmux server, alongside the command
-// it's running. It's what a server-wide `list-panes -a` yields: enough to decide
-// which panes are worth inspecting, and which window and session to attribute
-// the result to.
+// it's running and enough naming context (session/window name and index) to
+// show it meaningfully in a flat, server-wide list. It's what a server-wide
+// `list-panes -a` yields: enough to decide which panes are worth inspecting,
+// which window and session to attribute the result to, and how to label a row
+// that's lost the visual hierarchy a per-session or per-window list has.
 type PaneRef struct {
-	SessionID string
-	WindowID  string
-	PaneID    string
-	Command   string
+	SessionID   string
+	SessionName string
+	WindowID    string
+	WindowName  string
+	WindowIndex int
+	PaneID      string
+	PaneIndex   int
+	Command     string
 }
 
-const allPanesFormat = "#{session_id}|#{window_id}|#{pane_id}|#{pane_current_command}"
+// allPanesSep separates allPanesFormat's fields. Unlike every other format
+// string in this file, this one has *three* free-form, user-controlled
+// fields (session name, window name, and pane_current_command) rather than
+// one — records' "only the last field may contain the delimiter" contract
+// only protects one of them, so a session or window named with a literal
+// "|" would misparse (at best erroring the whole list, at worst — if the
+// field count still happened to come out right — silently misattributing
+// fields). A control character essentially never present in a typed name
+// sidesteps the problem instead of just moving it, which is why this
+// function parses its own output rather than going through records.
+const allPanesSep = "\x01"
+
+const allPanesFormat = "#{session_id}" + allPanesSep + "#{session_name}" + allPanesSep +
+	"#{window_id}" + allPanesSep + "#{window_index}" + allPanesSep + "#{window_name}" + allPanesSep +
+	"#{pane_id}" + allPanesSep + "#{pane_index}" + allPanesSep + "#{pane_current_command}"
 
 // ListAllPanes returns every pane on the tmux server. The TUI uses it to find
 // agent panes across all sessions in one round trip — the alternative, walking
 // list-windows and list-panes per session, costs a tmux call per window and is
-// run on a timer.
+// run on a timer — and to back the flat, whole-server pane search ("f" in
+// `wyrm tui`).
 //
 // Like sessions.List, no server running is not an error: it just means
 // there are no panes.
@@ -131,23 +152,44 @@ func ListAllPanes(r Runner) ([]PaneRef, error) {
 		}
 		return nil, fmt.Errorf("listing panes: %w", CmdErr(err, out))
 	}
-	recs, err := records(out, 4, "list-panes")
-	if err != nil {
-		return nil, err
+	const nFields = 8
+	var recs [][]string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			continue
+		}
+		fields := strings.Split(line, allPanesSep)
+		if len(fields) != nFields {
+			return nil, fmt.Errorf("unexpected list-panes output %q", line)
+		}
+		recs = append(recs, fields)
 	}
 	refs := make([]PaneRef, 0, len(recs))
 	for _, f := range recs {
 		// These IDs are used directly as capture-pane targets, so they get the
 		// same validation every other parsed ID gets — see CheckID. This parser
 		// was the one that skipped it.
-		if err := CheckIDs(f[0], f[1], f[2]); err != nil {
+		if err := CheckIDs(f[0], f[2], f[5]); err != nil {
 			return nil, fmt.Errorf("listing panes: %w", err)
 		}
+		windowIndex, err := atoiField(f[3], "window index")
+		if err != nil {
+			return nil, err
+		}
+		paneIndex, err := atoiField(f[6], "pane index")
+		if err != nil {
+			return nil, err
+		}
 		refs = append(refs, PaneRef{
-			SessionID: f[0],
-			WindowID:  f[1],
-			PaneID:    f[2],
-			Command:   f[3],
+			SessionID:   f[0],
+			SessionName: f[1],
+			WindowID:    f[2],
+			WindowIndex: windowIndex,
+			WindowName:  f[4],
+			PaneID:      f[5],
+			PaneIndex:   paneIndex,
+			Command:     f[7],
 		})
 	}
 	return refs, nil
