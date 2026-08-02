@@ -73,9 +73,10 @@ Or build from a clone: `make install` (uses `go install` with a stamped version)
 ```sh
 wyrm                       # use .wyrm.toml (or legacy .tmuxconfig) in the cwd
 wyrm up -n                # dry run: print the tmux commands and hooks, run neither
+wyrm up -d                # build the session without attaching
 wyrm <name>                # attach to a running session, or start a known project, by name
 wyrm -config path/to/file  # explicit config
-wyrm restart              # stop the session and build it again (-n to dry-run)
+wyrm restart              # stop the session and build it again (-n to dry-run, -d to skip attaching)
 wyrm kill [name]          # destroy the session (runs on_project_exit first; -n to dry-run)
 wyrm pick                 # fuzzy-pick a running session and attach to it
 wyrm tui                  # full-screen session manager (browse, preview, kill, rename, start)
@@ -85,6 +86,8 @@ wyrm validate             # check the effective config parses and validates (-st
 wyrm list                 # list running tmux sessions non-interactively
 wyrm list-configs         # list candidate config file paths (used by shell completion)
 wyrm migrate-config       # move the local config into the shared config directory
+wyrm clone REPO [DEST]    # git clone, then build (and attach to) a session for it
+wyrm selfupdate           # download and install the latest release
 wyrm version
 ```
 
@@ -107,6 +110,22 @@ attaches.
 
 Run from inside an existing tmux client, wyrm switches the client to the
 session instead of nesting one tmux inside another.
+
+### Beyond one project, one config
+
+A few features extend discovery past "one `.wyrm.toml` per directory" — see
+the [configuration reference](configuration.md) for each in full:
+
+- **`[[wildcard]]`** applies one template config to every directory matching
+  a glob, for a folder of similar repos that should all get the same layout.
+- **`session.aliases`** gives a project a short, fixed name (`wyrm dot` for
+  `dotfiles`) that resolves exactly, alongside its real session name.
+- **`wyrm clone <repo> [dest]`** runs `git clone`, then builds a session for
+  the result in one step.
+- **`[zoxide]`** (opt-in) lists directories from your `cd` history in `wyrm
+  tui`'s Projects panel, not just ones with a wyrm config.
+- **`[tmux]`** targets a non-default tmux server or binary
+  (`socket`/`command`), for every tmux call wyrm makes.
 
 ## Editing, validating, and listing
 
@@ -279,6 +298,8 @@ trail    = "#3b4252"  # selection band in the other panels
 index    = "#8fbcbb"  # window indices and pane IDs
 active   = "#a3be8c"  # running / attached dots
 error    = "#bf616a"  # failed actions
+blocked  = "#ebcb8b"  # an agent waiting on an answer (⏸)
+idle     = "#8fbcbb"  # an agent that finished its turn (✓)
 ```
 
 Values are `#rgb` or `#rrggbb`. A misspelled role or an unparseable color is an
