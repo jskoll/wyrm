@@ -603,6 +603,7 @@ At least one of `name` / `root` is required.
 |---|---|---|---|
 | `name` | string | — | Window name |
 | `pre_window` | string | — | Command typed once into **every pane of the window**, before that pane's own command (e.g. `nvm use 18`) |
+| `post_window` | string | — | Shell command **run** (not typed) once all of the window's panes and their commands exist — e.g. waiting for a port to open |
 | `splits` | list | — | Split tree (below) — the recommended layout format |
 | `panes` | list | — | Legacy flat pane list (below); ignored when `splits` is set |
 | `layout` | string | `tiled` | tmux layout applied after legacy `panes` (`even-horizontal`, `main-vertical`, ...). Ignored when `splits` is set — a named layout would discard the tree's sizes — and wyrm warns if you set both |
@@ -678,6 +679,15 @@ A wyrm config **executes shell commands by design** — hooks run via
 your `$SHELL` (falling back to `sh`), and pane commands are typed into your shell. Treat config files
 with the same trust as a `Makefile` or `.envrc`: don't run one you haven't
 read.
+
+wyrm has no plugin system by design, for the same reason: `on_project_start`,
+`on_project_first_start`, `on_project_restart`, `on_project_exit`,
+`pre_window`, and `post_window` already cover what a plugin would typically
+be for (env prep, external tools, waiting on a condition, notifications) at
+one line of TOML each, without adding a separate mechanism for discovering
+and running third-party code. See
+[`docs/configuration.md`](docs/configuration.md) for each hook's exact
+timing.
 
 ## Development
 

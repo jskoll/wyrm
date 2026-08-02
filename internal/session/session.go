@@ -165,6 +165,16 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 	// Every pane now exists, so every target is known: type the lot.
 	keys.flush(r, stderr)
 
+	// post_window runs only now — a real subprocess, unlike pre_window's
+	// typed command, so it needs every pane's own command to have actually
+	// been sent first, not just the pane to exist. Sequential and in window
+	// order, matching the order windows were built in.
+	for i, w := range cfg.Windows {
+		if err := runHook(o, w.PostWindow, roots[i], "post_window", stderr); err != nil {
+			warnf(stderr, "post_window failed for window %q: %v", w.Name, err)
+		}
+	}
+
 	enablePaneTitles(r, id, cfg.Session, stderr)
 
 	if cfg.Session.StartupWindow != "" {

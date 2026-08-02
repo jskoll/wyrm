@@ -43,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   panel (marked `z`) alongside real wyrm projects, gracefully absent unless
   both the setting and the `zoxide` binary are present. `track` calls
   `zoxide add` after building a session.
+- `windows.post_window`: a shell command run (not typed) once a window's
+  panes and their commands all exist — for something a pane command
+  shouldn't block on, like waiting for a port to open. wyrm has no plugin
+  system by design; this rounds out the hooks that already cover what one
+  would typically be for.
 
 ### Fixed
 - `tmux.Attach` ignored `SocketName` entirely — a session built on a named

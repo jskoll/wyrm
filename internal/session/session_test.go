@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -629,6 +630,72 @@ func TestPaneTitlesOffByDefault(t *testing.T) {
 		if len(c) > 0 && c[0] == "set-option" {
 			t.Errorf("set-option called with pane titles unset: %v", c)
 		}
+	}
+}
+
+// TestCreatePostWindowRunsPerWindow covers both that post_window fires at
+// all, and that each window's hook runs in its own resolved root — the
+// thing that would break silently if roots[i] weren't threaded through the
+// hook loop correctly.
+func TestCreatePostWindowRunsPerWindow(t *testing.T) {
+	dir1, dir2 := t.TempDir(), t.TempDir()
+	marker := filepath.Join(t.TempDir(), "marker")
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{
+			{Name: "a", Root: dir1, PostWindow: "pwd >> " + marker},
+			{Name: "b", Root: dir2, PostWindow: "pwd >> " + marker},
+		},
+	}
+	r := &fakeRunner{}
+	var stderr bytes.Buffer
+	if _, _, _, err := Create(r, cfg, io.Discard, &stderr); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("post_window never ran: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("marker has %d lines, want one per window: %q", len(lines), data)
+	}
+	want := []string{dir1, dir2}
+	for i, w := range want {
+		got, err := filepath.EvalSymlinks(lines[i])
+		if err != nil {
+			t.Fatalf("resolving %q: %v", lines[i], err)
+		}
+		resolvedWant, err := filepath.EvalSymlinks(w)
+		if err != nil {
+			t.Fatalf("resolving %q: %v", w, err)
+		}
+		if got != resolvedWant {
+			t.Errorf("window %d ran post_window in %q, want %q", i, got, resolvedWant)
+		}
+	}
+}
+
+// TestCreatePostWindowFailureStillCreates matches the "cosmetic failure
+// warns and continues" policy every other per-pane/per-hook failure in this
+// package already follows.
+func TestCreatePostWindowFailureStillCreates(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{{Name: "w", PostWindow: "exit 1"}},
+	}
+	r := &fakeRunner{}
+	var stderr bytes.Buffer
+	name, _, created, err := Create(r, cfg, io.Discard, &stderr)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if name != "proj" || !created {
+		t.Errorf("name, created = %q, %v; want proj, true", name, created)
+	}
+	if !strings.Contains(stderr.String(), "post_window failed") {
+		t.Errorf("stderr = %q, want post_window failure warning", stderr.String())
 	}
 }
 

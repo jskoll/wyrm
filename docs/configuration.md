@@ -264,6 +264,32 @@ reach the shell in every pane. Setting them once on the session with
 Requires tmux 3.2 or newer (for `-e` on `new-session` / `split-window`). Every
 other wyrm feature works on 3.1+.
 
+## Hooks as wyrm's extension point
+
+wyrm has no plugin system, and isn't planning to build one — a real plugin
+loader (discovering executables, a versioned data contract, running
+third-party code at points a config doesn't obviously flag) is a lot of new
+machinery for a gap the six hooks below already cover: env prep, calling
+external tools, waiting on a condition, conditional logic, notifications —
+each one line of shell, run via your `$SHELL` (falling back to `sh`), with
+its own working directory:
+
+| Hook | Runs |
+|---|---|
+| `session.on_project_start` | Before the session is created, every fresh build |
+| `session.on_project_first_start` | Alongside `on_project_start`, only the very first time this project is ever started |
+| `session.on_project_restart` | Alongside `on_project_start`, every start after the first |
+| `session.on_project_exit` | Before `wyrm kill` destroys the session |
+| `windows.pre_window` | Typed into every pane of a window, before that pane's own command |
+| `windows.post_window` | Run once a window's panes and their commands all exist |
+
+A failure in any of them is reported and the build continues — see each
+hook's own section above for exact timing and semantics. If a real need
+ever shows up that these genuinely can't express (structured output fed
+back into a build decision, say, which a shell exit code can't carry), that
+would be worth a fresh design conversation — not something to route around
+with a bigger hook.
+
 ## `[[windows]]`
 
 | Key | Type | Default | Description |
@@ -271,9 +297,28 @@ other wyrm feature works on 3.1+.
 | `name` | string | — | Window name |
 | `root` | string | session root | This window's working directory. A relative path resolves against `session.root`, so `root = "api"` means the `api` folder inside the project |
 | `pre_window` | string | — | Command typed once into **every pane of the window**, before that pane's own command (e.g. `nvm use 18`) |
+| `post_window` | string | — | Shell command **run** (not typed) once all of the window's panes and their commands exist |
 | `splits` | list | — | Split tree (below) — the recommended layout format |
 | `panes` | list | — | Legacy flat pane list (below); ignored when `splits` is set |
 | `layout` | string | `tiled` | tmux layout applied after legacy `panes` (`even-horizontal`, `main-vertical`, ...). Ignored when `splits` is set — a named layout would discard the tree's sizes — and wyrm warns if you set both |
+
+`post_window` is a real subprocess — the same shape as `on_project_start`/
+`on_project_exit`, run via your `$SHELL` (falling back to `sh`) in the
+window's own root — not typed into a pane the way `pre_window` is. That
+makes it the place for something a pane command shouldn't block on, like
+waiting for a port to open before doing anything else:
+
+```toml
+[[windows]]
+name = "db"
+post_window = "until nc -z localhost 5432; do sleep 1; done"
+
+  [[windows.splits]]
+  run = "docker compose up db"
+```
+
+A failure warns and continues, same as every other per-window failure — see
+[Hooks as wyrm's extension point](#hooks-as-wyrms-extension-point) below.
 
 ## `[[windows.splits]]` — the split tree
 

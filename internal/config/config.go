@@ -102,6 +102,13 @@ type Window struct {
 	Splits    []Split `toml:"splits,omitempty"`
 	Panes     []Pane  `toml:"panes,omitempty"`
 	PreWindow string  `toml:"pre_window,omitempty"`
+	// PostWindow is a shell command run (via your $SHELL, or sh, in the
+	// window's root) once all of the window's panes exist, splits and pane
+	// commands included. Unlike PreWindow, it is a real subprocess — not
+	// typed into a pane — giving an out-of-band point for something like
+	// "wait for a port to open before continuing", the same shape as the
+	// project-level on_project_start/on_project_exit hooks.
+	PostWindow string `toml:"post_window,omitempty"`
 }
 
 // Split is a node in a window's split tree.

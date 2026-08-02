@@ -400,6 +400,7 @@ pane_title_format = "#{pane_index}"
 name = "w"
 layout = "tiled"
 pre_window = "true"
+post_window = "true"
 
   [[windows.splits]]
   type = "h"
