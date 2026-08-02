@@ -1,0 +1,31 @@
+# A [[wildcard]] template: applied to every directory a glob pattern
+# matches, instead of writing a config per directory. Point a [[wildcard]]
+# entry in ~/.config/wyrm/config.toml at a file like this one:
+#
+#   [[wildcard]]
+#   pattern = "~/work/*"
+#   config  = "~/.config/wyrm/settings/wildcard-template.wyrm.toml"
+#
+# `wyrm <name>` (the matched directory's basename), the TUI's Projects panel
+# (marked `~`), and `wyrm list-configs` all pick up the resulting matches the
+# same way they pick up any other project.
+
+[session]
+# session.name is normally left unset here: each matched directory's
+# basename supplies it automatically.
+#
+# root = "." is a placeholder. wyrm still requires a config to set *something*
+# here (or a name) to parse at all, but the value itself is never used — the
+# matched directory always overrides it, regardless of what this file says.
+root = "."
+
+[[windows]]
+name = "code"
+
+  [[windows.splits]]
+  command = "nvim"
+
+  [[windows.splits]]
+  type = "h"
+  size = 30
+  command = "git status"

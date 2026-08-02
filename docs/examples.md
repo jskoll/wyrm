@@ -58,3 +58,16 @@ using the `splits` tree.
 
 A Python project layout: editor, test runner, and a REPL window,
 using the `splits` tree.
+
+## [hooks.wyrm.toml](https://github.com/jskoll/wyrm/blob/main/examples/hooks.wyrm.toml)
+
+Every lifecycle and identity option a project's config can set:
+`on_project_first_start`/`on_project_restart` alongside `on_project_start`,
+`post_window`, `aliases`, and `enable_pane_titles`.
+
+## [wildcard-template.wyrm.toml](https://github.com/jskoll/wyrm/blob/main/examples/wildcard-template.wyrm.toml)
+
+The template a [`[[wildcard]]`](configuration.md#wildcard-one-config-many-directories)
+entry points at — applied to every directory a glob pattern matches, instead
+of a `.wyrm.toml` per directory. Goes in the shared config directory, not a
+project root.

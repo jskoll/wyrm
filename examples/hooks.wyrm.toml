@@ -1,0 +1,44 @@
+# Lifecycle hooks and identity: first-start vs. restart, post_window, and a
+# short alias — everything a project's config can say about itself beyond
+# its windows and panes.
+
+[session]
+name = "api"
+root = "."
+
+# Runs on every fresh build, first time or not.
+on_project_start = "echo 'starting session...'"
+# Runs alongside on_project_start, but only the very first time this project
+# is ever started — tracked in ~/.config/wyrm/state.toml, so it survives a
+# `wyrm kill` and holds across process runs. Good for one-off setup.
+on_project_first_start = "npm install"
+# Runs alongside on_project_start on every start after the first — for
+# something that should happen again each time, but not on the very first.
+on_project_restart = "npm run migrate"
+# Runs before `wyrm kill` destroys the session.
+on_project_exit = "echo 'cleaning up...'"
+
+# `wyrm dot` and `wyrm api-alias` now resolve to this project too, alongside
+# `wyrm api` — a short, fixed name that doesn't shift as other projects come
+# and go. Matched only for exact equality, same as the session name itself.
+aliases = ["a", "api-alias"]
+
+# Turns on tmux's live pane-border status line for the whole session.
+enable_pane_titles = true
+pane_title_position = "top"
+pane_title_format = "#{pane_index}: #{pane_current_command}"
+
+[[windows]]
+name = "dev"
+# A real subprocess, unlike pre_window's typed command — runs once every
+# pane below exists and has its own command running, useful for something a
+# pane command shouldn't block on.
+post_window = "until nc -z localhost 3000; do sleep 1; done; echo 'server is up'"
+
+  [[windows.splits]]
+  command = "nvim"
+
+  [[windows.splits]]
+  type = "h"
+  size = 35
+  run = "npm run dev"
