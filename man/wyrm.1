@@ -30,7 +30,7 @@ for the discovery order.
 Build or attach the current folder's session. This is the default
 when no subcommand is given.
 .TP
-.BI "wyrm up [\-config " PATH "] [\-n]"
+.BI "wyrm up [\-config " PATH "] [\-n] [\-d]"
 Same as bare
 .BR wyrm ,
 spelled explicitly.
@@ -42,7 +42,7 @@ if one exists; otherwise start the known project named
 .I NAME
 (local or shared config).
 .TP
-.BI "wyrm restart [\-config " PATH "] [\-n]"
+.BI "wyrm restart [\-config " PATH "] [\-n] [\-d]"
 Stop the session (running
 .B on_project_exit
 first) and build it again from the current config.
@@ -123,6 +123,10 @@ Dry run: print the tmux commands and lifecycle hooks that would run,
 without touching tmux. Accepted by
 .BR up ", " restart ", and " kill .
 .TP
+.B \-d
+Build (or reattach to) the session without attaching. Accepted by
+.BR up " and " restart .
+.TP
 .B \-strict
 With
 .BR validate ,
@@ -147,7 +151,9 @@ is absent.
 (falls back to
 .BR ~/.config/wyrm/settings.toml )
 Global settings: local vs. shared config storage, the shared config
-directory, and TUI preferences.
+directory, which tmux server/binary to target
+.RI ( [tmux] ),
+and TUI preferences.
 .TP
 .B $XDG_CONFIG_HOME/wyrm/default.wyrm.toml
 User-supplied replacement for the built-in default config, used when no

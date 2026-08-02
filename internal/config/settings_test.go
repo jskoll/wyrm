@@ -43,6 +43,87 @@ func TestLoadSettingsParsesFile(t *testing.T) {
 	}
 }
 
+func TestLoadSettingsParsesTmuxSection(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	dir := filepath.Join(xdg, "wyrm")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "[tmux]\nsocket = \"mysocket\"\ncommand = \"/opt/tmux/bin/tmux\"\n"
+	if err := os.WriteFile(filepath.Join(dir, SettingsFileName), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := LoadSettings()
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if got := s.TmuxSocket(); got != "mysocket" {
+		t.Errorf("TmuxSocket() = %q, want %q", got, "mysocket")
+	}
+	if got := s.TmuxCommand(); got != "/opt/tmux/bin/tmux" {
+		t.Errorf("TmuxCommand() = %q, want %q", got, "/opt/tmux/bin/tmux")
+	}
+}
+
+// TestTmuxEnvOverridesSettings guards the documented precedence: an env var
+// wins over [tmux], which is what lets a one-off invocation target a
+// different server without editing config.toml.
+func TestTmuxEnvOverridesSettings(t *testing.T) {
+	t.Setenv("WYRM_TMUX_SOCKET", "env-socket")
+	t.Setenv("WYRM_TMUX_COMMAND", "env-tmux")
+
+	s := &Settings{Tmux: Tmux{Socket: "file-socket", Command: "file-tmux"}}
+	if got := s.TmuxSocket(); got != "env-socket" {
+		t.Errorf("TmuxSocket() = %q, want env override %q", got, "env-socket")
+	}
+	if got := s.TmuxCommand(); got != "env-tmux" {
+		t.Errorf("TmuxCommand() = %q, want env override %q", got, "env-tmux")
+	}
+}
+
+func TestTmuxDefaultsNilSafe(t *testing.T) {
+	var s *Settings
+	if got := s.TmuxSocket(); got != "" {
+		t.Errorf("nil Settings TmuxSocket() = %q, want empty", got)
+	}
+	if got := s.TmuxCommand(); got != "" {
+		t.Errorf("nil Settings TmuxCommand() = %q, want empty", got)
+	}
+}
+
+// TestLoadSettingsUnknownKeyWarns guards the fix that brought Settings up to
+// the same strictness as a project config: a typo'd top-level key used to be
+// silently dropped by a plain toml.Unmarshal, so e.g. "[[widcard]]" would
+// parse clean and just never take effect.
+func TestLoadSettingsUnknownKeyWarns(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	dir := filepath.Join(xdg, "wyrm")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, SettingsFileName), []byte("stroage = \"shared\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := LoadSettings()
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if len(s.Warnings()) != 1 {
+		t.Fatalf("Warnings() = %v, want exactly 1", s.Warnings())
+	}
+	// The typo means Storage never got set from the file, so it should still
+	// carry the pre-parse default rather than silently staying empty.
+	if s.Storage != StorageLocal {
+		t.Errorf("Storage = %q, want default %q despite the typo", s.Storage, StorageLocal)
+	}
+}
+
 func TestLoadSettingsInvalidStorage(t *testing.T) {
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)

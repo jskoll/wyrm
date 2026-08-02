@@ -17,6 +17,24 @@ directory's basename) inside `shared_dir` first, falling back to the normal
 local search if it's missing. Run `wyrm migrate-config` to move an existing
 local config into the shared directory under the right name.
 
+## `[tmux]` — which tmux wyrm talks to
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `tmux.socket` | string | — | Passed as `tmux -L <name>`, selecting a separate tmux server instead of the default one |
+| `tmux.command` | string | `tmux` | Binary to invoke in place of `tmux` — a full path, or a wrapper/fork like `byobu` or `psmux` |
+
+```toml
+[tmux]
+socket  = "work"
+command = "/opt/tmux/bin/tmux"
+```
+
+Both can also be set per-invocation via `WYRM_TMUX_SOCKET` / `WYRM_TMUX_COMMAND`,
+which take priority over the settings file. Every tmux invocation for the
+process — including the final `attach-session` handoff — goes through the
+same configured binary and socket.
+
 ## `[tui]` — session manager preferences
 
 The same global settings file configures `wyrm tui`. Both sections are

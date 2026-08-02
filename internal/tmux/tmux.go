@@ -19,8 +19,22 @@ type Runner interface {
 // Exec is the real Runner, shelling out to the tmux binary on PATH.
 type Exec struct {
 	// SocketName selects a separate tmux server (tmux -L). Empty uses the
-	// default server. Used by integration tests to stay isolated.
+	// default server. Used by integration tests to stay isolated, and
+	// configurable via [tmux].socket / WYRM_TMUX_SOCKET for real use.
 	SocketName string
+
+	// Command overrides the binary invoked in place of "tmux" — a full path,
+	// or a wrapper/fork name like "byobu" or "psmux". Empty uses "tmux",
+	// resolved from PATH. Configurable via [tmux].command / WYRM_TMUX_COMMAND.
+	Command string
+}
+
+// bin returns the binary name or path to invoke: Command if set, else "tmux".
+func (e Exec) bin() string {
+	if e.Command != "" {
+		return e.Command
+	}
+	return "tmux"
 }
 
 // Run implements Runner. It captures stdout only, deliberately: the first
@@ -38,7 +52,7 @@ func (e Exec) Run(args ...string) (string, error) {
 	if e.SocketName != "" {
 		args = append([]string{"-L", e.SocketName}, args...)
 	}
-	out, err := exec.Command("tmux", args...).Output()
+	out, err := exec.Command(e.bin(), args...).Output()
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
@@ -123,10 +137,16 @@ func InsideTmux() bool {
 
 // Attach hands the caller's terminal to a tmux client attached to target,
 // which should be a tmux session ID (e.g. "$3") rather than a session name —
-// see FindSessionID for why. It is not part of Runner because it needs the
-// process's stdio.
-func Attach(target string) error {
-	cmd := exec.Command("tmux", "attach-session", "-t", target)
+// see FindSessionID for why. It is a method on Exec, not part of Runner,
+// because it needs the process's stdio rather than captured output — but it
+// still has to honor the same SocketName/Command as every other call, or a
+// session built on a named socket/binary would attach to the wrong server.
+func (e Exec) Attach(target string) error {
+	args := []string{"attach-session", "-t", target}
+	if e.SocketName != "" {
+		args = append([]string{"-L", e.SocketName}, args...)
+	}
+	cmd := exec.Command(e.bin(), args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

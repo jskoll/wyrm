@@ -182,6 +182,33 @@ func TestRunRestartWithNothingRunningStillBuilds(t *testing.T) {
 	}
 }
 
+// TestRunRestartDetachSkipsAttach guards `wyrm restart -d`: the session
+// still gets torn down and rebuilt for real, but attach must never be called.
+func TestRunRestartDetachSkipsAttach(t *testing.T) {
+	writeLocalConfig(t, localConfig)
+
+	r := &fakeRunner{listOutput: "$1|proj"}
+	var stdout, stderr bytes.Buffer
+	attachCalled := false
+	code := run([]string{"restart", "-d"}, &stdout, &stderr, r, func() bool { return false }, func(string) error {
+		attachCalled = true
+		return nil
+	})
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	joined := joinCalls(r)
+	if !strings.Contains(joined, "kill-session -t $1") {
+		t.Errorf("restart -d did not kill the running session:\n%s", joined)
+	}
+	if !strings.Contains(joined, "new-session") {
+		t.Errorf("restart -d did not rebuild the session:\n%s", joined)
+	}
+	if attachCalled {
+		t.Error("restart -d attached; want it to skip attaching")
+	}
+}
+
 // TestRunKillByName: `wyrm <name>` attached by name but `wyrm kill` could only
 // kill the current folder's session — an arbitrary asymmetry.
 func TestRunKillByName(t *testing.T) {

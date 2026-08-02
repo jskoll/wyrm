@@ -6,6 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `[tmux]` global settings (`socket`, `command`, or `WYRM_TMUX_SOCKET`/
+  `WYRM_TMUX_COMMAND`) to target a non-default tmux server or a different
+  binary (a wrapper/fork like `byobu` or `psmux`). Every tmux invocation for
+  the run, including the final `attach-session` handoff, honors it.
+- `-d` on `wyrm up` and `wyrm restart`: build (or reattach to) the session
+  without attaching.
+
+### Fixed
+- `tmux.Attach` ignored `SocketName` entirely — a session built on a named
+  socket via `[tmux].socket` would have attached to the default server
+  instead. It's now a method on `Exec`, like every other tmux call.
+- The global settings file (`~/.config/wyrm/config.toml`) silently dropped
+  unknown top-level keys; a typo like `[[widcard]]` now surfaces as a
+  warning, matching how project configs already report typos.
+
 ## [0.6.2] - 2026-08-01
 
 ### Added

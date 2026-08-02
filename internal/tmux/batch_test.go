@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -116,6 +118,38 @@ func TestRunEachReplaysOnlyFromTheFailure(t *testing.T) {
 	}
 	if errs[3] != nil {
 		t.Errorf("errs[3] = %v, want nil — it ran fine on replay", errs[3])
+	}
+}
+
+// TestRunBatchCommand guards RunBatch honoring Exec.Command the same way Run
+// does — a wrapper/fork binary needs every code path to invoke it, not just
+// single commands. The fake script echoes the value following every "-p"
+// flag on its own line, which is enough to stand in for tmux's own
+// "display-message -p" that RunBatch relies on for both a command's own
+// output and its trailing marker.
+func TestRunBatchCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake tmux script requires a POSIX shell")
+	}
+	dir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"prev=\"\"\n" +
+		"for a in \"$@\"; do\n" +
+		"  if [ \"$prev\" = \"-p\" ]; then printf '%s\\n' \"$a\"; fi\n" +
+		"  prev=\"$a\"\n" +
+		"done\n"
+	path := filepath.Join(dir, "custom-tmux")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := Exec{Command: path}
+	results, err := r.RunBatch([][]string{{"display-message", "-p", "one"}})
+	if err != nil {
+		t.Fatalf("RunBatch: %v", err)
+	}
+	if len(results) != 1 || results[0] != "one" {
+		t.Errorf("results = %q, want [\"one\"]", results)
 	}
 }
 

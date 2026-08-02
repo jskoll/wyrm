@@ -67,7 +67,7 @@ func (e Exec) RunBatch(cmds [][]string) ([]string, error) {
 		args = append(args, batchSep, "display-message", "-p", marker)
 	}
 
-	cmd := exec.Command("tmux", args...)
+	cmd := exec.Command(e.bin(), args...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()

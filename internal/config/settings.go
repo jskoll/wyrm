@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -55,6 +56,59 @@ type Settings struct {
 	Storage   Storage `toml:"storage"`
 	SharedDir string  `toml:"shared_dir"`
 	TUI       TUI     `toml:"tui"`
+	Tmux      Tmux    `toml:"tmux"`
+
+	// warnings collects unknown top-level keys found while parsing this
+	// settings file (see LoadSettings), mirroring Config.warnings.
+	warnings []string
+}
+
+// Warnings returns this settings file's non-fatal problems: unknown keys, one
+// per offending dotted path. Unlike Config.Warnings, there's no -strict
+// consumer for these yet — they're printed once, by main, right after the
+// initial load.
+func (s *Settings) Warnings() []string {
+	if s == nil {
+		return nil
+	}
+	return s.warnings
+}
+
+// Tmux configures which tmux binary and server wyrm talks to. Both fields can
+// also be set via WYRM_TMUX_COMMAND / WYRM_TMUX_SOCKET, which take priority —
+// see Settings.TmuxCommand / TmuxSocket.
+type Tmux struct {
+	// Socket selects a separate tmux server (tmux -L). Empty uses the default
+	// server.
+	Socket string `toml:"socket"`
+	// Command overrides the binary invoked in place of "tmux" — a full path,
+	// or a wrapper/fork like "byobu" or "psmux". Empty resolves "tmux" from
+	// PATH.
+	Command string `toml:"command"`
+}
+
+// TmuxSocket returns the tmux -L socket name to use: WYRM_TMUX_SOCKET if set,
+// else [tmux].socket, else "" (the default server). Nil-safe.
+func (s *Settings) TmuxSocket() string {
+	if v := os.Getenv("WYRM_TMUX_SOCKET"); v != "" {
+		return v
+	}
+	if s == nil {
+		return ""
+	}
+	return s.Tmux.Socket
+}
+
+// TmuxCommand returns the tmux binary to invoke: WYRM_TMUX_COMMAND if set,
+// else [tmux].command, else "" (resolve "tmux" from PATH). Nil-safe.
+func (s *Settings) TmuxCommand() string {
+	if v := os.Getenv("WYRM_TMUX_COMMAND"); v != "" {
+		return v
+	}
+	if s == nil {
+		return ""
+	}
+	return s.Tmux.Command
 }
 
 // TUI holds the interactive session manager's preferences.
@@ -197,6 +251,12 @@ func configDir() (string, error) {
 
 // LoadSettings reads the global settings file, returning defaults
 // (StorageLocal) when it doesn't exist.
+//
+// Parsing is strict (DisallowUnknownFields), the same as a project config
+// (see decode): a misspelled key here used to be silently dropped, which
+// meant e.g. "[[widcard]]" would parse clean and just never take effect. The
+// resulting Settings.Warnings() are printed once, by main, rather than at
+// every one of this function's call sites.
 func LoadSettings() (*Settings, error) {
 	path, err := SettingsPath()
 	if err != nil {
@@ -210,8 +270,16 @@ func LoadSettings() (*Settings, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := toml.Unmarshal(data, s); err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	dec := toml.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(s); err != nil {
+		var missing *toml.StrictMissingError
+		if !errors.As(err, &missing) {
+			return nil, fmt.Errorf("parsing %s: %w", path, err)
+		}
+		for _, key := range UnknownKeys(missing) {
+			s.warnings = append(s.warnings, fmt.Sprintf("unknown key %s — it is ignored (a typo?)", key))
+		}
 	}
 	if s.Storage == "" {
 		s.Storage = StorageLocal

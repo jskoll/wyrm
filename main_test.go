@@ -825,6 +825,33 @@ func TestRunDiscoverFallsBackToUserDefault(t *testing.T) {
 	}
 }
 
+// TestRunnerFromSettings guards main's use of [tmux].socket/command to build
+// the process-wide runner — the one construction site that shapes every tmux
+// invocation for the run, attach included.
+func TestRunnerFromSettings(t *testing.T) {
+	settings := &config.Settings{Tmux: config.Tmux{Socket: "mysocket", Command: "/opt/tmux/bin/tmux"}}
+	r := runnerFromSettings(settings)
+	if r.SocketName != "mysocket" {
+		t.Errorf("SocketName = %q, want %q", r.SocketName, "mysocket")
+	}
+	if r.Command != "/opt/tmux/bin/tmux" {
+		t.Errorf("Command = %q, want %q", r.Command, "/opt/tmux/bin/tmux")
+	}
+}
+
+func TestRunnerFromSettingsEnvOverride(t *testing.T) {
+	t.Setenv("WYRM_TMUX_SOCKET", "env-socket")
+	t.Setenv("WYRM_TMUX_COMMAND", "env-tmux")
+
+	r := runnerFromSettings(&config.Settings{Tmux: config.Tmux{Socket: "file-socket", Command: "file-tmux"}})
+	if r.SocketName != "env-socket" {
+		t.Errorf("SocketName = %q, want env override %q", r.SocketName, "env-socket")
+	}
+	if r.Command != "env-tmux" {
+		t.Errorf("Command = %q, want env override %q", r.Command, "env-tmux")
+	}
+}
+
 func TestRunCreateAndAttach(t *testing.T) {
 	path := writeConfig(t, validConfig)
 
@@ -842,6 +869,31 @@ func TestRunCreateAndAttach(t *testing.T) {
 	}
 	if attachCalled != "$1" {
 		t.Errorf("attach called with %q, want the session's tmux ID $1", attachCalled)
+	}
+}
+
+// TestRunUpDetachSkipsAttach guards `wyrm up -d`: the session must still be
+// built for real (unlike -n), but attach must never be called.
+func TestRunUpDetachSkipsAttach(t *testing.T) {
+	path := writeConfig(t, validConfig)
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{}
+	attachCalled := false
+	attach := func(string) error { attachCalled = true; return nil }
+
+	code := run([]string{"up", "-config", path, "-d"}, &stdout, &stderr, r, func() bool { return false }, attach)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "created session proj") {
+		t.Errorf("stdout = %q, want mention of created session", stdout.String())
+	}
+	if attachCalled {
+		t.Error("wyrm up -d attached; want it to skip attaching")
+	}
+	if !strings.Contains(joinCalls(r), "new-session") {
+		t.Errorf("wyrm up -d did not build the session:\n%s", joinCalls(r))
 	}
 }
 

@@ -80,9 +80,10 @@ wyrm uses git-style subcommands:
 wyrm                        # use .wyrm.toml (or legacy .tmuxconfig) in the cwd
 wyrm up                     # same as bare wyrm, spelled explicitly
 wyrm up -n                  # dry run: print the tmux commands and hooks, run neither
+wyrm up -d                  # build the session without attaching
 wyrm <name>                 # attach to a running session, or start a known project, by name
 wyrm -config path/to/file   # explicit config for the default build
-wyrm restart                # stop the session and build it again (-n to dry-run)
+wyrm restart                # stop the session and build it again (-n to dry-run, -d to skip attaching)
 wyrm kill [name]            # destroy the session (runs on_project_exit first; -n to dry-run)
 wyrm pick                   # fuzzy-pick a running session and attach to it
 wyrm tui                    # full-screen session manager (browse, preview, kill, rename, start)
@@ -184,6 +185,25 @@ back to a minimal built-in default. To use your own fallback instead, drop a
 `~/.config/wyrm/default.wyrm.toml` (`$XDG_CONFIG_HOME/wyrm/default.wyrm.toml`
 if set). It's a normal wyrm config — same `[session]` / `[[windows]]` format
 as any project config.
+
+## Targeting a different tmux
+
+By default wyrm talks to the default tmux server, via whatever `tmux` it
+finds on `PATH`. To point it at a separate server or a different binary —
+a wrapper/fork like `byobu` or `psmux`, or a specific install — add a
+`[tmux]` block to the same global settings file:
+
+```toml
+[tmux]
+socket  = "work"                    # tmux -L work
+command = "/opt/tmux/bin/tmux"      # binary to invoke instead of "tmux"
+```
+
+`WYRM_TMUX_SOCKET` / `WYRM_TMUX_COMMAND` override these per-invocation and
+take priority over the file. Every tmux call wyrm makes for the run —
+including the final `attach-session` handoff — goes through the same
+configured server and binary. See [`docs/configuration.md`](docs/configuration.md)
+for the full reference.
 
 ## Picking a running session
 

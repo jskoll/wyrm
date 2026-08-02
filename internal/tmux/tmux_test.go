@@ -80,7 +80,7 @@ func TestAttach(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	t.Setenv("TMUX_FAKE_ARGS_FILE", argsFile)
 
-	if err := Attach("myproj"); err != nil {
+	if err := (Exec{}).Attach("myproj"); err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
 	got, err := os.ReadFile(argsFile)
@@ -96,8 +96,50 @@ func TestAttachError(t *testing.T) {
 	installFakeTmux(t)
 	t.Setenv("TMUX_FAKE_EXIT", "1")
 
-	if err := Attach("myproj"); err == nil {
+	if err := (Exec{}).Attach("myproj"); err == nil {
 		t.Error("Attach with nonzero exit: want error, got nil")
+	}
+}
+
+// TestAttachSocketName guards the bug fixed alongside adding real socket
+// support: Attach used to be a free function that ignored SocketName
+// entirely, so a session built on a named socket would attach to the
+// default server instead.
+func TestAttachSocketName(t *testing.T) {
+	installFakeTmux(t)
+	argsFile := filepath.Join(t.TempDir(), "args")
+	t.Setenv("TMUX_FAKE_ARGS_FILE", argsFile)
+
+	if err := (Exec{SocketName: "wyrm-test"}).Attach("myproj"); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	got, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "-L wyrm-test attach-session -t myproj"; strings.TrimSpace(string(got)) != want {
+		t.Errorf("Attach invoked tmux with %q, want %q", strings.TrimSpace(string(got)), want)
+	}
+}
+
+func TestExecCommand(t *testing.T) {
+	installFakeTmux(t)
+	// Rename the fake binary so a bare "tmux" lookup on PATH would fail,
+	// proving Command actually selects the binary rather than PATH order
+	// happening to prefer it.
+	dir := t.TempDir()
+	script := "#!/bin/sh\nprintf '%s' \"$*\"\n"
+	path := filepath.Join(dir, "custom-tmux")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := (Exec{Command: path}).Run("list-sessions")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out != "list-sessions" {
+		t.Errorf("Run output = %q, want %q", out, "list-sessions")
 	}
 }
 

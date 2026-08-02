@@ -19,6 +19,7 @@ func (a *app) up(args []string) error {
 	fs := a.newFlagSet("up")
 	configPath := fs.String("config", "", "path to config file (default: .wyrm.toml, then .tmuxconfig)")
 	dryRun := fs.Bool("n", false, "print the tmux commands and hooks that would run, without touching tmux")
+	detach := fs.Bool("d", false, "build the session without attaching")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -50,6 +51,10 @@ func (a *app) up(args []string) error {
 		return err
 	}
 	a.reportCreated(name, created)
+	if *detach {
+		_, _ = fmt.Fprintf(a.stdout, "run `wyrm %s` to attach\n", name)
+		return nil
+	}
 	return a.attachOrSwitch(sessionID)
 }
 
@@ -105,6 +110,7 @@ func (a *app) restart(args []string) error {
 	fs := a.newFlagSet("restart")
 	configPath := fs.String("config", "", "path to config file (default: .wyrm.toml, then .tmuxconfig)")
 	dryRun := fs.Bool("n", false, "print the tmux commands and hooks that would run, without touching tmux")
+	detach := fs.Bool("d", false, "build the session without attaching")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -144,6 +150,10 @@ func (a *app) restart(args []string) error {
 		return err
 	}
 	_, _ = fmt.Fprintf(a.stdout, "created session %s\n", name)
+	if *detach {
+		_, _ = fmt.Fprintf(a.stdout, "run `wyrm %s` to attach\n", name)
+		return nil
+	}
 	return a.attachOrSwitch(sessionID)
 }
 

@@ -20,7 +20,31 @@ import (
 var version = "dev"
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, tmux.Exec{}, tmux.InsideTmux, tmux.Attach))
+	// Settings are loaded here, once, only to build the tmux runner: its
+	// [tmux].socket/command decide which server and binary every subsequent
+	// tmux invocation targets, runner.Attach included. Every verb still loads
+	// its own Settings for its own purposes (shared dir, TUI prefs) — this
+	// isn't a substitute for that, just the one load early enough to shape
+	// the runner before any verb runs.
+	settings, err := config.LoadSettings()
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "wyrm: "+err.Error())
+		os.Exit(1)
+	}
+	for _, w := range settings.Warnings() {
+		_, _ = fmt.Fprintln(os.Stderr, "wyrm: warning: "+w)
+	}
+	runner := runnerFromSettings(settings)
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, runner, tmux.InsideTmux, runner.Attach))
+}
+
+// runnerFromSettings builds the tmux.Exec every tmux invocation for this
+// process goes through, from [tmux].socket/command (WYRM_TMUX_SOCKET/COMMAND
+// take priority — see Settings.TmuxSocket/TmuxCommand). Split out from main
+// so it's a plain, directly testable function despite main itself calling
+// os.Exit.
+func runnerFromSettings(settings *config.Settings) tmux.Exec {
+	return tmux.Exec{SocketName: settings.TmuxSocket(), Command: settings.TmuxCommand()}
 }
 
 // app carries the process-level dependencies every subcommand needs. Verbs take
@@ -194,9 +218,9 @@ const usage = `wyrm — repeatable tmux session layouts from a TOML config.
 
 Usage:
   wyrm [-config PATH]        build or attach the current folder's session (default)
-  wyrm up [-config PATH]     same as bare wyrm, spelled explicitly (-n to dry-run)
+  wyrm up [-config PATH]     same as bare wyrm, spelled explicitly (-n to dry-run, -d to skip attaching)
   wyrm <name>                attach to a running session, or start a known project, by name
-  wyrm restart [-config P]   stop the session and build it again (-n to dry-run)
+  wyrm restart [-config P]   stop the session and build it again (-n to dry-run, -d to skip attaching)
   wyrm kill [name]           destroy the session (runs on_project_exit first; -n to dry-run)
   wyrm pick                  fuzzy-pick a running session and attach to it
   wyrm tui                   full-screen session manager (browse, preview, manage)
