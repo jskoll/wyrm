@@ -42,7 +42,7 @@ func TestStartProjectUsesConfigDirNotCwd(t *testing.T) {
 		return "", nil
 	}}
 
-	if msg := startProjectCmd(r, Project{Path: path})(); msg == nil {
+	if msg := startProjectCmd(r, nil, Project{Path: path})(); msg == nil {
 		t.Fatal("startProjectCmd produced no message")
 	} else if started, ok := msg.(projectStartedMsg); !ok {
 		t.Fatalf("startProjectCmd produced %T, want projectStartedMsg", msg)

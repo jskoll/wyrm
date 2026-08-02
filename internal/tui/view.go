@@ -199,11 +199,17 @@ func projectRows(m Model) [][]span {
 			mark = span{activeMark, "●"}
 		}
 		rows[i] = []span{mark, plain(" " + p.Name)}
-		if p.Wildcard {
+		switch {
+		case p.Wildcard:
 			// Distinguishes a directory synthesized from a [[wildcard]]
 			// pattern match from a project with its own config file — many
 			// of these can appear at once from a single settings entry.
 			rows[i] = append(rows[i], span{hintStyle, " ~"})
+		case p.Zoxide:
+			// A directory zoxide knows about with no wyrm config of its
+			// own — distinct from "~" since starting one uses the default
+			// config rather than a template.
+			rows[i] = append(rows[i], span{hintStyle, " z"})
 		}
 		// A project's marker is its session's: the project row is the only
 		// place a not-currently-selected session's agent shows up at all.

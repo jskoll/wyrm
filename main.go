@@ -156,6 +156,8 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 		return a.report(a.listConfigs(args[1:]))
 	case "migrate-config":
 		return a.report(a.migrateConfig(args[1:]))
+	case "clone":
+		return a.report(a.clone(args[1:]))
 	case "selfupdate":
 		return a.report(a.selfupdate(args[1:]))
 	default:
@@ -230,6 +232,7 @@ Usage:
   wyrm list [-format FMT]    list running sessions (FMT: table, json, toml, names)
   wyrm list-configs          list candidate config file paths (used by shell completion)
   wyrm migrate-config        move the local config into the shared config directory
+  wyrm clone REPO [DEST]     git clone, then build (and attach to) a session for it
   wyrm selfupdate            download and install the latest release (-check, -version V)
   wyrm version               print version and exit
   wyrm help                  show this help
@@ -329,7 +332,7 @@ func (a *app) resolveConfig(settings *config.Settings, explicitPath string) (*co
 // power the "did you mean" hint in attachByName.
 var knownSubcommands = []string{
 	"up", "restart", "kill", "pick", "tui", "save", "edit", "validate",
-	"list", "list-configs", "migrate-config", "selfupdate", "version", "help",
+	"list", "list-configs", "migrate-config", "clone", "selfupdate", "version", "help",
 }
 
 // nearestSubcommand returns the known subcommand closest to name by edit

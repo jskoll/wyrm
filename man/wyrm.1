@@ -93,6 +93,21 @@ config in the shared config directory. Used by shell completion.
 .B wyrm migrate-config
 Move the local config file into the shared config directory.
 .TP
+.BI "wyrm clone " REPO " [" DEST ]
+Run
+.BR "git clone" ,
+then build (and attach to) a session for the result, the same way a bare
+.B wyrm
+run from inside the freshly cloned directory would. Requires
+.B git
+on
+.BR PATH .
+If
+.I DEST
+falls under a configured
+.BR [[wildcard]] ,
+that template is used instead.
+.TP
 .BI "wyrm selfupdate [\-check] [\-version " VERSION ]
 Download the latest wyrm release from GitHub, verify it against the
 release's published checksums, and replace the running binary in place.
@@ -205,6 +220,9 @@ Tear a session down and rebuild it after editing its config:
 .TP
 List running sessions as JSON for a script:
 .B wyrm list \-format json
+.TP
+Clone a repo and start working in it immediately:
+.B wyrm clone git@github.com:jskoll/wyrm.git
 .SH SEE ALSO
 .BR tmux (1)
 .br

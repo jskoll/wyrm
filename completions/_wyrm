@@ -28,6 +28,7 @@ _wyrm() {
         'list:list running tmux sessions non-interactively'
         'list-configs:list candidate config file paths'
         'migrate-config:move the local config into the shared config directory'
+        'clone:git clone, then build and attach a session'
         'selfupdate:download and install the latest release'
         'version:print version and exit'
         'help:show help'

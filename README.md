@@ -93,6 +93,7 @@ wyrm validate               # check the effective config parses and validates (-
 wyrm list                   # list running tmux sessions non-interactively
 wyrm list-configs           # list candidate config file paths (used by shell completion)
 wyrm migrate-config         # move the local config into the shared config directory
+wyrm clone REPO [DEST]      # git clone, then build (and attach to) a session for it
 wyrm selfupdate             # download and install the latest release (-check, -version V)
 wyrm version                # print version
 wyrm help                   # usage overview
@@ -195,6 +196,49 @@ rooted there using the template's windows, and the TUI's Projects panel
 marks matches with `~`. See
 [`docs/configuration.md`](docs/configuration.md) for the template format and
 the recursive `/**` pattern form.
+
+## Cloning a repo into a session
+
+`wyrm clone <repo> [dest]` runs `git clone`, then builds (and attaches to) a
+session for the result — the shortcut for "get this repo and start working
+in it" in one command instead of `git clone` + `cd` + `wyrm`:
+
+```sh
+wyrm clone git@github.com:jskoll/wyrm.git       # clones into ./wyrm, same as git's own default
+wyrm clone git@github.com:jskoll/wyrm.git work  # clones into ./work instead
+```
+
+It needs `git` on `PATH` — the only other place wyrm depends on a binary
+besides tmux, and only for this one explicit subcommand, never by default.
+If the destination falls under a `[[wildcard]]` pattern, that template is
+used, the same as it would be for any other directory the pattern covers;
+otherwise wyrm resolves the config the same way a bare `wyrm up` run from
+inside the freshly cloned directory would — the repo's own committed
+`.wyrm.toml` if it has one, else your default config.
+
+A linked `git worktree`'s session name is derived from both the main
+repository and the worktree's own directory (e.g. `wyrm-feature-x` for a
+worktree named `feature-x` off the `wyrm` repo) rather than just the
+worktree directory's bare name, so it's clear at a glance which repo a
+worktree session belongs to — read directly from `.git`'s own pointer file,
+not by shelling to git, so it costs nothing on every `wyrm up`.
+
+## Directories zoxide knows about
+
+If you use [zoxide](https://github.com/ajeetdsouza/zoxide), `wyrm tui` can
+list directories from your `cd` history in the Projects panel too — not just
+ones with a wyrm config. It's opt-in (off by default) and does nothing at
+all unless both a setting and the `zoxide` binary itself are present:
+
+```toml
+# ~/.config/wyrm/config.toml
+[zoxide]
+enabled = true
+track   = true   # also call `zoxide add` after building a session
+```
+
+See [`docs/configuration.md`](docs/configuration.md) for how zoxide entries
+are deduplicated against real projects and what starting one builds.
 
 ## A custom default config
 

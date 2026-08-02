@@ -58,10 +58,27 @@ type Settings struct {
 	TUI       TUI        `toml:"tui"`
 	Tmux      Tmux       `toml:"tmux"`
 	Wildcard  []Wildcard `toml:"wildcard,omitempty"`
+	Zoxide    Zoxide     `toml:"zoxide"`
 
 	// warnings collects unknown top-level keys found while parsing this
 	// settings file (see LoadSettings), mirroring Config.warnings.
 	warnings []string
+}
+
+// Zoxide configures the TUI's optional zoxide-backed directory discovery —
+// see internal/zoxide and ZoxideEnabled/ZoxideTrack. Both fields default to
+// false, unlike TUI.Mouse/TUI.Agent.Enabled (which default true): those are
+// pure UI conveniences with no external dependency, while this one is a
+// real dependency on a binary other than tmux and a side-effecting write
+// into zoxide's own database, so it must not activate just because zoxide
+// happens to be installed.
+type Zoxide struct {
+	// Enabled shows zoxide-known directories (that don't already have a
+	// wyrm project) in the TUI's Projects panel.
+	Enabled *bool `toml:"enabled"`
+	// Track calls `zoxide add` after building a session, so using wyrm to
+	// reach a directory also teaches zoxide about it.
+	Track *bool `toml:"track"`
 }
 
 // Wildcard applies one config as a template to every directory matching
@@ -188,6 +205,24 @@ func (s *Settings) AgentEnabled() bool {
 		return true
 	}
 	return *s.TUI.Agent.Enabled
+}
+
+// ZoxideEnabled reports whether the TUI should list zoxide-known
+// directories in the Projects panel. Defaults to false — see Zoxide.
+func (s *Settings) ZoxideEnabled() bool {
+	if s == nil || s.Zoxide.Enabled == nil {
+		return false
+	}
+	return *s.Zoxide.Enabled
+}
+
+// ZoxideTrack reports whether wyrm should call `zoxide add` after building a
+// session. Defaults to false.
+func (s *Settings) ZoxideTrack() bool {
+	if s == nil || s.Zoxide.Track == nil {
+		return false
+	}
+	return *s.Zoxide.Track
 }
 
 // AgentCommands returns the pane commands to treat as agents; nil means the

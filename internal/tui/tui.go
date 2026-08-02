@@ -930,7 +930,7 @@ func (m Model) startProject() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	return m, startProjectCmd(m.runner, p)
+	return m, startProjectCmd(m.runner, m.settings, p)
 }
 
 // editProject opens the selected project's config in $EDITOR.

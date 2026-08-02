@@ -157,6 +157,38 @@ can't decide another's state — list Claude Code yourself if you still want it.
 A profile with no `commands`, or a `busy_pattern` that doesn't compile, is an
 error reported before the TUI starts rather than a silent fallback.
 
+## `[zoxide]` — frecency-based directory discovery
+
+`wyrm tui`'s Projects panel can list directories [zoxide](https://github.com/ajeetdsouza/zoxide)
+knows about — from your ordinary `cd` history — alongside your wyrm
+projects, so a directory you visit often shows up there whether or not it
+has a config of its own. This is opt-in and gracefully absent: it does
+nothing unless both `enabled = true` is set here *and* the `zoxide` binary
+is actually on `PATH`. Unlike `[tui].mouse`/`[tui].agent`, it defaults to
+**off** — it's a real dependency on a binary other than tmux and a
+side-effecting write into zoxide's own database, not a pure UI convenience,
+so it shouldn't activate just because zoxide happens to be installed.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `zoxide.enabled` | bool | `false` | List zoxide-known directories in the TUI's Projects panel |
+| `zoxide.track` | bool | `false` | Call `zoxide add` after building a session, so using wyrm to reach a directory also teaches zoxide about it |
+
+```toml
+[zoxide]
+enabled = true
+track   = true
+```
+
+A zoxide directory is skipped if its basename collides with an
+already-discovered wyrm project's name — the wyrm project wins, since it's
+the more specific match. Selecting a zoxide-only entry builds a session from
+your `default.wyrm.toml` (or wyrm's built-in default) rooted at that
+directory, marked `z` in the Projects panel to distinguish it from a project
+with its own config or a `~`-marked wildcard match. This is a `wyrm
+tui`-only feature — `wyrm <name>` and `wyrm pick` don't resolve zoxide
+directories by name.
+
 ## Custom default config
 
 When no project config is found at all, wyrm falls back to

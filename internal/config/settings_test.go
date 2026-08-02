@@ -160,6 +160,10 @@ busy_pattern = 'thinking \d+s'
 [[wildcard]]
 pattern = "~/code/*"
 config = "~/.config/wyrm/settings/_template.wyrm.toml"
+
+[zoxide]
+enabled = true
+track = true
 `
 	if err := os.WriteFile(filepath.Join(dir, SettingsFileName), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -443,7 +447,40 @@ func TestTUISettingsDefaults(t *testing.T) {
 			if got := s.AgentCommands(); got != nil {
 				t.Errorf("AgentCommands() = %v, want nil (the package default)", got)
 			}
+			// Unlike Mouse/Agent, Zoxide defaults to *off* — it's a real
+			// external dependency and a side-effecting write, not a pure UI
+			// convenience, so it must not activate on its own.
+			if s.ZoxideEnabled() {
+				t.Error("ZoxideEnabled() = true, want false by default")
+			}
+			if s.ZoxideTrack() {
+				t.Error("ZoxideTrack() = true, want false by default")
+			}
 		})
+	}
+}
+
+func TestLoadSettingsParsesZoxideSection(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	dir := filepath.Join(xdg, "wyrm")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "[zoxide]\nenabled = true\ntrack = true\n"
+	if err := os.WriteFile(filepath.Join(dir, SettingsFileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := LoadSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.ZoxideEnabled() {
+		t.Error("ZoxideEnabled() = false, want true from the file")
+	}
+	if !s.ZoxideTrack() {
+		t.Error("ZoxideTrack() = false, want true from the file")
 	}
 }
 

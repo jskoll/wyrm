@@ -31,7 +31,7 @@ _wyrm_complete() {
             ;;
     esac
 
-    local subcommands="up restart kill pick tui save edit validate list list-configs migrate-config selfupdate version help"
+    local subcommands="up restart kill pick tui save edit validate list list-configs migrate-config clone selfupdate version help"
 
     # First token: a subcommand, or a running session name to attach to.
     if [[ "$COMP_CWORD" -eq 1 ]]; then

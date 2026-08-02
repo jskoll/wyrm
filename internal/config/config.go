@@ -375,7 +375,11 @@ func (s Session) Resolve(baseDir string) (name, absRoot string, err error) {
 	}
 	name = s.Name
 	if name == "" {
-		name = filepath.Base(absRoot)
+		if wtName, ok := mainRepoWorktreeName(absRoot); ok {
+			name = wtName
+		} else {
+			name = filepath.Base(absRoot)
+		}
 	}
 	return name, absRoot, nil
 }

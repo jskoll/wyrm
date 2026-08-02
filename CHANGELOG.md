@@ -28,6 +28,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `session.aliases`: additional exact-match names `wyrm <name>` resolves to a
   project, alongside its session name — an exact project name always wins
   over an alias collision.
+- `wyrm clone <repo> [dest]`: runs `git clone`, then builds (and attaches to)
+  a session for the result — a `[[wildcard]]` template if the destination
+  falls under one, otherwise whatever a bare `wyrm up` from inside it would
+  resolve. Requires `git` on `PATH`, wyrm's second (and still explicit,
+  opt-in) dependency on a binary other than tmux.
+- A linked git worktree's session name is now derived from both the main
+  repository and the worktree's own directory (`wyrm-feature-x`, not just
+  `feature-x`) when `session.name` is unset — read directly from `.git`'s
+  own pointer file, not by shelling to git, so every `wyrm up` stays on the
+  zero-dependency naming path.
+- `[zoxide]` global settings (`enabled`, `track`; both default `false`):
+  lists directories from your zoxide/`cd` history in `wyrm tui`'s Projects
+  panel (marked `z`) alongside real wyrm projects, gracefully absent unless
+  both the setting and the `zoxide` binary are present. `track` calls
+  `zoxide add` after building a session.
 
 ### Fixed
 - `tmux.Attach` ignored `SocketName` entirely — a session built on a named
