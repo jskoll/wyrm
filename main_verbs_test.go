@@ -109,9 +109,9 @@ func TestRunUpDryRunDoesNotExecuteHooks(t *testing.T) {
 // on_project_restart instead — proving state.Load/MarkStarted are actually
 // wired into the up/restart command paths, not just Create's own signature.
 func TestRunUpFirstStartThenRestartFiresCorrectHook(t *testing.T) {
-	cfg := localConfig[:strings.Index(localConfig, "[[windows]]")] +
+	cfg := "\n[session]\nname = \"proj\"\nroot = \".\"\n" +
 		"on_project_first_start = \"true\"\non_project_restart = \"true\"\n\n" +
-		localConfig[strings.Index(localConfig, "[[windows]]"):]
+		"[[windows]]\nname = \"w\"\n"
 	writeLocalConfig(t, cfg)
 
 	var stdout, stderr bytes.Buffer

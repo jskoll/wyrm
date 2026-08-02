@@ -178,8 +178,10 @@ func matchWildcardDirs(pattern string) ([]string, error) {
 		err := filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				// An unreadable subdirectory shouldn't cost every sibling its
-				// match, so skip it rather than aborting the whole walk.
-				return nil
+				// match, so skip it rather than aborting the whole walk —
+				// returning nil from a WalkDirFunc means exactly that, per
+				// its documented contract, not "swallow the error".
+				return nil //nolint:nilerr
 			}
 			if path != base && d.IsDir() {
 				dirs = append(dirs, path)
