@@ -345,6 +345,7 @@ func TestNoServerRunningPrefersTheSentinel(t *testing.T) {
 		{"typed sentinel, no text", fmt.Errorf("listing: %w", ErrNoServer), "", true},
 		{"text fallback, untyped error", errors.New("exit status 1"), "no server running on /tmp/x", true},
 		{"text fallback, socket never created", errors.New("exit status 1"), "error connecting to /tmp/x", true},
+		{"text fallback, server auto-exited after last session", errors.New("exit status 1"), "server exited unexpectedly", true},
 		{"a real failure is not 'no server'", errors.New("exit status 1"), "duplicate session: foo", false},
 		{"no error at all", nil, "", false},
 	}

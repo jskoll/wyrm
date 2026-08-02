@@ -106,7 +106,10 @@ var ErrNoServer = errors.New("no tmux server running")
 // may report the condition only in its output, and because the wording is not
 // something tmux promises: "no server running on <socket>" for the default
 // server, "error connecting to <socket> (No such file or directory)" for an -L
-// socket that was never created.
+// socket that was never created, "server exited unexpectedly" for a client
+// that reached the socket just as the server tore itself down — which tmux
+// does automatically once its last session ends, so killing that last
+// session and then listing sessions is a legitimate race, not a fault.
 func NoServerRunning(err error, out string) bool {
 	if errors.Is(err, ErrNoServer) {
 		return true
@@ -116,7 +119,9 @@ func NoServerRunning(err error, out string) bool {
 
 func noServerText(out string) bool {
 	msg := strings.ToLower(out)
-	return strings.Contains(msg, "no server running") || strings.Contains(msg, "error connecting")
+	return strings.Contains(msg, "no server running") ||
+		strings.Contains(msg, "error connecting") ||
+		strings.Contains(msg, "server exited unexpectedly")
 }
 
 // CheckID validates an ID parsed out of tmux's output. wyrm targets every
