@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-02
+
 ### Added
 - `[tmux]` global settings (`socket`, `command`, or `WYRM_TMUX_SOCKET`/
   `WYRM_TMUX_COMMAND`) to target a non-default tmux server or a different
@@ -680,7 +682,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/jskoll/wyrm/compare/v0.7.0...v0.8.0
 [0.6.2]: https://github.com/jskoll/wyrm/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/jskoll/wyrm/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/jskoll/wyrm/compare/v0.5.1...v0.6.0
