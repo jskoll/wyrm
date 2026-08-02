@@ -177,6 +177,25 @@ usual local search if it isn't there. `wyrm migrate-config` moves the
 current directory's local config into the shared directory under the right
 name for you.
 
+## One config, many directories
+
+`[[wildcard]]` applies one template config to every directory matching a
+glob, instead of a `.wyrm.toml` per project — for a folder of similar repos
+that should all get the same layout:
+
+```toml
+# ~/.config/wyrm/config.toml
+[[wildcard]]
+pattern = "~/work/*"
+config  = "~/.config/wyrm/settings/_client-template.wyrm.toml"
+```
+
+`wyrm <name>` (the matched directory's basename) then builds a session
+rooted there using the template's windows, and the TUI's Projects panel
+marks matches with `~`. See
+[`docs/configuration.md`](docs/configuration.md) for the template format and
+the recursive `/**` pattern form.
+
 ## A custom default config
 
 If no config is found for a project at all (see above), wyrm normally falls
@@ -254,6 +273,11 @@ If you already know the session's name, `wyrm <name>` skips the picker and
 attaches (or `switch-client`s) directly to it — exact match only, no fuzzy
 matching. Combined with shell completion (below), this means `wyrm <TAB>`
 tab-completes to real running session names.
+
+A project can also declare `aliases` in its `[session]` block — short, fixed
+names that resolve exactly like the real one (`wyrm dot` for a project named
+`dotfiles`), without shifting as other projects come and go. See
+[`docs/configuration.md`](docs/configuration.md).
 
 ## The session manager TUI
 
@@ -522,6 +546,7 @@ session instead of nesting one tmux inside another.
 | `on_project_restart` | string | — | Runs alongside `on_project_start` on every start after the first |
 | `startup_window` | string | first window | Window (name or index) to focus after creation. Without it the session opens on the first window, focused on its first pane |
 | `startup_pane` | int | — | Pane to focus within `startup_window` (uses your `pane-base-index`) |
+| `aliases` | array | — | Additional exact-match names `wyrm <name>` resolves to this project |
 | `enable_pane_titles` | bool | `false` | Turn on tmux's live pane-border status line (`pane-border-status`/`-format`) |
 | `pane_title_position` | string | `top` | `top` or `bottom`; only meaningful with `enable_pane_titles` |
 | `pane_title_format` | string | `#{pane_index}: #{pane_current_command}` | tmux format string for the pane-border line |

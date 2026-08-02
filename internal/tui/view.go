@@ -199,6 +199,12 @@ func projectRows(m Model) [][]span {
 			mark = span{activeMark, "●"}
 		}
 		rows[i] = []span{mark, plain(" " + p.Name)}
+		if p.Wildcard {
+			// Distinguishes a directory synthesized from a [[wildcard]]
+			// pattern match from a project with its own config file — many
+			// of these can appear at once from a single settings entry.
+			rows[i] = append(rows[i], span{hintStyle, " ~"})
+		}
 		// A project's marker is its session's: the project row is the only
 		// place a not-currently-selected session's agent shows up at all.
 		if p.Running {

@@ -18,9 +18,10 @@ import (
 )
 
 // listConfigs prints config paths wyrm knows about: the local file (if
-// present) and every candidate in the shared config directory. These are
-// the candidates shell completion offers for -config; -config itself can
-// point at any of them regardless of the current storage setting.
+// present), every candidate in the shared config directory, and every
+// [[wildcard]] template that currently matches at least one directory.
+// These are the candidates shell completion offers for -config; -config
+// itself can point at any of them regardless of the current storage setting.
 func (a *app) listConfigs(args []string) error {
 	fs := a.newFlagSet("list-configs")
 	if err := parseFlags(fs, args); err != nil {
@@ -42,6 +43,13 @@ func (a *app) listConfigs(args []string) error {
 		matches, _ := filepath.Glob(filepath.Join(dir, "*"+config.DefaultFileName))
 		for _, m := range matches {
 			_, _ = fmt.Fprintln(a.stdout, m)
+		}
+	}
+	seen := map[string]bool{}
+	for _, p := range config.DiscoverWildcardProjects(settings) {
+		if !seen[p.Path] {
+			seen[p.Path] = true
+			_, _ = fmt.Fprintln(a.stdout, p.Path)
 		}
 	}
 	return nil

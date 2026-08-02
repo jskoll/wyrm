@@ -53,14 +53,33 @@ const (
 
 // Settings is wyrm's global preferences, shared across all projects.
 type Settings struct {
-	Storage   Storage `toml:"storage"`
-	SharedDir string  `toml:"shared_dir"`
-	TUI       TUI     `toml:"tui"`
-	Tmux      Tmux    `toml:"tmux"`
+	Storage   Storage    `toml:"storage"`
+	SharedDir string     `toml:"shared_dir"`
+	TUI       TUI        `toml:"tui"`
+	Tmux      Tmux       `toml:"tmux"`
+	Wildcard  []Wildcard `toml:"wildcard,omitempty"`
 
 	// warnings collects unknown top-level keys found while parsing this
 	// settings file (see LoadSettings), mirroring Config.warnings.
 	warnings []string
+}
+
+// Wildcard applies one config as a template to every directory matching
+// Pattern, instead of requiring a [[session]]-style config per directory.
+// See DiscoverWildcardProjects.
+type Wildcard struct {
+	// Pattern is a glob (Go's filepath.Match syntax: "*", "?", "[...]"),
+	// optionally ending in "/**" for recursive matching. "~" and $VAR are
+	// expanded.
+	Pattern string `toml:"pattern"`
+	// Config is the template config file applied to every directory Pattern
+	// matches — an ordinary .wyrm.toml whose session.name is normally left
+	// unset, since the matched directory supplies it. session.root, on the
+	// other hand, always gets overridden with the matched directory
+	// regardless of what the file says — but Load still requires the file to
+	// set *something* there (or a name), so a template conventionally sets
+	// root = "." as a placeholder (see DiscoverWildcardProjects).
+	Config string `toml:"config"`
 }
 
 // Warnings returns this settings file's non-fatal problems: unknown keys, one

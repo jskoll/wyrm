@@ -67,6 +67,12 @@ type Session struct {
 	StartupWindow       string            `toml:"startup_window,omitempty"`
 	StartupPane         *int              `toml:"startup_pane,omitempty"` // nil = unset; 0 is a valid pane
 	Env                 map[string]string `toml:"env,omitempty"`
+	// Aliases are additional exact-match names FindProject resolves this
+	// project by, alongside its normal session name — a short, fixed name
+	// that doesn't shift as other projects come and go. Matched only for
+	// exact equality, the same as the session name itself; no fuzzy
+	// matching is involved.
+	Aliases []string `toml:"aliases,omitempty"`
 
 	// EnablePaneTitles turns on tmux's live pane-border status line
 	// (pane-border-status/-format) for the session. Nil means off, matching

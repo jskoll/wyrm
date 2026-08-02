@@ -298,6 +298,12 @@ func (a *app) startProject(project config.Project) error {
 	if err != nil {
 		return err
 	}
+	if project.Wildcard {
+		// The template's own session.root (normally unset) doesn't say which
+		// directory this Project stands for — only the match does. See
+		// config.DiscoverWildcardProjects.
+		cfg.Session.Root = project.Root
+	}
 	_, _ = fmt.Fprintf(a.stderr, "wyrm: using config %s\n", project.Path)
 	a.printWarnings(cfg)
 	if msg, bad := config.CheckSharedRoot(project, cfg); bad {

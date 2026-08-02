@@ -17,6 +17,52 @@ directory's basename) inside `shared_dir` first, falling back to the normal
 local search if it's missing. Run `wyrm migrate-config` to move an existing
 local config into the shared directory under the right name.
 
+## `[[wildcard]]` — one config, many directories
+
+A `[[wildcard]]` entry applies one template config to every directory
+matching a glob pattern, instead of writing a `[[session]]`-per-project
+config for each. It's for a folder of similar repos — a client's projects, a
+monorepo's packages — that should all get the same layout without
+maintaining one file per directory.
+
+```toml
+[[wildcard]]
+pattern = "~/work/*"
+config  = "~/.config/wyrm/settings/_client-template.wyrm.toml"
+
+[[wildcard]]
+pattern = "~/code/**"       # nested at any depth, not just one level
+config  = "~/.config/wyrm/settings/_dev-template.wyrm.toml"
+```
+
+| Key | Type | Description |
+|---|---|---|
+| `pattern` | string | A glob (`*`, `?`, `[...]`); `~` and `$VAR` are expanded. A trailing `/**` matches every directory nested at any depth under the base, instead of one level |
+| `config` | string | Path to the template config applied to every matching directory |
+
+The template is an ordinary `.wyrm.toml`. Its `session.name` is normally left
+unset, since each matched directory's basename supplies it. Its
+`session.root` is always overridden with the matched directory regardless of
+what the file says — but `wyrm` still requires a config to set *something*
+there (or a name) to parse at all, so the convention is to write
+`root = "."` as a placeholder:
+
+```toml
+# ~/.config/wyrm/settings/_client-template.wyrm.toml
+[session]
+root = "."
+
+[[windows]]
+name = "code"
+  [[windows.splits]]
+  command = "nvim"
+```
+
+`wyrm <name>` (where `<name>` is a matched directory's basename), the TUI's
+Projects panel, and `wyrm list-configs` all pick up wildcard matches the same
+way they pick up any other project — matched entries are marked `~` in the
+TUI to distinguish them from a project with its own config file.
+
 ## `[tmux]` — which tmux wyrm talks to
 
 | Key | Type | Default | Description |
@@ -131,6 +177,7 @@ file uses the same `[session]` / `[[windows]]` format documented below.
 | `startup_window` | string | first window | Window (name or index) to focus after creation. Without it the session opens on the first window, focused on its first pane |
 | `startup_pane` | int | — | Pane to focus within `startup_window` (uses your `pane-base-index`) |
 | `env` | table | — | Environment variables set in every pane of the session (below) |
+| `aliases` | array | — | Additional exact-match names `wyrm <name>` resolves to this project, alongside its session name (below) |
 | `enable_pane_titles` | bool | `false` | Turn on tmux's live pane-border status line for the session |
 | `pane_title_position` | string | `top` | `top` or `bottom` |
 | `pane_title_format` | string | `#{pane_index}: #{pane_current_command}` | tmux format string shown on the pane-border line |
@@ -154,6 +201,21 @@ on_project_restart     = "npm run migrate"  # every start after that
 
 Neither fires for a config with no on-disk identity — the built-in default,
 or one loaded some other way than from a file.
+
+### `aliases`
+
+```toml
+[session]
+name    = "dotfiles"
+aliases = ["dot", "df"]
+```
+
+`wyrm dot` and `wyrm df` now attach to (or start) the same project as `wyrm
+dotfiles` — handy for a project you jump to constantly, where a short fixed
+name beats remembering (or fuzzy-typing) the full one. Matching is exact
+only, same as the session name itself: an alias never partially matches, and
+an exact project name always wins over an alias collision if two projects'
+names/aliases happen to overlap.
 
 ### `[session.env]`
 

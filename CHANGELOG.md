@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `wyrm kill` and holds across process runs.
 - `session.enable_pane_titles` (plus `pane_title_position`/`pane_title_format`):
   turns on tmux's live pane-border status line for the session.
+- `[[wildcard]]` global settings: apply one template config to every
+  directory matching a glob pattern (with a `/**` recursive form), instead of
+  a `.wyrm.toml` per project. Matches are discoverable by `wyrm <name>`,
+  `wyrm list-configs`, and the TUI's Projects panel (marked `~`) the same as
+  any other project.
+- `session.aliases`: additional exact-match names `wyrm <name>` resolves to a
+  project, alongside its session name — an exact project name always wins
+  over an alias collision.
 
 ### Fixed
 - `tmux.Attach` ignored `SocketName` entirely — a session built on a named

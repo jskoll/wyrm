@@ -124,6 +124,56 @@ func TestLoadSettingsUnknownKeyWarns(t *testing.T) {
 	}
 }
 
+// TestLoadSettingsAcceptsEveryDocumentedKey is Settings' equivalent of
+// config.TestLoadAcceptsEveryDocumentedKey: every key the reference
+// documents must round-trip warning-free now that LoadSettings is strict.
+func TestLoadSettingsAcceptsEveryDocumentedKey(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	dir := filepath.Join(xdg, "wyrm")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `
+storage = "local"
+shared_dir = "~/.config/wyrm/settings"
+
+[tmux]
+socket = "mysocket"
+command = "/opt/tmux/bin/tmux"
+
+[tui]
+mouse = true
+
+[tui.agent]
+enabled = true
+commands = ["claude"]
+
+[[tui.agent.profiles]]
+commands = ["aider"]
+busy = ["thinking"]
+blocked = ["? for shortcuts"]
+idle = ["aider> "]
+busy_pattern = 'thinking \d+s'
+
+[[wildcard]]
+pattern = "~/code/*"
+config = "~/.config/wyrm/settings/_template.wyrm.toml"
+`
+	if err := os.WriteFile(filepath.Join(dir, SettingsFileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := LoadSettings()
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if len(s.Warnings()) != 0 {
+		t.Errorf("Warnings() = %v, want none", s.Warnings())
+	}
+}
+
 func TestLoadSettingsInvalidStorage(t *testing.T) {
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)

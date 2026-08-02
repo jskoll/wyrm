@@ -92,6 +92,125 @@ func TestProjectNameCacheInvalidatesOnEdit(t *testing.T) {
 	}
 }
 
+// TestDiscoverWildcardProjectsExpandsPattern covers the plain (single-level)
+// glob form, and that each match gets its own Project rooted at the matched
+// directory, all sharing the one template config.
+func TestDiscoverWildcardProjectsExpandsPattern(t *testing.T) {
+	base := t.TempDir()
+	template := filepath.Join(t.TempDir(), "tmpl.wyrm.toml")
+	if err := os.WriteFile(template, []byte("[[windows]]\nname = \"w\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"alpha", "beta"} {
+		if err := os.MkdirAll(filepath.Join(base, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A non-directory match must be excluded.
+	if err := os.WriteFile(filepath.Join(base, "notadir"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := &Settings{Wildcard: []Wildcard{{Pattern: filepath.Join(base, "*"), Config: template}}}
+	got := DiscoverWildcardProjects(settings)
+	if len(got) != 2 {
+		t.Fatalf("got %d wildcard projects, want 2: %+v", len(got), got)
+	}
+	names := map[string]bool{}
+	for _, p := range got {
+		if !p.Wildcard {
+			t.Errorf("project %+v: Wildcard = false, want true", p)
+		}
+		if p.Path != template {
+			t.Errorf("project %+v: Path = %q, want the template %q", p, p.Path, template)
+		}
+		if p.Root == "" || !filepath.IsAbs(p.Root) {
+			t.Errorf("project %+v: Root must be an absolute matched directory", p)
+		}
+		names[p.Name] = true
+	}
+	if !names["alpha"] || !names["beta"] {
+		t.Errorf("names = %+v, want alpha and beta", names)
+	}
+}
+
+// TestDiscoverWildcardProjectsRecursive covers the "/**" suffix, which must
+// match nested directories at any depth, but not the base itself.
+func TestDiscoverWildcardProjectsRecursive(t *testing.T) {
+	base := t.TempDir()
+	template := filepath.Join(t.TempDir(), "tmpl.wyrm.toml")
+	if err := os.WriteFile(template, []byte("[[windows]]\nname = \"w\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(base, "foo", "bar"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := &Settings{Wildcard: []Wildcard{{Pattern: base + "/**", Config: template}}}
+	got := DiscoverWildcardProjects(settings)
+	roots := map[string]bool{}
+	for _, p := range got {
+		roots[p.Root] = true
+	}
+	if len(roots) != 2 {
+		t.Fatalf("roots = %+v, want exactly foo and foo/bar", roots)
+	}
+	if !roots[filepath.Join(base, "foo")] || !roots[filepath.Join(base, "foo", "bar")] {
+		t.Errorf("roots = %+v, want %q and %q", roots,
+			filepath.Join(base, "foo"), filepath.Join(base, "foo", "bar"))
+	}
+	if roots[base] {
+		t.Error("recursive wildcard matched the base directory itself")
+	}
+}
+
+// TestDiscoverProjectsWildcardDedup guards the identity model: a wildcard
+// project's key is (template path, matched directory), not the template path
+// alone — DiscoverProjects' normal file-based dedup would otherwise collapse
+// every directory sharing one template down to a single entry.
+func TestDiscoverProjectsWildcardDedup(t *testing.T) {
+	base := t.TempDir()
+	template := filepath.Join(t.TempDir(), "tmpl.wyrm.toml")
+	if err := os.WriteFile(template, []byte("[[windows]]\nname = \"w\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"one", "two", "three"} {
+		if err := os.MkdirAll(filepath.Join(base, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(t.TempDir())
+
+	settings := &Settings{Wildcard: []Wildcard{{Pattern: filepath.Join(base, "*"), Config: template}}}
+	got := DiscoverProjects(settings)
+	if len(got) != 3 {
+		t.Fatalf("DiscoverProjects with a 3-directory wildcard = %d projects, want 3: %+v", len(got), got)
+	}
+}
+
+// TestFindProjectAliasResolvesAfterExactName covers both halves of the
+// documented rule: an alias resolves a project, and an exact project name
+// always wins over an alias collision.
+func TestFindProjectAliasResolvesAfterExactName(t *testing.T) {
+	local := t.TempDir()
+	t.Chdir(local)
+	body := "[session]\nname = \"dotfiles\"\naliases = [\"dot\", \"df\"]\n[[windows]]\nname = \"w\"\n"
+	if err := os.WriteFile(filepath.Join(local, DefaultFileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := &Settings{Storage: StorageLocal}
+	if p, ok := FindProject(settings, "dot"); !ok || p.Name != "dotfiles" {
+		t.Errorf("FindProject(dot) = %+v, %v; want the dotfiles project", p, ok)
+	}
+	if p, ok := FindProject(settings, "df"); !ok || p.Name != "dotfiles" {
+		t.Errorf("FindProject(df) = %+v, %v; want the dotfiles project", p, ok)
+	}
+	if _, ok := FindProject(settings, "nonexistent-alias"); ok {
+		t.Error("FindProject matched an alias that was never declared")
+	}
+}
+
 // A shared config with a relative root resolves against the shared directory,
 // not the project, so it builds a session in the wrong place. Warn, don't refuse.
 func TestCheckSharedRoot(t *testing.T) {

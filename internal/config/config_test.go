@@ -391,6 +391,7 @@ on_project_first_start = "true"
 on_project_restart = "true"
 startup_window = "w"
 startup_pane = 0
+aliases = ["s2", "s3"]
 enable_pane_titles = true
 pane_title_position = "top"
 pane_title_format = "#{pane_index}"

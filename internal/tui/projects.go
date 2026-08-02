@@ -23,6 +23,12 @@ type Project struct {
 	Shared    bool
 	Running   bool
 	SessionID string
+	// Root and Wildcard mirror config.Project — see DiscoverWildcardProjects.
+	// Root is the matched directory for a wildcard-discovered project
+	// (nonempty only when Wildcard is true), which overrides the template
+	// config's own session.root when the project is started.
+	Root     string
+	Wildcard bool
 }
 
 // listProjects annotates config.DiscoverProjects — the shared discovery rules,
@@ -39,7 +45,7 @@ func listProjects(r tmux.Runner, settings *config.Settings) ([]Project, error) {
 	discovered := config.DiscoverProjects(settings)
 	projects := make([]Project, 0, len(discovered))
 	for _, d := range discovered {
-		p := Project{Name: d.Name, Path: d.Path, Shared: d.Shared}
+		p := Project{Name: d.Name, Path: d.Path, Shared: d.Shared, Root: d.Root, Wildcard: d.Wildcard}
 		if id, ok := running[d.Name]; ok {
 			p.Running, p.SessionID = true, id
 		}
@@ -83,13 +89,19 @@ func loadConfigPreview(path string) tea.Cmd {
 }
 
 // startProjectCmd builds (or, if already running, reuses) the session for a
-// config and resolves to a projectStartedMsg carrying the session ID to attach
-// to. session.Create is idempotent, so this doubles as "attach".
-func startProjectCmd(r tmux.Runner, path string) tea.Cmd {
+// project and resolves to a projectStartedMsg carrying the session ID to
+// attach to. session.Create is idempotent, so this doubles as "attach".
+func startProjectCmd(r tmux.Runner, p Project) tea.Cmd {
 	return func() tea.Msg {
-		cfg, err := config.Load(path)
+		cfg, err := config.Load(p.Path)
 		if err != nil {
 			return projectStartedMsg{err: err}
+		}
+		if p.Wildcard {
+			// The template's own session.root (normally unset) doesn't say
+			// which directory this Project stands for — only the match
+			// does. See config.DiscoverWildcardProjects.
+			cfg.Session.Root = p.Root
 		}
 		hist, err := state.Load()
 		if err != nil {

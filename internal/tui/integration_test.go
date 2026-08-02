@@ -98,7 +98,7 @@ func TestIntegrationProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	started, ok := run(startProjectCmd(r, path)).(projectStartedMsg)
+	started, ok := run(startProjectCmd(r, Project{Path: path})).(projectStartedMsg)
 	if !ok || started.err != nil {
 		t.Fatalf("startProjectCmd -> %+v", started)
 	}

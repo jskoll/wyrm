@@ -1042,6 +1042,98 @@ func TestRunAttachByNameFound(t *testing.T) {
 	}
 }
 
+// TestRunAttachByAlias covers session.aliases end to end: `wyrm <alias>`
+// resolves to the project declaring it, the same way an exact project name
+// already does — with no fuzzy matching involved.
+func TestRunAttachByAlias(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	content := "[session]\nname = \"dotfiles\"\nroot = \".\"\naliases = [\"dot\"]\n\n[[windows]]\nname = \"w\"\n"
+	if err := os.WriteFile(filepath.Join(dir, config.DefaultFileName), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &fakeRunner{}
+	var stdout, stderr bytes.Buffer
+	attachCalled := ""
+	attach := func(name string) error { attachCalled = name; return nil }
+
+	code := run([]string{"dot"}, &stdout, &stderr, r, func() bool { return false }, attach)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "created session dotfiles") {
+		t.Errorf("stdout = %q, want the aliased project's session to be built", stdout.String())
+	}
+	if attachCalled == "" {
+		t.Error("attach was not called after resolving the alias")
+	}
+}
+
+// TestRunAttachByWildcardName covers a [[wildcard]] end to end: `wyrm
+// <matched-directory-basename>` resolves through config.FindProject to the
+// wildcard's template, building a session rooted at the matched directory
+// rather than at whatever the template's own (normally unset) session.root
+// says.
+func TestRunAttachByWildcardName(t *testing.T) {
+	settingsPath, err := config.SettingsPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(settingsPath) })
+
+	base := t.TempDir()
+	matched := filepath.Join(base, "widget")
+	if err := os.MkdirAll(matched, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// root = "." is a placeholder to satisfy config.Load's "name or root
+	// required" validation; startProject overrides it with the matched
+	// directory regardless of what's here — see config.DiscoverWildcardProjects.
+	template := filepath.Join(t.TempDir(), "tmpl.wyrm.toml")
+	if err := os.WriteFile(template, []byte("[session]\nroot = \".\"\n\n[[windows]]\nname = \"w\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	settingsBody := "[[wildcard]]\npattern = \"" + filepath.Join(base, "*") + "\"\nconfig = \"" + template + "\"\n"
+	if err := os.WriteFile(settingsPath, []byte(settingsBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	chdir(t, t.TempDir()) // standing well outside the matched directory
+
+	r := &fakeRunner{}
+	var stdout, stderr bytes.Buffer
+	attachCalled := ""
+	attach := func(name string) error { attachCalled = name; return nil }
+
+	code := run([]string{"widget"}, &stdout, &stderr, r, func() bool { return false }, attach)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "created session widget") {
+		t.Errorf("stdout = %q, want the wildcard-matched project's session to be built", stdout.String())
+	}
+	if attachCalled == "" {
+		t.Error("attach was not called after resolving the wildcard match")
+	}
+	var newSessionRoot string
+	for _, c := range r.calls {
+		if len(c) > 0 && c[0] == "new-session" {
+			for i, a := range c {
+				if a == "-c" && i+1 < len(c) {
+					newSessionRoot = c[i+1]
+				}
+			}
+		}
+	}
+	if newSessionRoot != matched {
+		t.Errorf("new-session -c = %q, want the matched directory %q", newSessionRoot, matched)
+	}
+}
+
 func TestRunAttachByNameInsideTmux(t *testing.T) {
 	r := &fakeRunner{listOutput: "$5|myproj"}
 
