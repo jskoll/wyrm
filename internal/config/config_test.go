@@ -347,6 +347,63 @@ func TestDiscover(t *testing.T) {
 	}
 }
 
+func TestDiscoverUpwardInGitRepo(t *testing.T) {
+	repoRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(repoRoot, DefaultFileName)
+	if err := os.WriteFile(cfgPath, []byte("[session]\nname = 'myrepo'\n[[windows]]\nname = 'w'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	nestedDir := filepath.Join(repoRoot, "src", "packages", "ui")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	chdir(t, nestedDir)
+
+	got, err := Discover()
+	if err != nil {
+		t.Fatalf("Discover from nested dir: %v", err)
+	}
+	if filepath.Clean(got) != filepath.Clean(cfgPath) {
+		t.Errorf("Discover() = %q, want %q", got, cfgPath)
+	}
+
+	cfg, err := Load(got)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if filepath.Clean(cfg.Dir()) != filepath.Clean(repoRoot) {
+		t.Errorf("cfg.Dir() = %q, want %q", cfg.Dir(), repoRoot)
+	}
+}
+
+func TestDiscoverUpwardHaltsAtGitRoot(t *testing.T) {
+	outerDir := t.TempDir()
+	outerCfg := filepath.Join(outerDir, DefaultFileName)
+	if err := os.WriteFile(outerCfg, []byte("[session]\nname = 'outer'\n[[windows]]\nname = 'w'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	innerRepo := filepath.Join(outerDir, "inner")
+	if err := os.MkdirAll(filepath.Join(innerRepo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(innerRepo, "pkg")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	chdir(t, nested)
+
+	if got, err := Discover(); err == nil {
+		t.Errorf("Discover() = %q, expected error because traversal should halt at inner .git boundary", got)
+	}
+}
+
 // TestLoadWarnsOnUnknownKeys: a misspelled key is dropped silently by a plain
 // TOML unmarshal, so a config whose every key was a typo passed `wyrm validate`
 // — the exact mistake validate exists to catch.

@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Upward directory traversal to automatically discover `.wyrm.toml` at Git repository or project root from nested subdirectories, with configurable `[discovery].upward` setting (enabled by default).
+
 ## [1.0.0] - 2026-08-15
 
 ### Added
