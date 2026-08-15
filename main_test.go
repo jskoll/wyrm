@@ -1432,4 +1432,3 @@ name = "main"
 		t.Errorf("expected config valid in stdout, got %q", stdout.String())
 	}
 }
-
