@@ -25,8 +25,10 @@ func installFakeGit(t *testing.T) {
 	dir := t.TempDir()
 	script := "#!/bin/sh\n" +
 		"if [ \"$1\" != \"clone\" ]; then exit 1; fi\n" +
-		"repo=\"$2\"\n" +
-		"dest=\"$3\"\n" +
+		"shift\n" +
+		"if [ \"$1\" = \"--\" ]; then shift; fi\n" +
+		"repo=\"$1\"\n" +
+		"dest=\"$2\"\n" +
 		"if [ -z \"$dest\" ]; then dest=$(basename \"$repo\" .git); fi\n" +
 		"mkdir -p \"$dest\"\n"
 	path := filepath.Join(dir, "git")
@@ -165,6 +167,27 @@ func TestDeriveCloneDir(t *testing.T) {
 	for _, tt := range tests {
 		if got := deriveCloneDir(tt.repo); got != tt.want {
 			t.Errorf("deriveCloneDir(%q) = %q, want %q", tt.repo, got, tt.want)
+		}
+	}
+}
+
+func TestCloneRejectsFlags(t *testing.T) {
+	installFakeGit(t)
+
+	flagArgs := [][]string{
+		{"clone", "--", "--upload-pack=touch /tmp/pwned", "repo"},
+		{"clone", "--", "-u", "repo"},
+		{"clone", "--", "--config=core.sshCommand=calc", "repo"},
+		{"clone", "https://example.com/repo.git", "--dest-flag"},
+		{"clone", "https://example.com/repo.git", "-d"},
+		{"clone", "-u", "repo"},
+	}
+
+	for _, args := range flagArgs {
+		var stdout, stderr bytes.Buffer
+		code := run(args, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+		if code == 0 {
+			t.Errorf("run(%v): want non-zero exit code for arguments starting with hyphen", args)
 		}
 	}
 }
