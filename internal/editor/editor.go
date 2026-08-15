@@ -40,11 +40,75 @@ func Resolve() ([]string, error) {
 	if value == "" {
 		return []string{Fallback}, nil
 	}
-	parts := strings.Fields(value)
+	parts, err := splitArgs(value)
+	if err != nil {
+		return nil, err
+	}
 	if len(parts) == 0 {
 		return nil, errors.New("$EDITOR is set but empty")
 	}
 	return parts, nil
+}
+
+// splitArgs splits a command line into arguments, honoring single quotes,
+// double quotes, and backslash escaping so an $EDITOR pointing at a path with
+// spaces (e.g. `"/Applications/Sublime Text.app/.../subl" -w`) works correctly.
+func splitArgs(s string) ([]string, error) {
+	var args []string
+	var cur strings.Builder
+	var inSingle, inDouble, escaped bool
+	var inWord bool
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if escaped {
+			cur.WriteByte(c)
+			escaped = false
+			inWord = true
+			continue
+		}
+
+		if c == '\\' && !inSingle {
+			escaped = true
+			inWord = true
+			continue
+		}
+
+		if c == '\'' && !inDouble {
+			inSingle = !inSingle
+			inWord = true
+			continue
+		}
+
+		if c == '"' && !inSingle {
+			inDouble = !inDouble
+			inWord = true
+			continue
+		}
+
+		if (c == ' ' || c == '\t' || c == '\n' || c == '\r') && !inSingle && !inDouble {
+			if inWord {
+				args = append(args, cur.String())
+				cur.Reset()
+				inWord = false
+			}
+			continue
+		}
+
+		cur.WriteByte(c)
+		inWord = true
+	}
+
+	if escaped {
+		return nil, errors.New("trailing backslash in $EDITOR")
+	}
+	if inSingle || inDouble {
+		return nil, errors.New("unclosed quote in $EDITOR")
+	}
+	if inWord {
+		args = append(args, cur.String())
+	}
+	return args, nil
 }
 
 // Command builds the process that opens path in the resolved editor. Callers

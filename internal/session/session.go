@@ -107,7 +107,7 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 		return name, id, false, nil
 	}
 
-	if err := runHook(o, cfg.Session.OnProjectStart, root, "on_project_start", stderr); err != nil {
+	if err := runHook(o, cfg.Session.OnProjectStart, root, "on_project_start", cfg.Session.Env, stderr); err != nil {
 		warnf(stderr, "on_project_start failed: %v", err)
 	}
 	runFirstStartOrRestartHook(o, cfg, root, stderr)
@@ -170,7 +170,7 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 	// been sent first, not just the pane to exist. Sequential and in window
 	// order, matching the order windows were built in.
 	for i, w := range cfg.Windows {
-		if err := runHook(o, w.PostWindow, roots[i], "post_window", stderr); err != nil {
+		if err := runHook(o, w.PostWindow, roots[i], "post_window", cfg.Session.Env, stderr); err != nil {
 			warnf(stderr, "post_window failed for window %q: %v", w.Name, err)
 		}
 	}
@@ -285,7 +285,7 @@ func Kill(r tmux.Runner, cfg *config.Config, stderr io.Writer, opts ...Option) (
 	if !ok {
 		return "", fmt.Errorf("session %q is not running", name)
 	}
-	if err := runHook(o, cfg.Session.OnProjectExit, root, "on_project_exit", stderr); err != nil {
+	if err := runHook(o, cfg.Session.OnProjectExit, root, "on_project_exit", cfg.Session.Env, stderr); err != nil {
 		warnf(stderr, "on_project_exit failed: %v", err)
 	}
 	if o.dryRun {
@@ -696,7 +696,7 @@ func findStartupPane(panes []tmux.PaneInfo, index int) (string, bool) {
 // blank screen and no output looks indistinguishable from a hang. stderr
 // rather than stdout so hook chatter can't be confused with wyrm's own
 // progress lines.
-func runHook(o options, hook, dir, label string, stderr io.Writer) error {
+func runHook(o options, hook, dir, label string, env map[string]string, stderr io.Writer) error {
 	if hook == "" {
 		return nil
 	}
@@ -714,6 +714,9 @@ func runHook(o options, hook, dir, label string, stderr io.Writer) error {
 	_, _ = fmt.Fprintf(stderr, "wyrm: running %s: %s\n", label, hook)
 	cmd := exec.Command(shell, "-c", hook)
 	cmd.Dir = dir
+	if len(env) > 0 {
+		cmd.Env = hookEnv(env)
+	}
 	cmd.Stdout, cmd.Stderr = stderr, stderr
 	if err := cmd.Run(); err != nil {
 		return err
@@ -736,12 +739,12 @@ func runFirstStartOrRestartHook(o options, cfg *config.Config, root string, stde
 		return
 	}
 	if o.history.Started(cfg.Dir()) {
-		if err := runHook(o, cfg.Session.OnProjectRestart, root, "on_project_restart", stderr); err != nil {
+		if err := runHook(o, cfg.Session.OnProjectRestart, root, "on_project_restart", cfg.Session.Env, stderr); err != nil {
 			warnf(stderr, "on_project_restart failed: %v", err)
 		}
 		return
 	}
-	if err := runHook(o, cfg.Session.OnProjectFirstStart, root, "on_project_first_start", stderr); err != nil {
+	if err := runHook(o, cfg.Session.OnProjectFirstStart, root, "on_project_first_start", cfg.Session.Env, stderr); err != nil {
 		warnf(stderr, "on_project_first_start failed: %v", err)
 	}
 	if o.dryRun {
@@ -750,6 +753,24 @@ func runFirstStartOrRestartHook(o options, cfg *config.Config, root string, stde
 	if err := o.history.MarkStarted(cfg.Dir()); err != nil {
 		warnf(stderr, "failed to record project start: %v", err)
 	}
+}
+
+// hookEnv merges the process environment with the session's configured env map,
+// sorted for deterministic ordering.
+func hookEnv(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := append([]string(nil), os.Environ()...)
+	for _, k := range keys {
+		out = append(out, k+"="+env[k])
+	}
+	return out
 }
 
 func warnf(w io.Writer, format string, args ...any) {
