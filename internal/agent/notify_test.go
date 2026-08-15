@@ -197,3 +197,44 @@ func TestBuildWindowsToastCommand_SpecialCharacters(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildCustomNotifyCommand_SafeEnvironmentVariables(t *testing.T) {
+	n := Notification{
+		State:       StateBlocked,
+		PaneID:      "%1",
+		SessionName: "test-sess",
+		WindowName:  "w0",
+	}
+	maliciousTitle := `title; rm -rf /; echo `
+	maliciousMsg := `msg && touch /tmp/pwned`
+
+	cmd := BuildCustomNotifyCommand("echo $WYRM_NOTIFY_TITLE: $WYRM_NOTIFY_MESSAGE", n, maliciousTitle, maliciousMsg)
+
+	// Command argument should match the configured command verbatim without string injection
+	if len(cmd.Args) < 3 || cmd.Args[2] != "echo $WYRM_NOTIFY_TITLE: $WYRM_NOTIFY_MESSAGE" {
+		t.Errorf("Command string was unexpectedly altered: %v", cmd.Args)
+	}
+
+	var foundTitle, foundMsg, foundState, foundSession, foundPane bool
+	for _, env := range cmd.Env {
+		if env == "WYRM_NOTIFY_TITLE="+maliciousTitle {
+			foundTitle = true
+		}
+		if env == "WYRM_NOTIFY_MESSAGE="+maliciousMsg {
+			foundMsg = true
+		}
+		if env == "WYRM_NOTIFY_STATE="+n.State.String() {
+			foundState = true
+		}
+		if env == "WYRM_NOTIFY_SESSION="+n.SessionName {
+			foundSession = true
+		}
+		if env == "WYRM_NOTIFY_PANE="+n.PaneID {
+			foundPane = true
+		}
+	}
+
+	if !foundTitle || !foundMsg || !foundState || !foundSession || !foundPane {
+		t.Errorf("Missing expected environment variables in cmd.Env: %v", cmd.Env)
+	}
+}
