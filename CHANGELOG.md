@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `wyrm status --watch` (`-w`) mode with `--interval` flag to continuously stream agent status updates for Waybar, Sketchybar, and Tmux status bars.
+
 ## [1.0.0] - 2026-08-15
 
 ### Added

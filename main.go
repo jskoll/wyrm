@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -56,6 +57,8 @@ type app struct {
 	runner         tmux.Runner
 	insideTmux     func() bool
 	attach         func(string) error
+
+	watchCtx context.Context
 
 	// httpClient is used only by selfupdate. Left nil in the normal
 	// construction path below, where it defaults to http.DefaultClient;
@@ -120,8 +123,10 @@ func (a *app) report(err error) int {
 // silently-ignored or mutually-exclusive top-level flags can't arise.
 //
 // The verb implementations live in cmd_*.go, grouped by what they act on.
+var appWatchCtx context.Context
+
 func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux func() bool, attach func(string) error) int {
-	a := &app{stdout: stdout, stderr: stderr, runner: runner, insideTmux: insideTmux, attach: attach}
+	a := &app{stdout: stdout, stderr: stderr, runner: runner, insideTmux: insideTmux, attach: attach, watchCtx: appWatchCtx}
 
 	if len(args) == 0 {
 		return a.report(a.up(nil))

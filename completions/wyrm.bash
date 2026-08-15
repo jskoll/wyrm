@@ -47,7 +47,7 @@ _wyrm_complete() {
     if [[ "$cur" == -* ]]; then
         case "$cmd" in
             up|restart|kill|edit|validate) COMPREPLY=($(compgen -W "-config" -- "$cur")) ;;
-            status) COMPREPLY=($(compgen -W "-format -session -v" -- "$cur")) ;;
+            status) COMPREPLY=($(compgen -W "-format -session -v -watch -w -interval" -- "$cur")) ;;
             list) COMPREPLY=($(compgen -W "-format" -- "$cur")) ;;
             selfupdate) COMPREPLY=($(compgen -W "-check -version" -- "$cur")) ;;
             *) COMPREPLY=() ;;

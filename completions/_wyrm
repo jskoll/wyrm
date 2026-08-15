@@ -54,7 +54,10 @@ _wyrm() {
                 status)
                     _arguments '-format[output format]:format:(text json tmux waybar sketchybar)' \
                         '-session[filter to session]:session:' \
-                        '-v[verbose output]'
+                        '-v[verbose output]' \
+                        '-watch[continuously stream status output]' \
+                        '-w[continuously stream status output]' \
+                        '-interval[polling interval in watch mode]:interval:'
                     ;;
                 list)
                     _arguments '-format[output format]:format:(table json toml names)'

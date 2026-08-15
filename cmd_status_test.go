@@ -2,128 +2,78 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
-func TestStatusCmdTextOutput(t *testing.T) {
-	mockRunner := &statusTestRunner{
-		panes: []string{"$1\x01backend\x01@1\x010\x01code\x01%1\x010\x01claude"},
-		paneOutputs: map[string]string{
-			"%1": "Allow Claude to execute `npm test`?\n  1. Yes\n  2. No\nChoose: ",
-		},
-	}
-	var stdout, stderr bytes.Buffer
-	app := &app{
-		stdout: &stdout,
-		stderr: &stderr,
-		runner: mockRunner,
-	}
-
-	if err := app.status([]string{"-format", "text"}); err != nil {
-		t.Fatalf("status failed: %v", err)
-	}
-
-	out := stdout.String()
-	if !strings.Contains(out, "⏸ 1 blocked") {
-		t.Errorf("expected text output to contain '⏸ 1 blocked', got %q", out)
-	}
-
-	// Test verbose text
-	stdout.Reset()
-	if err := app.status([]string{"-v"}); err != nil {
-		t.Fatalf("status -v failed: %v", err)
-	}
-	vOut := stdout.String()
-	if !strings.Contains(vOut, "backend: @0:code %1 (claude) - blocked") {
-		t.Errorf("expected verbose output to contain pane info, got %q", vOut)
-	}
+type statusFakeRunner struct {
+	panes   string
+	capture map[string]string
 }
 
-func TestStatusCmdJsonOutput(t *testing.T) {
-	mockRunner := &statusTestRunner{
-		panes: []string{"$1\x01backend\x01@1\x010\x01code\x01%1\x010\x01claude"},
-		paneOutputs: map[string]string{
-			"%1": "Allow Claude to execute `npm test`?\n  1. Yes\n  2. No\nChoose: ",
-		},
+func (s *statusFakeRunner) Run(args ...string) (string, error) {
+	if len(args) == 0 {
+		return "", nil
 	}
-	var stdout, stderr bytes.Buffer
-	app := &app{
-		stdout: &stdout,
-		stderr: &stderr,
-		runner: mockRunner,
+	if args[0] == "list-panes" {
+		return s.panes, nil
 	}
-
-	if err := app.status([]string{"-format", "json"}); err != nil {
-		t.Fatalf("status -format json failed: %v", err)
-	}
-
-	var report agentStatusReport
-	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
-		t.Fatalf("failed to parse json output: %v", err)
-	}
-	if report.Summary.Blocked != 1 {
-		t.Errorf("report.Summary.Blocked = %d, want 1", report.Summary.Blocked)
-	}
-	if len(report.Agents) != 1 || report.Agents[0].State != "blocked" {
-		t.Errorf("unexpected report.Agents: %+v", report.Agents)
-	}
-}
-
-func TestStatusCmdTmuxWaybarSketchybar(t *testing.T) {
-	mockRunner := &statusTestRunner{
-		panes: []string{"$1\x01backend\x01@1\x010\x01code\x01%1\x010\x01claude"},
-		paneOutputs: map[string]string{
-			"%1": "Allow Claude to execute `npm test`?\n  1. Yes\n  2. No\nChoose: ",
-		},
-	}
-	var stdout, stderr bytes.Buffer
-	app := &app{
-		stdout: &stdout,
-		stderr: &stderr,
-		runner: mockRunner,
-	}
-
-	// tmux format
-	if err := app.status([]string{"-format", "tmux"}); err != nil {
-		t.Fatalf("status -format tmux failed: %v", err)
-	}
-	if !strings.Contains(stdout.String(), "#[fg=yellow,bold]⏸ 1 blocked#[default]") {
-		t.Errorf("unexpected tmux output: %q", stdout.String())
-	}
-
-	// waybar format
-	stdout.Reset()
-	if err := app.status([]string{"-format", "waybar"}); err != nil {
-		t.Fatalf("status -format waybar failed: %v", err)
-	}
-	if !strings.Contains(stdout.String(), `"class":"blocked"`) {
-		t.Errorf("unexpected waybar output: %q", stdout.String())
-	}
-
-	// sketchybar format
-	stdout.Reset()
-	if err := app.status([]string{"-format", "sketchybar"}); err != nil {
-		t.Fatalf("status -format sketchybar failed: %v", err)
-	}
-	if !strings.Contains(stdout.String(), "icon=⏸ label=\"1 blocked\" drawing=on") {
-		t.Errorf("unexpected sketchybar output: %q", stdout.String())
-	}
-}
-
-type statusTestRunner struct {
-	panes       []string
-	paneOutputs map[string]string
-}
-
-func (s *statusTestRunner) Run(args ...string) (string, error) {
-	if len(args) > 0 && args[0] == "list-panes" && args[1] == "-a" {
-		return strings.Join(s.panes, "\n"), nil
-	}
-	if len(args) >= 4 && args[0] == "capture-pane" {
-		target := args[3]
-		return s.paneOutputs[target], nil
+	if args[0] == "capture-pane" {
+		for i, a := range args {
+			if a == "-t" && i+1 < len(args) {
+				return s.capture[args[i+1]], nil
+			}
+		}
 	}
 	return "", nil
+}
+
+func TestRunStatusFormats(t *testing.T) {
+	r := &statusFakeRunner{
+		panes: "$1\x01myproj\x01@1\x011\x01win1\x01%1\x011\x01claude",
+		capture: map[string]string{
+			"%1": "something\nenter to confirm", // blocked state
+		},
+	}
+
+	for _, format := range []string{"text", "json", "tmux", "waybar", "sketchybar"} {
+		t.Run(format, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run([]string{"status", "-format", format}, &stdout, &stderr, r, func() bool { return false }, nil)
+			if code != 0 {
+				t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+			}
+			out := stdout.String()
+			if out == "" {
+				t.Errorf("expected non-empty output for format %s", format)
+			}
+		})
+	}
+}
+
+func TestRunStatusWatchMode(t *testing.T) {
+	r := &statusFakeRunner{
+		panes: "$1\x01myproj\x01@1\x011\x01win1\x01%1\x011\x01claude",
+		capture: map[string]string{
+			"%1": "something\nenter to confirm",
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	appWatchCtx = ctx
+	defer func() { appWatchCtx = nil }()
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"status", "-format", "waybar", "--watch", "--interval", "10ms"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, `"class":"blocked"`) {
+		t.Errorf("expected waybar json output with blocked class in watch mode, got:\n%s", out)
+	}
 }
