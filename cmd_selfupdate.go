@@ -113,6 +113,31 @@ func (a *app) installRelease(client selfupdate.HTTPDoer, rel selfupdate.Release,
 	if err != nil {
 		return err
 	}
+
+	if sigURL, ok := rel.Assets["checksums.txt.sig"]; ok {
+		sig, err := selfupdate.Get(client, sigURL)
+		if err != nil {
+			return fmt.Errorf("downloading signature: %w", err)
+		}
+		if len(selfupdate.DefaultSigningPublicKey) > 0 {
+			if err := selfupdate.VerifyChecksumsSignature(checksums, sig, selfupdate.DefaultSigningPublicKey); err != nil {
+				return fmt.Errorf("verifying checksums signature: %w", err)
+			}
+		}
+	} else if sigURL, ok := rel.Assets["checksums.txt.minisig"]; ok {
+		sig, err := selfupdate.Get(client, sigURL)
+		if err != nil {
+			return fmt.Errorf("downloading signature: %w", err)
+		}
+		if len(selfupdate.DefaultSigningPublicKey) > 0 {
+			if err := selfupdate.VerifyChecksumsSignature(checksums, sig, selfupdate.DefaultSigningPublicKey); err != nil {
+				return fmt.Errorf("verifying checksums signature: %w", err)
+			}
+		}
+	} else if len(selfupdate.DefaultSigningPublicKey) > 0 {
+		return fmt.Errorf("release %s is missing signature for checksums.txt", rel.Version)
+	}
+
 	if err := selfupdate.VerifyChecksum(checksums, assetName, archive); err != nil {
 		return err
 	}

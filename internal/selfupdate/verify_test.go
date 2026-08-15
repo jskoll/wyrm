@@ -4,7 +4,10 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -115,5 +118,64 @@ func TestExtractFileExceedsLimit(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "exceeds maximum permitted binary size") {
 		t.Errorf("ExtractFile error = %q, want size limit message", err.Error())
+	}
+}
+
+func TestVerifyChecksumsSignatureValid(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("sha256sum  wyrm_1.0.0_linux_amd64.tar.gz\n")
+	sig := ed25519.Sign(priv, data)
+
+	// Test raw binary signature
+	if err := VerifyChecksumsSignature(data, sig, pub); err != nil {
+		t.Fatalf("VerifyChecksumsSignature raw: %v", err)
+	}
+
+	// Test hex encoded signature
+	hexSig := []byte(hex.EncodeToString(sig))
+	if err := VerifyChecksumsSignature(data, hexSig, pub); err != nil {
+		t.Fatalf("VerifyChecksumsSignature hex: %v", err)
+	}
+
+	// Test base64 encoded signature
+	b64Sig := []byte(base64.StdEncoding.EncodeToString(sig))
+	if err := VerifyChecksumsSignature(data, b64Sig, pub); err != nil {
+		t.Fatalf("VerifyChecksumsSignature base64: %v", err)
+	}
+
+	// Test Minisign format signature
+	minisignContent := fmt.Sprintf("untrusted comment: signature from minisign secret key\n%s\ntrusted comment: timestamp:12345\n%s\n",
+		base64.StdEncoding.EncodeToString(append([]byte{0x45, 0x64, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}, sig...)),
+		base64.StdEncoding.EncodeToString(sig))
+	if err := VerifyChecksumsSignature(data, []byte(minisignContent), pub); err != nil {
+		t.Fatalf("VerifyChecksumsSignature minisign: %v", err)
+	}
+}
+
+func TestVerifyChecksumsSignatureInvalid(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("sha256sum  wyrm_1.0.0_linux_amd64.tar.gz\n")
+	sig := ed25519.Sign(priv, data)
+
+	tamperedData := []byte("tampered  wyrm_1.0.0_linux_amd64.tar.gz\n")
+	if err := VerifyChecksumsSignature(tamperedData, sig, pub); err == nil {
+		t.Fatal("VerifyChecksumsSignature: want error for tampered data, got nil")
+	}
+
+	// Wrong public key
+	wrongPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	if err := VerifyChecksumsSignature(data, sig, wrongPub); err == nil {
+		t.Fatal("VerifyChecksumsSignature: want error for wrong public key, got nil")
+	}
+
+	// Nil or empty public key
+	if err := VerifyChecksumsSignature(data, sig, nil); err == nil {
+		t.Fatal("VerifyChecksumsSignature: want error for nil public key, got nil")
 	}
 }
