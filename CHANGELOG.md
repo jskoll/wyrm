@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Bulk session operations: `--all` (or `-a`) and `--yes` (or `-y`) flags for `wyrm kill` and `wyrm restart` to gracefully stop or rebuild all active tmux sessions.
+
 ## [1.0.0] - 2026-08-15
 
 ### Added

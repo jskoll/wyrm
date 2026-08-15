@@ -42,17 +42,21 @@ if one exists; otherwise start the known project named
 .I NAME
 (local or shared config).
 .TP
-.BI "wyrm restart [\-config " PATH "] [\-n] [\-d]"
+.BI "wyrm restart [\-config " PATH "] [\-n] [\-d] [\-all] [\-y]"
 Stop the session (running
 .B on_project_exit
-first) and build it again from the current config.
+first) and build it again from the current config. With
+.BR \-all ,
+restarts all active tmux sessions.
 .TP
-.BI "wyrm kill [" NAME "] [\-config " PATH "] [\-n]"
+.BI "wyrm kill [" NAME "] [\-config " PATH "] [\-n] [\-all] [\-y]"
 Destroy the session, running
 .B on_project_exit
 first. With no name, targets the current folder's session; with
 .IR NAME ,
-targets that session (or known project) instead.
+targets that session (or known project) instead. With
+.BR \-all ,
+destroys all active tmux sessions.
 .B \-config
 and a session name are mutually exclusive.
 .TP

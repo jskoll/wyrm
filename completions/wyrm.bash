@@ -46,7 +46,9 @@ _wyrm_complete() {
     # Subcommand-specific flags.
     if [[ "$cur" == -* ]]; then
         case "$cmd" in
-            up|restart|kill|edit|validate) COMPREPLY=($(compgen -W "-config" -- "$cur")) ;;
+            up|edit|validate) COMPREPLY=($(compgen -W "-config -n" -- "$cur")) ;;
+            restart) COMPREPLY=($(compgen -W "-config -n -d -all -a -yes -y -var" -- "$cur")) ;;
+            kill) COMPREPLY=($(compgen -W "-config -n -all -a -yes -y" -- "$cur")) ;;
             status) COMPREPLY=($(compgen -W "-format -session -v" -- "$cur")) ;;
             list) COMPREPLY=($(compgen -W "-format" -- "$cur")) ;;
             selfupdate) COMPREPLY=($(compgen -W "-check -version" -- "$cur")) ;;

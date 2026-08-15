@@ -52,6 +52,7 @@ func runnerFromSettings(settings *config.Settings) tmux.Exec {
 // what lets each of them return a plain error instead of hand-rolling its own
 // "print wyrm: <err> and return 1" — see run's report.
 type app struct {
+	stdin          io.Reader
 	stdout, stderr io.Writer
 	runner         tmux.Runner
 	insideTmux     func() bool
@@ -61,6 +62,20 @@ type app struct {
 	// construction path below, where it defaults to http.DefaultClient;
 	// tests point it at an httptest server instead.
 	httpClient *http.Client
+}
+
+func (a *app) promptConfirm(msg string) bool {
+	_, _ = fmt.Fprint(a.stdout, msg)
+	in := a.stdin
+	if in == nil {
+		in = os.Stdin
+	}
+	var resp string
+	if _, err := fmt.Fscanln(in, &resp); err != nil {
+		return false
+	}
+	resp = strings.ToLower(strings.TrimSpace(resp))
+	return resp == "y" || resp == "yes"
 }
 
 // exitErr is a subcommand failure carrying an explicit exit status. A nil Err
@@ -120,8 +135,10 @@ func (a *app) report(err error) int {
 // silently-ignored or mutually-exclusive top-level flags can't arise.
 //
 // The verb implementations live in cmd_*.go, grouped by what they act on.
+var appStdin io.Reader
+
 func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux func() bool, attach func(string) error) int {
-	a := &app{stdout: stdout, stderr: stderr, runner: runner, insideTmux: insideTmux, attach: attach}
+	a := &app{stdin: appStdin, stdout: stdout, stderr: stderr, runner: runner, insideTmux: insideTmux, attach: attach}
 
 	if len(args) == 0 {
 		return a.report(a.up(nil))
@@ -224,8 +241,8 @@ Usage:
   wyrm [-config PATH]        build or attach the current folder's session (default)
   wyrm up [-config PATH]     same as bare wyrm, spelled explicitly (-n to dry-run, -d to skip attaching)
   wyrm <name>                attach to a running session, or start a known project, by name
-  wyrm restart [-config P]   stop the session and build it again (-n to dry-run, -d to skip attaching)
-  wyrm kill [name]           destroy the session (runs on_project_exit first; -n to dry-run)
+  wyrm restart [-config P]   stop the session and build it again (-all, -n, -d, -y)
+  wyrm kill [name]           destroy the session (runs on_project_exit first; -all, -n, -y)
   wyrm pick                  fuzzy-pick a running session and attach to it
   wyrm tui                   full-screen session manager (browse, preview, manage)
   wyrm save [-config PATH]   save the running session's layout as this folder's config
