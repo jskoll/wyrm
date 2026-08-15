@@ -184,6 +184,10 @@ func matchWildcardDirs(pattern string) ([]string, error) {
 				return nil //nolint:nilerr
 			}
 			if path != base && d.IsDir() {
+				name := d.Name()
+				if strings.HasPrefix(name, ".") || isIgnoredWildcardDir(name) {
+					return filepath.SkipDir
+				}
 				dirs = append(dirs, path)
 			}
 			return nil
@@ -209,6 +213,20 @@ func matchWildcardDirs(pattern string) ([]string, error) {
 		}
 	}
 	return dirs, nil
+}
+
+var ignoredWildcardDirNames = map[string]bool{
+	"node_modules": true,
+	"vendor":       true,
+	"target":       true,
+	"dist":         true,
+	"build":        true,
+	"venv":         true,
+	"__pycache__":  true,
+}
+
+func isIgnoredWildcardDir(name string) bool {
+	return ignoredWildcardDirNames[name]
 }
 
 // FindProject returns the discoverable project whose session name is name,
