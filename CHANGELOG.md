@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Capture pane working directories (`pane_current_path`) during `wyrm save` and `freeze`, preserving relative and absolute directory paths across windows and splits.
+
 ## [1.0.0] - 2026-08-15
 
 ### Added
