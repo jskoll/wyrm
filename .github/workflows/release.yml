@@ -12,13 +12,13 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
-      - uses: goreleaser/goreleaser-action@v7
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
           distribution: goreleaser
           version: "~> 2"
@@ -49,7 +49,7 @@ jobs:
             echo "::notice::AUR_SSH_PRIVATE_KEY is not set — skipping the AUR publish for ${GITHUB_REF_NAME}."
           fi
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: steps.gate.outputs.configured == 'true'
 
       # packaging/aur/PKGBUILD in the repo is a template (pkgver=0.0.0,
@@ -75,7 +75,7 @@ jobs:
 
       - name: Publish to the AUR
         if: steps.gate.outputs.configured == 'true'
-        uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+        uses: KSXGitHub/github-actions-deploy-aur@a97f56a8425a7a7f3b8c58607f769c69b089cadb # v3.0.1
         with:
           pkgname: wyrm-bin
           pkgbuild: /tmp/PKGBUILD
