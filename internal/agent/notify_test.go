@@ -130,3 +130,70 @@ func TestDispatchDesktop(t *testing.T) {
 		t.Errorf("desktopMsg = %q, want mentioning dev (%%5)", desktopMsg)
 	}
 }
+
+func TestBuildWindowsToastCommand_SafeEnvironmentVariables(t *testing.T) {
+	maliciousTitle := `test'); Start-Process calc.exe; ('`
+	maliciousMsg := `msg"; Invoke-Item C:\; "`
+
+	cmd := BuildWindowsToastCommand(maliciousTitle, maliciousMsg)
+
+	// Command line arguments must be static and not contain user input directly
+	for _, arg := range cmd.Args {
+		if strings.Contains(arg, "calc.exe") {
+			t.Errorf("PowerShell args contained unescaped payload: %s", arg)
+		}
+		if strings.Contains(arg, maliciousTitle) {
+			t.Errorf("PowerShell args contained raw title: %s", arg)
+		}
+	}
+
+	// Environment variables must safely carry the values
+	var foundTitle, foundMsg bool
+	for _, env := range cmd.Env {
+		if env == "WYRM_NOTIFY_TITLE="+maliciousTitle {
+			foundTitle = true
+		}
+		if env == "WYRM_NOTIFY_MSG="+maliciousMsg {
+			foundMsg = true
+		}
+	}
+
+	if !foundTitle {
+		t.Errorf("WYRM_NOTIFY_TITLE not properly set in environment")
+	}
+	if !foundMsg {
+		t.Errorf("WYRM_NOTIFY_MSG not properly set in environment")
+	}
+}
+
+func TestBuildWindowsToastCommand_SpecialCharacters(t *testing.T) {
+	specialCases := []struct {
+		name  string
+		title string
+		msg   string
+	}{
+		{"single quotes", "It's a test", "Don't break 'PowerShell'"},
+		{"double quotes", `He said "hello"`, `Nested "quotes"`},
+		{"semicolons and pipes", "title; echo pwned | cat", "msg & echo hi"},
+		{"variable expansion", "Value is $HOME and $env:SECRET", "Payload `$((Get-Process).Count)"},
+		{"backticks", "Use `code` blocks", "tick ` ` `"},
+	}
+
+	for _, tc := range specialCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := BuildWindowsToastCommand(tc.title, tc.msg)
+			var foundTitle, foundMsg bool
+			for _, env := range cmd.Env {
+				if env == "WYRM_NOTIFY_TITLE="+tc.title {
+					foundTitle = true
+				}
+				if env == "WYRM_NOTIFY_MSG="+tc.msg {
+					foundMsg = true
+				}
+			}
+			if !foundTitle || !foundMsg {
+				t.Errorf("special characters not preserved in environment for case %s", tc.name)
+			}
+		})
+	}
+}

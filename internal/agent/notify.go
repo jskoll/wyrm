@@ -112,6 +112,31 @@ func Dispatch(n Notification, cfg NotifyConfig, out io.Writer) error {
 	return nil
 }
 
+// WindowsToastScript is the PowerShell script used to display Windows toast notifications
+// without string interpolation vulnerabilities.
+const WindowsToastScript = `
+$title = $env:WYRM_NOTIFY_TITLE
+$msg = $env:WYRM_NOTIFY_MSG
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null
+$template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+$textNodes = $template.GetElementsByTagName('text')
+$textNodes.Item(0).AppendChild($template.CreateTextNode($title)) > $null
+$textNodes.Item(1).AppendChild($template.CreateTextNode($msg)) > $null
+$toast = [Windows.UI.Notifications.ToastNotification]::new($template)
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Wyrm').Show($toast)
+`
+
+// BuildWindowsToastCommand constructs an exec.Cmd for PowerShell Windows toast notifications
+// safely passing title and message through environment variables to prevent command injection.
+func BuildWindowsToastCommand(title, msg string) *exec.Cmd {
+	cmd := exec.Command("powershell", "-NoProfile", "-Command", WindowsToastScript)
+	cmd.Env = append(os.Environ(),
+		"WYRM_NOTIFY_TITLE="+title,
+		"WYRM_NOTIFY_MSG="+msg,
+	)
+	return cmd
+}
+
 // SendDesktopNotification invokes platform desktop notification tools.
 // Swappable for testing.
 var SendDesktopNotification = func(title, msg string) {
@@ -122,7 +147,7 @@ var SendDesktopNotification = func(title, msg string) {
 	case "linux", "freebsd", "openbsd", "netbsd":
 		_ = exec.Command("notify-send", title, msg).Run()
 	case "windows":
-		psScript := fmt.Sprintf(`[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); $textNodes = $template.GetElementsByTagName('text'); $textNodes.Item(0).AppendChild($template.CreateTextNode('%s')) > $null; $textNodes.Item(1).AppendChild($template.CreateTextNode('%s')) > $null; $toast = [Windows.UI.Notifications.ToastNotification]::new($template); [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Wyrm').Show($toast)`, title, msg)
-		_ = exec.Command("powershell", "-NoProfile", "-Command", psScript).Run()
+		cmd := BuildWindowsToastCommand(title, msg)
+		_ = cmd.Run()
 	}
 }
