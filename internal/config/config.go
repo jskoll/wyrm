@@ -109,6 +109,12 @@ type Window struct {
 	// "wait for a port to open before continuing", the same shape as the
 	// project-level on_project_start/on_project_exit hooks.
 	PostWindow string `toml:"post_window,omitempty"`
+	// Synchronize turns on tmux's synchronize-panes for this window on creation.
+	Synchronize *bool `toml:"synchronize,omitempty"`
+	// SynchronizePanes is an alias for Synchronize.
+	SynchronizePanes *bool `toml:"synchronize_panes,omitempty"`
+	// RemainOnExit keeps panes open after their process exits so crash logs are inspectable.
+	RemainOnExit *bool `toml:"remain_on_exit,omitempty"`
 }
 
 // Split is a node in a window's split tree.
@@ -131,6 +137,12 @@ type Split struct {
 	// override it themselves, its children.
 	Root     string  `toml:"root,omitempty"`
 	Children []Split `toml:"children,omitempty"`
+	// RemainOnExit keeps this pane open after its command exits.
+	RemainOnExit *bool `toml:"remain_on_exit,omitempty"`
+	// Zoomed starts this split focused and zoomed.
+	Zoomed *bool `toml:"zoomed,omitempty"`
+	// Zoom is an alias for Zoomed.
+	Zoom *bool `toml:"zoom,omitempty"`
 }
 
 // Pane is one entry in the legacy flat pane list.
@@ -444,4 +456,70 @@ func ExpandTilde(p string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, strings.TrimPrefix(p, "~")), nil
+}
+
+// Interpolate replaces template placeholders in the config with values from vars,
+// and merges vars into session.env so child shells and hooks also receive them.
+// Supported placeholders: {{.var}}, {{var}}, {{.var.name}}, {{var.name}}, ${var}, and $var.
+func (c *Config) Interpolate(vars map[string]string) {
+	if c == nil || len(vars) == 0 {
+		return
+	}
+	c.Session.Name = InterpolateString(c.Session.Name, vars)
+	c.Session.Root = InterpolateString(c.Session.Root, vars)
+	c.Session.OnProjectStart = InterpolateString(c.Session.OnProjectStart, vars)
+	c.Session.OnProjectExit = InterpolateString(c.Session.OnProjectExit, vars)
+	c.Session.OnProjectFirstStart = InterpolateString(c.Session.OnProjectFirstStart, vars)
+	c.Session.OnProjectRestart = InterpolateString(c.Session.OnProjectRestart, vars)
+	c.Session.StartupWindow = InterpolateString(c.Session.StartupWindow, vars)
+	c.Session.PaneTitleFormat = InterpolateString(c.Session.PaneTitleFormat, vars)
+
+	if c.Session.Env == nil {
+		c.Session.Env = make(map[string]string)
+	}
+	for k, v := range c.Session.Env {
+		c.Session.Env[k] = InterpolateString(v, vars)
+	}
+	for k, v := range vars {
+		if _, exists := c.Session.Env[k]; !exists {
+			c.Session.Env[k] = v
+		}
+	}
+
+	for i := range c.Windows {
+		c.Windows[i].Name = InterpolateString(c.Windows[i].Name, vars)
+		c.Windows[i].Root = InterpolateString(c.Windows[i].Root, vars)
+		c.Windows[i].PreWindow = InterpolateString(c.Windows[i].PreWindow, vars)
+		c.Windows[i].PostWindow = InterpolateString(c.Windows[i].PostWindow, vars)
+		interpolateSplits(c.Windows[i].Splits, vars)
+		for j := range c.Windows[i].Panes {
+			c.Windows[i].Panes[j].Command = InterpolateString(c.Windows[i].Panes[j].Command, vars)
+		}
+	}
+}
+
+func interpolateSplits(splits []Split, vars map[string]string) {
+	for i := range splits {
+		splits[i].Command = InterpolateString(splits[i].Command, vars)
+		splits[i].Run = InterpolateString(splits[i].Run, vars)
+		splits[i].Root = InterpolateString(splits[i].Root, vars)
+		interpolateSplits(splits[i].Children, vars)
+	}
+}
+
+// InterpolateString substitutes template variables in s.
+func InterpolateString(s string, vars map[string]string) string {
+	if s == "" || len(vars) == 0 {
+		return s
+	}
+	res := s
+	for k, v := range vars {
+		res = strings.ReplaceAll(res, "{{."+k+"}}", v)
+		res = strings.ReplaceAll(res, "{{"+k+"}}", v)
+		res = strings.ReplaceAll(res, "{{.var."+k+"}}", v)
+		res = strings.ReplaceAll(res, "{{var."+k+"}}", v)
+		res = strings.ReplaceAll(res, "${"+k+"}", v)
+		res = strings.ReplaceAll(res, "$"+k, v)
+	}
+	return res
 }

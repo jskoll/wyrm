@@ -114,6 +114,8 @@ func (a *app) validate(args []string) error {
 	fs := a.newFlagSet("validate")
 	configPath := fs.String("config", "", "path to config file (default: .wyrm.toml, then .tmuxconfig)")
 	strict := fs.Bool("strict", false, "exit non-zero if the config has warnings (typos, deprecations)")
+	var vars varMapFlag
+	fs.Var(&vars, "var", "set template variable (KEY=VALUE, can be repeated)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -127,6 +129,9 @@ func (a *app) validate(args []string) error {
 	cfg, source, err := config.ResolveEffective(settings, *configPath)
 	if err != nil {
 		return err
+	}
+	if len(vars) > 0 {
+		cfg.Interpolate(vars)
 	}
 	a.printWarnings(cfg)
 	// Warnings are not failures by default — a deprecated `panes` list still

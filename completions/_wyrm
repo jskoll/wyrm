@@ -25,6 +25,7 @@ _wyrm() {
         'save:save the running session layout as a config for this folder'
         'edit:open the resolved config in $EDITOR'
         'validate:check the effective config without building a session'
+        'status:print agent status across sessions'
         'list:list running tmux sessions non-interactively'
         'list-configs:list candidate config file paths'
         'migrate-config:move the local config into the shared config directory'
@@ -49,6 +50,11 @@ _wyrm() {
             case "$words[1]" in
                 up|restart|kill|edit|validate)
                     _arguments '-config[config file path]:config file:->configs'
+                    ;;
+                status)
+                    _arguments '-format[output format]:format:(text json tmux waybar sketchybar)' \
+                        '-session[filter to session]:session:' \
+                        '-v[verbose output]'
                     ;;
                 list)
                     _arguments '-format[output format]:format:(table json toml names)'

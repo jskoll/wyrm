@@ -1,0 +1,128 @@
+package agent
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"runtime"
+	"strings"
+)
+
+// Notification holds the data for an agent state transition alert.
+type Notification struct {
+	Title       string
+	Message     string
+	State       State
+	PaneID      string
+	SessionName string
+	WindowName  string
+}
+
+// NotifyConfig defines how notifications are delivered.
+type NotifyConfig struct {
+	Enabled   bool
+	Desktop   bool
+	Bell      bool
+	OSC       bool
+	OnBlocked bool
+	OnIdle    bool
+	Command   string
+}
+
+// FormattedTitle returns a standard title for the notification.
+func (n Notification) FormattedTitle() string {
+	if n.Title != "" {
+		return n.Title
+	}
+	if n.SessionName != "" {
+		return fmt.Sprintf("Wyrm Agent: %s", n.SessionName)
+	}
+	return "Wyrm Agent Alert"
+}
+
+// FormattedMessage returns a standard message body for the notification.
+func (n Notification) FormattedMessage() string {
+	if n.Message != "" {
+		return n.Message
+	}
+	target := n.PaneID
+	if n.WindowName != "" {
+		target = fmt.Sprintf("%s (%s)", n.WindowName, n.PaneID)
+	}
+	switch n.State {
+	case StateBlocked:
+		return fmt.Sprintf("Agent in %s needs confirmation or input", target)
+	case StateIdle:
+		return fmt.Sprintf("Agent in %s has finished its turn", target)
+	default:
+		return fmt.Sprintf("Agent in %s changed state to %s", target, n.State)
+	}
+}
+
+// Dispatch sends the notification using the configured delivery channels.
+func Dispatch(n Notification, cfg NotifyConfig, out io.Writer) error {
+	if !cfg.Enabled {
+		return nil
+	}
+	if n.State == StateBlocked && !cfg.OnBlocked {
+		return nil
+	}
+	if n.State == StateIdle && !cfg.OnIdle {
+		return nil
+	}
+
+	title := n.FormattedTitle()
+	msg := n.FormattedMessage()
+
+	// Terminal bell
+	if cfg.Bell && out != nil {
+		_, _ = fmt.Fprint(out, "\a")
+	}
+
+	// OSC 9 / OSC 777
+	if cfg.OSC && out != nil {
+		// OSC 777 is standard for desktop notifications in modern terminals
+		_, _ = fmt.Fprintf(out, "\x1b]777;notify;%s;%s\x1b\\", title, msg)
+		// OSC 9 is supported by iTerm2
+		_, _ = fmt.Fprintf(out, "\x1b]9;%s\x1b\\", msg)
+	}
+
+	// Custom command
+	if cfg.Command != "" {
+		shell := os.Getenv("SHELL")
+		if shell == "" {
+			shell = "sh"
+		}
+		cmdStr := strings.ReplaceAll(cfg.Command, "{title}", title)
+		cmdStr = strings.ReplaceAll(cmdStr, "{message}", msg)
+		cmdStr = strings.ReplaceAll(cmdStr, "{state}", n.State.String())
+		cmdStr = strings.ReplaceAll(cmdStr, "{session}", n.SessionName)
+		cmdStr = strings.ReplaceAll(cmdStr, "{pane}", n.PaneID)
+		cmd := exec.Command(shell, "-c", cmdStr)
+		_ = cmd.Run()
+		return nil
+	}
+
+	// Desktop notification
+	if cfg.Desktop {
+		SendDesktopNotification(title, msg)
+	}
+
+	return nil
+}
+
+// SendDesktopNotification invokes platform desktop notification tools.
+// Swappable for testing.
+var SendDesktopNotification = func(title, msg string) {
+	switch runtime.GOOS {
+	case "darwin":
+		script := fmt.Sprintf(`display notification %q with title %q`, msg, title)
+		_ = exec.Command("osascript", "-e", script).Run()
+	case "linux", "freebsd", "openbsd", "netbsd":
+		_ = exec.Command("notify-send", title, msg).Run()
+	case "windows":
+		psScript := fmt.Sprintf(`[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); $textNodes = $template.GetElementsByTagName('text'); $textNodes.Item(0).AppendChild($template.CreateTextNode('%s')) > $null; $textNodes.Item(1).AppendChild($template.CreateTextNode('%s')) > $null; $toast = [Windows.UI.Notifications.ToastNotification]::new($template); [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Wyrm').Show($toast)`, title, msg)
+		_ = exec.Command("powershell", "-NoProfile", "-Command", psScript).Run()
+	}
+}

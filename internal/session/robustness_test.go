@@ -244,7 +244,7 @@ func TestCreateRollsBackHalfBuiltSession(t *testing.T) {
 // with a blank screen.
 func TestHookOutputIsStreamed(t *testing.T) {
 	var stderr bytes.Buffer
-	if err := runHook(options{}, "echo hello-from-hook", t.TempDir(), "on_project_start", &stderr); err != nil {
+	if err := runHook(options{}, "echo hello-from-hook", t.TempDir(), "on_project_start", nil, &stderr); err != nil {
 		t.Fatalf("runHook: %v", err)
 	}
 	if !strings.Contains(stderr.String(), "hello-from-hook") {
@@ -252,5 +252,16 @@ func TestHookOutputIsStreamed(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "running on_project_start") {
 		t.Errorf("stderr = %q, want the hook announced before it runs", stderr.String())
+	}
+}
+
+func TestHookReceivesSessionEnv(t *testing.T) {
+	var stderr bytes.Buffer
+	env := map[string]string{"WYRM_TEST_VAR": "hook-env-val"}
+	if err := runHook(options{}, `echo "val=$WYRM_TEST_VAR"`, t.TempDir(), "on_project_start", env, &stderr); err != nil {
+		t.Fatalf("runHook: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "val=hook-env-val") {
+		t.Errorf("stderr = %q, want session env variable in hook output", stderr.String())
 	}
 }

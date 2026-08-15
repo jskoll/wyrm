@@ -77,6 +77,73 @@ func TestResolveRejectsBlankEditor(t *testing.T) {
 	}
 }
 
+func TestResolveQuotedPaths(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			name:  "double-quoted path with spaces",
+			input: `"/Applications/Visual Studio Code.app/bin/code" -w`,
+			want:  []string{"/Applications/Visual Studio Code.app/bin/code", "-w"},
+		},
+		{
+			name:  "single-quoted path with spaces",
+			input: `'/Applications/Sublime Text.app/bin/subl' -w --new-window`,
+			want:  []string{"/Applications/Sublime Text.app/bin/subl", "-w", "--new-window"},
+		},
+		{
+			name:  "escaped spaces",
+			input: `/path/to/my\ custom\ editor -w`,
+			want:  []string{"/path/to/my custom editor", "-w"},
+		},
+		{
+			name:  "quoted argument with spaces",
+			input: `editor --title "My Config" --wait`,
+			want:  []string{"editor", "--title", "My Config", "--wait"},
+		},
+		{
+			name:  "escaped quotes inside double quotes",
+			input: `editor --msg "hello \"world\""`,
+			want:  []string{"editor", "--msg", `hello "world"`},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("EDITOR", c.input)
+			got, err := Resolve()
+			if err != nil {
+				t.Fatalf("Resolve() unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("Resolve() = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestResolveRejectsMalformedQuotes(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{"unclosed single quote", "editor 'unclosed"},
+		{"unclosed double quote", `editor "unclosed`},
+		{"trailing backslash", `editor \`},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("EDITOR", c.input)
+			if _, err := Resolve(); err == nil {
+				t.Errorf("Resolve(%q) = nil error, want error for malformed input", c.input)
+			}
+		})
+	}
+}
+
 func TestCommandAppendsPath(t *testing.T) {
 	t.Setenv("EDITOR", "code -w")
 

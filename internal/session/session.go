@@ -107,7 +107,7 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 		return name, id, false, nil
 	}
 
-	if err := runHook(o, cfg.Session.OnProjectStart, root, "on_project_start", stderr); err != nil {
+	if err := runHook(o, cfg.Session.OnProjectStart, root, "on_project_start", cfg.Session.Env, stderr); err != nil {
 		warnf(stderr, "on_project_start failed: %v", err)
 	}
 	runFirstStartOrRestartHook(o, cfg, root, stderr)
@@ -170,7 +170,7 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 	// been sent first, not just the pane to exist. Sequential and in window
 	// order, matching the order windows were built in.
 	for i, w := range cfg.Windows {
-		if err := runHook(o, w.PostWindow, roots[i], "post_window", stderr); err != nil {
+		if err := runHook(o, w.PostWindow, roots[i], "post_window", cfg.Session.Env, stderr); err != nil {
 			warnf(stderr, "post_window failed for window %q: %v", w.Name, err)
 		}
 	}
@@ -285,7 +285,7 @@ func Kill(r tmux.Runner, cfg *config.Config, stderr io.Writer, opts ...Option) (
 	if !ok {
 		return "", fmt.Errorf("session %q is not running", name)
 	}
-	if err := runHook(o, cfg.Session.OnProjectExit, root, "on_project_exit", stderr); err != nil {
+	if err := runHook(o, cfg.Session.OnProjectExit, root, "on_project_exit", cfg.Session.Env, stderr); err != nil {
 		warnf(stderr, "on_project_exit failed: %v", err)
 	}
 	if o.dryRun {
@@ -344,6 +344,37 @@ func buildWindow(r tmux.Runner, windowID, initialPane string, w config.Window, c
 	// caller supplies everything else; this is the one thing scoped to a single
 	// window, so it is created here rather than passed in.
 	ctx.done = map[string]bool{}
+
+	// Window-level synchronize-panes
+	if (w.Synchronize != nil && *w.Synchronize) || (w.SynchronizePanes != nil && *w.SynchronizePanes) {
+		if out, err := r.Run("set-window-option", "-t", windowID, "synchronize-panes", "on"); err != nil {
+			warnf(stderr, "failed to enable synchronize-panes for window %q: %v", w.Name, tmux.CmdErr(err, out))
+		}
+	}
+
+	// Window-level remain-on-exit
+	if w.RemainOnExit != nil && *w.RemainOnExit {
+		if out, err := r.Run("set-window-option", "-t", windowID, "remain-on-exit", "on"); err != nil {
+			warnf(stderr, "failed to enable remain-on-exit for window %q: %v", w.Name, tmux.CmdErr(err, out))
+		}
+	}
+
+	var paneToZoom string
+	ctx.onPaneCreated = func(paneID string, s config.Split) {
+		if s.RemainOnExit != nil && *s.RemainOnExit {
+			if out, err := r.Run("set-option", "-p", "-t", paneID, "remain-on-exit", "on"); err != nil {
+				warnf(stderr, "failed to set remain-on-exit on pane %s: %v", paneID, tmux.CmdErr(err, out))
+			}
+		}
+		if (s.Zoomed != nil && *s.Zoomed) || (s.Zoom != nil && *s.Zoom) {
+			paneToZoom = paneID
+		}
+	}
+
+	if len(w.Splits) > 0 && w.Splits[0].Type == "" {
+		ctx.onPaneCreated(initialPane, w.Splits[0])
+	}
+
 	switch {
 	case len(w.Splits) > 0:
 		applySplits(r, initialPane, w.Splits, ctx, stderr)
@@ -352,17 +383,24 @@ func buildWindow(r tmux.Runner, windowID, initialPane string, w config.Window, c
 	case w.PreWindow != "":
 		sendPreWindow(ctx.keys, initialPane, w.PreWindow, ctx.done)
 	}
+
+	if paneToZoom != "" {
+		if out, err := r.Run("resize-pane", "-Z", "-t", paneToZoom); err != nil {
+			warnf(stderr, "failed to zoom pane %s: %v", paneToZoom, tmux.CmdErr(err, out))
+		}
+	}
 }
 
 // splitCtx is what a level of the split tree inherits from the one above it:
 // the directory new panes open in, the environment they get, the window's
 // pre_window command, and the per-pane record of where it has already run.
 type splitCtx struct {
-	root      string
-	env       []string
-	preWindow string
-	done      map[string]bool
-	keys      *keyBatch
+	root          string
+	env           []string
+	preWindow     string
+	done          map[string]bool
+	keys          *keyBatch
+	onPaneCreated func(paneID string, s config.Split)
 }
 
 // applySplits walks a split tree. Each entry with a type splits the pane of
@@ -397,6 +435,9 @@ func applySplits(r tmux.Runner, basePane string, splits []config.Split, ctx spli
 				continue // panes[i] stays "": skipped below
 			}
 			pane = newPane
+			if ctx.onPaneCreated != nil {
+				ctx.onPaneCreated(pane, s)
+			}
 		}
 		panes[i] = pane
 		current = pane
@@ -425,6 +466,9 @@ func applySplits(r tmux.Runner, basePane string, splits []config.Split, ctx spli
 		}
 		child := ctx
 		child.root = roots[i]
+		if len(s.Children) > 0 && s.Children[0].Type == "" && ctx.onPaneCreated != nil {
+			ctx.onPaneCreated(pane, s.Children[0])
+		}
 		applySplits(r, pane, s.Children, child, stderr)
 	}
 }
@@ -696,7 +740,7 @@ func findStartupPane(panes []tmux.PaneInfo, index int) (string, bool) {
 // blank screen and no output looks indistinguishable from a hang. stderr
 // rather than stdout so hook chatter can't be confused with wyrm's own
 // progress lines.
-func runHook(o options, hook, dir, label string, stderr io.Writer) error {
+func runHook(o options, hook, dir, label string, env map[string]string, stderr io.Writer) error {
 	if hook == "" {
 		return nil
 	}
@@ -714,6 +758,9 @@ func runHook(o options, hook, dir, label string, stderr io.Writer) error {
 	_, _ = fmt.Fprintf(stderr, "wyrm: running %s: %s\n", label, hook)
 	cmd := exec.Command(shell, "-c", hook)
 	cmd.Dir = dir
+	if len(env) > 0 {
+		cmd.Env = hookEnv(env)
+	}
 	cmd.Stdout, cmd.Stderr = stderr, stderr
 	if err := cmd.Run(); err != nil {
 		return err
@@ -736,12 +783,12 @@ func runFirstStartOrRestartHook(o options, cfg *config.Config, root string, stde
 		return
 	}
 	if o.history.Started(cfg.Dir()) {
-		if err := runHook(o, cfg.Session.OnProjectRestart, root, "on_project_restart", stderr); err != nil {
+		if err := runHook(o, cfg.Session.OnProjectRestart, root, "on_project_restart", cfg.Session.Env, stderr); err != nil {
 			warnf(stderr, "on_project_restart failed: %v", err)
 		}
 		return
 	}
-	if err := runHook(o, cfg.Session.OnProjectFirstStart, root, "on_project_first_start", stderr); err != nil {
+	if err := runHook(o, cfg.Session.OnProjectFirstStart, root, "on_project_first_start", cfg.Session.Env, stderr); err != nil {
 		warnf(stderr, "on_project_first_start failed: %v", err)
 	}
 	if o.dryRun {
@@ -750,6 +797,24 @@ func runFirstStartOrRestartHook(o options, cfg *config.Config, root string, stde
 	if err := o.history.MarkStarted(cfg.Dir()); err != nil {
 		warnf(stderr, "failed to record project start: %v", err)
 	}
+}
+
+// hookEnv merges the process environment with the session's configured env map,
+// sorted for deterministic ordering.
+func hookEnv(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := append([]string(nil), os.Environ()...)
+	for _, k := range keys {
+		out = append(out, k+"="+env[k])
+	}
+	return out
 }
 
 func warnf(w io.Writer, format string, args ...any) {

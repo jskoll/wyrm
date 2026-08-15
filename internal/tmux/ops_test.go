@@ -41,6 +41,20 @@ func TestCapturePaneError(t *testing.T) {
 	}
 }
 
+func TestCapturePaneFull(t *testing.T) {
+	r := &recordingRunner{out: "full scrollback\nline two"}
+	out, err := CapturePaneFull(r, "%1")
+	if err != nil {
+		t.Fatalf("CapturePaneFull: %v", err)
+	}
+	if want := "full scrollback\nline two"; out != want {
+		t.Errorf("CapturePaneFull output = %q, want %q", out, want)
+	}
+	if got := strings.Join(r.args, " "); got != "capture-pane -S - -E - -e -p -t %1" {
+		t.Errorf("CapturePaneFull invoked tmux with %q, want %q", got, "capture-pane -S - -E - -e -p -t %1")
+	}
+}
+
 func TestMutationArgv(t *testing.T) {
 	cases := []struct {
 		name string

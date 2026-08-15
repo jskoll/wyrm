@@ -1383,3 +1383,52 @@ func TestRunKill(t *testing.T) {
 		}
 	})
 }
+
+func TestRunUpWithVarFlag(t *testing.T) {
+	templ := `
+[session]
+name = "proj-{{.port}}"
+root = "/tmp/proj"
+
+[[windows]]
+name = "win-{{.branch}}"
+`
+	path := writeConfig(t, templ)
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{}
+	code := run([]string{"up", "-config", path, "-n", "--var", "port=8080", "--var", "branch=feat"},
+		&stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "proj-8080") {
+		t.Errorf("expected interpolated session name proj-8080, got:\n%s", out)
+	}
+	if !strings.Contains(out, "win-feat") {
+		t.Errorf("expected interpolated window name win-feat, got:\n%s", out)
+	}
+}
+
+func TestRunValidateWithVarFlag(t *testing.T) {
+	templ := `
+[session]
+name = "proj-{{.env}}"
+root = "/tmp/proj"
+
+[[windows]]
+name = "main"
+`
+	path := writeConfig(t, templ)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"validate", "-config", path, "--var", "env=prod"},
+		&stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "config valid") {
+		t.Errorf("expected config valid in stdout, got %q", stdout.String())
+	}
+}

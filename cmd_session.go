@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/jskoll/wyrm/internal/config"
 	"github.com/jskoll/wyrm/internal/session"
@@ -14,6 +15,25 @@ import (
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
+// varMapFlag collects repeated --var KEY=VALUE flags into a map for template interpolation.
+type varMapFlag map[string]string
+
+func (v *varMapFlag) String() string {
+	return ""
+}
+
+func (v *varMapFlag) Set(s string) error {
+	k, val, ok := strings.Cut(s, "=")
+	if !ok {
+		return fmt.Errorf("invalid variable %q (expected KEY=VALUE)", s)
+	}
+	if *v == nil {
+		*v = make(map[string]string)
+	}
+	(*v)[k] = val
+	return nil
+}
+
 // up builds the current folder's session (or attaches if it's already
 // running). This is the default when no subcommand is given.
 func (a *app) up(args []string) error {
@@ -21,6 +41,8 @@ func (a *app) up(args []string) error {
 	configPath := fs.String("config", "", "path to config file (default: .wyrm.toml, then .tmuxconfig)")
 	dryRun := fs.Bool("n", false, "print the tmux commands and hooks that would run, without touching tmux")
 	detach := fs.Bool("d", false, "build the session without attaching")
+	var vars varMapFlag
+	fs.Var(&vars, "var", "set template variable (KEY=VALUE, can be repeated)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -41,6 +63,9 @@ func (a *app) up(args []string) error {
 	cfg, _, err := a.resolveConfig(settings, *configPath)
 	if err != nil {
 		return err
+	}
+	if len(vars) > 0 {
+		cfg.Interpolate(vars)
 	}
 
 	hist, err := state.Load()
@@ -117,6 +142,8 @@ func (a *app) restart(args []string) error {
 	configPath := fs.String("config", "", "path to config file (default: .wyrm.toml, then .tmuxconfig)")
 	dryRun := fs.Bool("n", false, "print the tmux commands and hooks that would run, without touching tmux")
 	detach := fs.Bool("d", false, "build the session without attaching")
+	var vars varMapFlag
+	fs.Var(&vars, "var", "set template variable (KEY=VALUE, can be repeated)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -130,6 +157,9 @@ func (a *app) restart(args []string) error {
 	cfg, _, err := a.resolveConfig(settings, *configPath)
 	if err != nil {
 		return err
+	}
+	if len(vars) > 0 {
+		cfg.Interpolate(vars)
 	}
 
 	hist, err := state.Load()
@@ -263,7 +293,19 @@ func (a *app) killByName(settings *config.Settings, target string, dryRun bool) 
 // from a genuine session name (see knownSubcommands), a not-found error here
 // also hints at the nearest known verb when name looks like a typo of one —
 // so `wyrm klil` says more than just "no running session named klil".
-func (a *app) attachByName(name string) error {
+func (a *app) attachByName(name string, extraArgs []string) error {
+	var vars varMapFlag
+	if len(extraArgs) > 0 {
+		fs := a.newFlagSet(name)
+		fs.Var(&vars, "var", "set template variable (KEY=VALUE, can be repeated)")
+		if err := parseFlags(fs, extraArgs); err != nil {
+			return err
+		}
+		if err := requireNoArgs(fs); err != nil {
+			return err
+		}
+	}
+
 	id, ok, err := tmux.FindSessionID(a.runner, name)
 	if err != nil {
 		return err
@@ -281,7 +323,7 @@ func (a *app) attachByName(name string) error {
 		return err
 	}
 	if project, found := config.FindProject(settings, name); found {
-		return a.startProject(project)
+		return a.startProject(project, vars)
 	}
 
 	_, _ = fmt.Fprintf(a.stderr, "wyrm: no running session or known project named %q\n", name)
@@ -293,7 +335,7 @@ func (a *app) attachByName(name string) error {
 
 // startProject builds (or reattaches) the session for a discovered config and
 // hands the terminal over.
-func (a *app) startProject(project config.Project) error {
+func (a *app) startProject(project config.Project, vars map[string]string) error {
 	cfg, err := config.Load(project.Path)
 	if err != nil {
 		return err
@@ -303,6 +345,9 @@ func (a *app) startProject(project config.Project) error {
 		// directory this Project stands for — only the match does. See
 		// config.DiscoverWildcardProjects.
 		cfg.Session.Root = project.Root
+	}
+	if len(vars) > 0 {
+		cfg.Interpolate(vars)
 	}
 	_, _ = fmt.Fprintf(a.stderr, "wyrm: using config %s\n", project.Path)
 	a.printWarnings(cfg)

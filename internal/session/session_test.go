@@ -1121,3 +1121,65 @@ func (p *partialBatchRunner) RunBatch(cmds [][]string) ([]string, error) {
 }
 
 func (p *partialBatchRunner) typed() []string { return p.sent }
+
+func TestCreateSynchronizeRemainOnExitZoomed(t *testing.T) {
+	tTrue := true
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{
+			{
+				Name:         "win1",
+				Synchronize:  &tTrue,
+				RemainOnExit: &tTrue,
+				Splits: []config.Split{
+					{Command: "echo pane1", RemainOnExit: &tTrue},
+					{Type: "h", Command: "echo pane2", Zoomed: &tTrue},
+				},
+			},
+		},
+	}
+
+	r := &fakeRunner{}
+	var stdout, stderr bytes.Buffer
+	name, id, created, err := Create(r, cfg, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if name != "proj" || id != "$1" || !created {
+		t.Fatalf("Create returned name=%q, id=%q, created=%v", name, id, created)
+	}
+
+	joined := r.joined()
+	foundSync := false
+	foundWinRemain := false
+	foundPaneRemain := false
+	foundZoom := false
+
+	for _, call := range joined {
+		if strings.Contains(call, "set-window-option -t @1 synchronize-panes on") {
+			foundSync = true
+		}
+		if strings.Contains(call, "set-window-option -t @1 remain-on-exit on") {
+			foundWinRemain = true
+		}
+		if strings.Contains(call, "set-option -p -t %1 remain-on-exit on") {
+			foundPaneRemain = true
+		}
+		if strings.Contains(call, "resize-pane -Z -t %2") {
+			foundZoom = true
+		}
+	}
+
+	if !foundSync {
+		t.Errorf("expected set-window-option synchronize-panes on, calls: %v", joined)
+	}
+	if !foundWinRemain {
+		t.Errorf("expected set-window-option remain-on-exit on, calls: %v", joined)
+	}
+	if !foundPaneRemain {
+		t.Errorf("expected set-option -p remain-on-exit on for %%1, calls: %v", joined)
+	}
+	if !foundZoom {
+		t.Errorf("expected resize-pane -Z for %%2, calls: %v", joined)
+	}
+}

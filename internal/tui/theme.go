@@ -94,7 +94,10 @@ var (
 	helpStyle  lipgloss.Style
 	errorStyle lipgloss.Style
 	modalStyle lipgloss.Style
+	infoStyle  lipgloss.Style
 	keyStyle   lipgloss.Style
+
+	searchMatchStyle lipgloss.Style
 
 	activeMark lipgloss.Style // "●" running/attached
 	indexMark  lipgloss.Style // window/pane identifiers
@@ -135,7 +138,10 @@ func SetTheme(t Theme) {
 	helpStyle = lipgloss.NewStyle().Foreground(subtle)
 	errorStyle = title.Foreground(lipgloss.Color(t.Error))
 	modalStyle = title.Foreground(accent)
+	infoStyle = title.Foreground(lipgloss.Color(t.Active))
 	keyStyle = lipgloss.NewStyle().Bold(true)
+
+	searchMatchStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Text)).Background(filter).Bold(true)
 
 	activeMark = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Active))
 	indexMark = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Index))
