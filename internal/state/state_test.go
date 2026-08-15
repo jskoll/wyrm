@@ -124,3 +124,35 @@ func TestLoadParseError(t *testing.T) {
 		t.Error("Load with malformed state file: want error, got nil")
 	}
 }
+
+func TestAtomicWriteFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested", "atomic.txt")
+
+	data := []byte("hello atomic world")
+	if err := AtomicWriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("AtomicWriteFile: %v", err)
+	}
+
+	read, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(read) != string(data) {
+		t.Errorf("read %q, want %q", read, data)
+	}
+
+	// Overwrite atomically
+	newData := []byte("updated content")
+	if err := AtomicWriteFile(path, newData, 0o644); err != nil {
+		t.Fatalf("second AtomicWriteFile: %v", err)
+	}
+
+	read2, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("second ReadFile: %v", err)
+	}
+	if string(read2) != string(newData) {
+		t.Errorf("second read %q, want %q", read2, newData)
+	}
+}

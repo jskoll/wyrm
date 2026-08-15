@@ -13,6 +13,7 @@ import (
 	"github.com/jskoll/wyrm/internal/config"
 	"github.com/jskoll/wyrm/internal/editor"
 	"github.com/jskoll/wyrm/internal/freeze"
+	"github.com/jskoll/wyrm/internal/state"
 	"github.com/jskoll/wyrm/internal/tmux"
 	"github.com/pelletier/go-toml/v2"
 )
@@ -242,10 +243,7 @@ func (a *app) save(args []string) error {
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(dest, data, 0o644); err != nil {
+	if err := state.AtomicWriteFile(dest, data, 0o644); err != nil {
 		return err
 	}
 
