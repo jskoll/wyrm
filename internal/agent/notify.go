@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 )
 
 // Notification holds the data for an agent state transition alert.
@@ -78,6 +79,33 @@ func BuildCustomNotifyCommand(command string, n Notification, title, msg string)
 	return cmd
 }
 
+// SanitizeTerminalString strips ASCII control characters (bytes < 0x20) and DEL (0x7f)
+// to prevent terminal escape sequence injection and control character abuse.
+func SanitizeTerminalString(s string) string {
+	var buf strings.Builder
+	buf.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if b >= 0x20 && b != 0x7f {
+			buf.WriteByte(b)
+		}
+	}
+	return buf.String()
+}
+
+// EmitTerminalNotification writes sanitized OSC 777 and OSC 9 escape sequences to out.
+func EmitTerminalNotification(out io.Writer, title, msg string) {
+	if out == nil {
+		return
+	}
+	cleanTitle := SanitizeTerminalString(title)
+	cleanMsg := SanitizeTerminalString(msg)
+	// OSC 777 is standard for desktop notifications in modern terminals
+	_, _ = fmt.Fprintf(out, "\x1b]777;notify;%s;%s\x1b\\", cleanTitle, cleanMsg)
+	// OSC 9 is supported by iTerm2
+	_, _ = fmt.Fprintf(out, "\x1b]9;%s\x1b\\", cleanMsg)
+}
+
 // Dispatch sends the notification using the configured delivery channels.
 func Dispatch(n Notification, cfg NotifyConfig, out io.Writer) error {
 	if !cfg.Enabled {
@@ -100,10 +128,7 @@ func Dispatch(n Notification, cfg NotifyConfig, out io.Writer) error {
 
 	// OSC 9 / OSC 777
 	if cfg.OSC && out != nil {
-		// OSC 777 is standard for desktop notifications in modern terminals
-		_, _ = fmt.Fprintf(out, "\x1b]777;notify;%s;%s\x1b\\", title, msg)
-		// OSC 9 is supported by iTerm2
-		_, _ = fmt.Fprintf(out, "\x1b]9;%s\x1b\\", msg)
+		EmitTerminalNotification(out, title, msg)
 	}
 
 	// Custom command
