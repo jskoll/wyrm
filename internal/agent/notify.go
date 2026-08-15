@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"strings"
 )
 
 // Notification holds the data for an agent state transition alert.
@@ -60,6 +59,25 @@ func (n Notification) FormattedMessage() string {
 	}
 }
 
+// BuildCustomNotifyCommand builds an *exec.Cmd for custom notification command execution,
+// passing notification fields via environment variables instead of string interpolation
+// to prevent shell command injection.
+func BuildCustomNotifyCommand(command string, n Notification, title, msg string) *exec.Cmd {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "sh"
+	}
+	cmd := exec.Command(shell, "-c", command)
+	cmd.Env = append(os.Environ(),
+		"WYRM_NOTIFY_TITLE="+title,
+		"WYRM_NOTIFY_MESSAGE="+msg,
+		"WYRM_NOTIFY_STATE="+n.State.String(),
+		"WYRM_NOTIFY_SESSION="+n.SessionName,
+		"WYRM_NOTIFY_PANE="+n.PaneID,
+	)
+	return cmd
+}
+
 // Dispatch sends the notification using the configured delivery channels.
 func Dispatch(n Notification, cfg NotifyConfig, out io.Writer) error {
 	if !cfg.Enabled {
@@ -90,16 +108,7 @@ func Dispatch(n Notification, cfg NotifyConfig, out io.Writer) error {
 
 	// Custom command
 	if cfg.Command != "" {
-		shell := os.Getenv("SHELL")
-		if shell == "" {
-			shell = "sh"
-		}
-		cmdStr := strings.ReplaceAll(cfg.Command, "{title}", title)
-		cmdStr = strings.ReplaceAll(cmdStr, "{message}", msg)
-		cmdStr = strings.ReplaceAll(cmdStr, "{state}", n.State.String())
-		cmdStr = strings.ReplaceAll(cmdStr, "{session}", n.SessionName)
-		cmdStr = strings.ReplaceAll(cmdStr, "{pane}", n.PaneID)
-		cmd := exec.Command(shell, "-c", cmdStr)
+		cmd := BuildCustomNotifyCommand(cfg.Command, n, title, msg)
 		_ = cmd.Run()
 		return nil
 	}
