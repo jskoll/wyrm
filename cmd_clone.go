@@ -62,7 +62,7 @@ func (a *app) clone(args []string) error {
 	// whatever discovery would find inside it — matching how any other
 	// directory under that pattern behaves, clone included or not.
 	if project, found := config.FindProject(settings, filepath.Base(absDest)); found && project.Wildcard && project.Root == absDest {
-		return a.startProject(project)
+		return a.startProject(project, nil)
 	}
 
 	if err := os.Chdir(absDest); err != nil {

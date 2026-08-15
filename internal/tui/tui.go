@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -24,6 +25,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jskoll/wyrm/internal/agent"
+	"github.com/jskoll/wyrm/internal/clipboard"
 	"github.com/jskoll/wyrm/internal/config"
 	"github.com/jskoll/wyrm/internal/sessions"
 	"github.com/jskoll/wyrm/internal/tmux"
@@ -103,6 +105,8 @@ const (
 	// cascade's parent-child relationships, and full-TUI only (wyrm pick's
 	// compact form is deliberately the two-panel Sessions/Windows chooser).
 	modeFindPane
+	// modePager is the full scrollback buffer pager and search mode ("p" / "[").
+	modePager
 )
 
 // Model is the Bubble Tea model for the TUI. It is a plain value type; Update
@@ -159,6 +163,23 @@ type Model struct {
 	allPanes      []tmux.PaneRef
 	findPaneQuery string
 	findPaneCur   int
+
+	// pager* backs modePager: full scrollback viewer and buffer search.
+	pagerPaneID    string
+	pagerPaneTitle string
+	pagerContent   string
+	pagerLines     []string
+	pagerScroll    int
+	pagerSearching bool
+	pagerQuery     string
+	pagerMatches   []int
+	pagerMatchIdx  int
+
+	// info is a transient status notification shown in the footer (e.g. on clipboard copy).
+	info string
+
+	// prevPaneStates tracks agent pane states across scans to trigger notifications on change.
+	prevPaneStates map[string]agent.State
 
 	// layoutIdx rotates through cycleLayouts on "L", and layoutWindow is the
 	// window it belongs to. Keeping them together makes the cycle per-window:
@@ -291,6 +312,14 @@ type allPanesMsg struct {
 	err   error
 }
 
+// pagerMsg carries the full captured scrollback buffer for modePager.
+type pagerMsg struct {
+	paneID  string
+	title   string
+	content string
+	err     error
+}
+
 type tickMsg time.Time
 
 // listTickMsg drives the slower project/session refresh — see
@@ -324,6 +353,13 @@ func loadPreview(r tmux.Runner, paneID string) tea.Cmd {
 	return func() tea.Msg {
 		out, err := tmux.CapturePane(r, paneID)
 		return previewMsg{paneID: paneID, content: out, err: err}
+	}
+}
+
+func loadPager(r tmux.Runner, paneID, title string) tea.Cmd {
+	return func() tea.Msg {
+		out, err := tmux.CapturePaneFull(r, paneID)
+		return pagerMsg{paneID: paneID, title: title, content: out, err: err}
 	}
 }
 
@@ -517,8 +553,75 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// claiming the footer: this is an optional decoration polled on a timer,
 		// and one unlucky tmux call shouldn't wipe an error the user is reading.
 		if msg.err == nil {
+			var notifyCmds []tea.Cmd
+			if m.settings != nil && m.settings.AgentNotifyEnabled() && m.prevPaneStates != nil {
+				cfg := agent.NotifyConfig{
+					Enabled:   m.settings.AgentNotifyEnabled(),
+					Desktop:   m.settings.AgentNotifyDesktop(),
+					Bell:      m.settings.AgentNotifyBell(),
+					OSC:       m.settings.AgentNotifyOSC(),
+					OnBlocked: m.settings.AgentNotifyOnBlocked(),
+					OnIdle:    m.settings.AgentNotifyOnIdle(),
+					Command:   m.settings.AgentNotifyCommand(),
+				}
+				for paneID, state := range msg.status.panes {
+					prevState := m.prevPaneStates[paneID]
+					if state != prevState && (state == agent.StateBlocked || state == agent.StateIdle) {
+						sessName := ""
+						winName := ""
+						for _, ref := range m.allPanes {
+							if ref.PaneID == paneID {
+								sessName = ref.SessionName
+								winName = ref.WindowName
+								break
+							}
+						}
+						n := agent.Notification{
+							State:       state,
+							PaneID:      paneID,
+							SessionName: sessName,
+							WindowName:  winName,
+						}
+						notifyCmds = append(notifyCmds, func() tea.Msg {
+							_ = agent.Dispatch(n, cfg, os.Stdout)
+							return nil
+						})
+					}
+				}
+			}
+			m.prevPaneStates = make(map[string]agent.State, len(msg.status.panes))
+			for k, v := range msg.status.panes {
+				m.prevPaneStates[k] = v
+			}
 			m.agents = msg.status
+			if len(notifyCmds) > 0 {
+				return m, tea.Batch(notifyCmds...)
+			}
 		}
+		return m, nil
+
+	case pagerMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.pagerPaneID = msg.paneID
+		m.pagerPaneTitle = msg.title
+		m.pagerContent = msg.content
+		m.pagerLines = strings.Split(msg.content, "\n")
+		m.pagerSearching = false
+		m.pagerQuery = ""
+		m.pagerMatches = nil
+		m.pagerMatchIdx = 0
+		pageH := m.height - 4
+		if pageH < 1 {
+			pageH = 1
+		}
+		m.pagerScroll = len(m.pagerLines) - pageH
+		if m.pagerScroll < 0 {
+			m.pagerScroll = 0
+		}
+		m.mode = modePager
 		return m, nil
 
 	case tea.FocusMsg:
@@ -672,10 +775,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleMenuKey(msg)
 	case modeFindPane:
 		return m.handleFindPaneKey(msg)
+	case modePager:
+		return m.handlePagerKey(msg)
 	}
-	// Any key clears a reported error, so the footer returns to the key hints
-	// once it's been seen.
+	// Any key clears a reported error or info notice, so the footer returns to
+	// the key hints once it's been seen.
 	m.err = nil
+	m.info = ""
 	return m.handleNormalKey(msg)
 }
 
@@ -898,8 +1004,159 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.findPaneQuery = ""
 		m.findPaneCur = 0
 		return m, loadAllPanes(m.runner)
+	case "p", "P", "[":
+		if p, ok := m.currentPane(); ok {
+			title := p.ID + " " + p.Command
+			if s, sok := m.currentSession(); sok {
+				title = s.Name + ": " + title
+			}
+			return m, loadPager(m.runner, p.ID, title)
+		}
+		return m, nil
+	case "y":
+		switch m.focus {
+		case panelSessions:
+			if s, ok := m.currentSession(); ok {
+				_ = clipboard.Write(s.Name)
+				m.info = fmt.Sprintf("copied session %q to clipboard", s.Name)
+			}
+		case panelProjects:
+			if p, ok := m.currentProject(); ok {
+				_ = clipboard.Write(p.Path)
+				m.info = fmt.Sprintf("copied project path %q to clipboard", p.Path)
+			}
+		case panelWindows:
+			if w, ok := m.currentWindow(); ok {
+				_ = clipboard.Write(w.Name)
+				m.info = fmt.Sprintf("copied window %q to clipboard", w.Name)
+			}
+		case panelPanes:
+			if p, ok := m.currentPane(); ok {
+				_ = clipboard.Write(m.preview)
+				m.info = fmt.Sprintf("copied pane %s preview to clipboard", p.ID)
+			}
+		}
+		return m, nil
 	}
 	return m, nil
+}
+
+// handlePagerKey drives modePager: scrolling the full scrollback buffer, searching
+// via /, jumping to matches with n/N, copying with y, and exiting with q/Esc.
+func (m Model) handlePagerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.pagerSearching {
+		switch msg.Type {
+		case tea.KeyEnter:
+			m.pagerSearching = false
+			return m, nil
+		case tea.KeyEsc, tea.KeyCtrlC:
+			m.pagerSearching = false
+			m.pagerQuery = ""
+			m.pagerMatches = nil
+			m.pagerMatchIdx = 0
+			return m, nil
+		case tea.KeyBackspace:
+			if m.pagerQuery != "" {
+				m.pagerQuery = m.pagerQuery[:len(m.pagerQuery)-1]
+			}
+			m.updatePagerMatches()
+			return m, nil
+		case tea.KeyRunes, tea.KeySpace:
+			m.pagerQuery += string(msg.Runes)
+			if msg.Type == tea.KeySpace {
+				m.pagerQuery += " "
+			}
+			m.updatePagerMatches()
+			return m, nil
+		}
+		return m, nil
+	}
+
+	pageH := m.height - 4
+	if pageH < 1 {
+		pageH = 1
+	}
+	maxScroll := len(m.pagerLines) - pageH
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+
+	switch msg.String() {
+	case "esc", "q", "ctrl+c":
+		m.mode = modeNormal
+		m.pagerQuery = ""
+		m.pagerMatches = nil
+		return m, nil
+	case "j", "down":
+		m.pagerScroll++
+	case "k", "up":
+		m.pagerScroll--
+	case "pgdown", "ctrl+d", " ":
+		m.pagerScroll += pageH
+	case "pgup", "ctrl+u":
+		m.pagerScroll -= pageH
+	case "g", "home":
+		m.pagerScroll = 0
+	case "G", "end":
+		m.pagerScroll = maxScroll
+	case "/":
+		m.pagerSearching = true
+		m.pagerQuery = ""
+		m.pagerMatches = nil
+		m.pagerMatchIdx = 0
+		return m, nil
+	case "n":
+		if len(m.pagerMatches) > 0 {
+			m.pagerMatchIdx = (m.pagerMatchIdx + 1) % len(m.pagerMatches)
+			m.pagerScroll = m.pagerMatches[m.pagerMatchIdx]
+		}
+	case "N":
+		if len(m.pagerMatches) > 0 {
+			m.pagerMatchIdx = (m.pagerMatchIdx - 1 + len(m.pagerMatches)) % len(m.pagerMatches)
+			m.pagerScroll = m.pagerMatches[m.pagerMatchIdx]
+		}
+	case "y":
+		text := strings.Join(m.pagerLines, "\n")
+		_ = clipboard.Write(text)
+		m.info = fmt.Sprintf("copied %d lines to clipboard", len(m.pagerLines))
+		return m, nil
+	}
+
+	if m.pagerScroll > maxScroll {
+		m.pagerScroll = maxScroll
+	}
+	if m.pagerScroll < 0 {
+		m.pagerScroll = 0
+	}
+	return m, nil
+}
+
+func (m *Model) updatePagerMatches() {
+	m.pagerMatches = nil
+	m.pagerMatchIdx = 0
+	if m.pagerQuery == "" {
+		return
+	}
+	q := strings.ToLower(m.pagerQuery)
+	for i, line := range m.pagerLines {
+		if strings.Contains(strings.ToLower(line), q) {
+			m.pagerMatches = append(m.pagerMatches, i)
+		}
+	}
+	if len(m.pagerMatches) > 0 {
+		m.pagerScroll = m.pagerMatches[0]
+		pageH := m.height - 4
+		if pageH < 1 {
+			pageH = 1
+		}
+		maxScroll := len(m.pagerLines) - pageH
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+		if m.pagerScroll > maxScroll {
+			m.pagerScroll = maxScroll
+		}
+	}
 }
 
 // cycleFocus moves focus by delta positions through the shown panels, wrapping.

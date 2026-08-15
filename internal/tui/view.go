@@ -101,6 +101,9 @@ func (m Model) View() string {
 	if m.ready && m.mode == modeFindPane {
 		return m.renderFindPaneOverlay()
 	}
+	if m.ready && m.mode == modePager {
+		return m.renderPagerOverlay()
+	}
 
 	if !m.ready || m.width < minWidth || m.height < m.minHeight() {
 		return fmt.Sprintf("wyrm: terminal too small (need at least %dx%d, have %dx%d)",
@@ -408,6 +411,9 @@ func (m Model) renderHelp() string {
 	if m.err != nil {
 		return errorStyle.Render(truncate("error: "+m.err.Error()+"  (any key dismisses)", m.width))
 	}
+	if m.info != "" {
+		return infoStyle.Render(truncate(m.info+"  (any key dismisses)", m.width))
+	}
 	if m.filtering || m.filter != "" {
 		return m.renderFilterLine()
 	}
@@ -445,6 +451,8 @@ var helpSections = []helpSection{
 		{"g / G", "jump to the first / last entry"},
 		{"/", "filter the focused panel"},
 		{"f", "find a pane anywhere (full TUI)"},
+		{"p / [", "open scrollback pager and search"},
+		{"y", "copy selection to clipboard"},
 		{"Esc", "clear the filter"},
 		{"R", "reload the project and session lists"},
 		{"M", "open the context menu for the selection"},
@@ -466,12 +474,14 @@ var helpSections = []helpSection{
 		{"Enter", "start or attach the config's session"},
 		{"e", "edit the config in $EDITOR"},
 		{"x", "stop the session (runs on_project_exit)"},
+		{"y", "copy project path to clipboard"},
 	}},
 	{"Sessions panel", [][2]string{
 		{"Enter", "attach (or switch-client inside tmux)"},
 		{"x", "kill the session"},
 		{"r", "rename the session"},
 		{"n", "new window in this session"},
+		{"y", "copy session name to clipboard"},
 	}},
 	{"Windows panel", [][2]string{
 		{"Enter", "attach, landing on this window"},
@@ -479,11 +489,14 @@ var helpSections = []helpSection{
 		{"r", "rename the window"},
 		{"n", "new window"},
 		{"L", "cycle the window layout"},
+		{"y", "copy window name to clipboard"},
 	}},
-	{"Panes panel", [][2]string{
+	{"Panes & Pager", [][2]string{
 		{"Enter", "attach, landing on this pane"},
 		{"x", "kill the pane"},
 		{"z", "toggle zoom"},
+		{"p / [", "open scrollback pager & search"},
+		{"y", "copy pane preview or pager buffer"},
 	}},
 	{"Confirm / prompt", [][2]string{
 		{"y", "confirm"},
@@ -703,4 +716,94 @@ func padRight(s string, w int) string {
 		return s
 	}
 	return s + strings.Repeat(" ", gap)
+}
+
+func (m Model) renderPagerOverlay() string {
+	boxW := m.width - 4
+	boxH := m.height - 2
+	if boxW < 20 {
+		boxW = 20
+	}
+	if boxH < 6 {
+		boxH = 6
+	}
+	innerW := boxW - borderSize
+	innerH := boxH - borderSize
+	bodyH := innerH - titleRows
+	if bodyH < 1 {
+		bodyH = 1
+	}
+
+	title := fmt.Sprintf(" Pager: %s ", m.pagerPaneTitle)
+	if len(m.pagerLines) > 0 {
+		title += fmt.Sprintf("[%d/%d] ", m.pagerScroll+1, len(m.pagerLines))
+	}
+	if m.pagerQuery != "" {
+		matchInfo := "no matches"
+		if len(m.pagerMatches) > 0 {
+			matchInfo = fmt.Sprintf("match %d/%d", m.pagerMatchIdx+1, len(m.pagerMatches))
+		}
+		title += fmt.Sprintf("(search: %q · %s) ", m.pagerQuery, matchInfo)
+	}
+
+	var b strings.Builder
+	b.WriteString(focusedTitle.Render(truncate(title, innerW)))
+	b.WriteByte('\n')
+
+	start := m.pagerScroll
+	if start < 0 {
+		start = 0
+	}
+	for i := 0; i < bodyH; i++ {
+		lineIdx := start + i
+		if lineIdx < len(m.pagerLines) {
+			line := m.pagerLines[lineIdx]
+			if m.pagerQuery != "" {
+				line = highlightMatch(line, m.pagerQuery)
+			}
+			b.WriteString(truncate(line, innerW))
+			b.WriteString(ansi.ResetStyle)
+		}
+		if i < bodyH-1 {
+			b.WriteByte('\n')
+		}
+	}
+
+	frame := focusedBorder.Width(innerW).Height(innerH).MaxHeight(boxH).Render(b.String())
+
+	var footer string
+	if m.pagerSearching {
+		footer = filterStyle.Render(truncate("/"+m.pagerQuery+"_  (Enter to commit, Esc to cancel)", m.width))
+	} else {
+		footer = helpStyle.Render(truncate("↑/↓/j/k: scroll · PgUp/PgDn: page · /: search · n/N: next/prev match · y: copy buffer · q/Esc: exit", m.width))
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, frame, footer)
+}
+
+func highlightMatch(line, query string) string {
+	if query == "" {
+		return line
+	}
+	lowerLine := strings.ToLower(line)
+	lowerQ := strings.ToLower(query)
+	idx := strings.Index(lowerLine, lowerQ)
+	if idx < 0 {
+		return line
+	}
+	var b strings.Builder
+	last := 0
+	for idx >= 0 {
+		b.WriteString(line[last:idx])
+		matchText := line[idx : idx+len(query)]
+		b.WriteString(searchMatchStyle.Render(matchText))
+		last = idx + len(query)
+		next := strings.Index(lowerLine[last:], lowerQ)
+		if next < 0 {
+			break
+		}
+		idx = last + next
+	}
+	b.WriteString(line[last:])
+	return b.String()
 }

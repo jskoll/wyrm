@@ -18,6 +18,15 @@ func CapturePane(r Runner, target string) (string, error) {
 	return out, nil
 }
 
+// CapturePaneFull captures the entire scrollback history of target.
+func CapturePaneFull(r Runner, target string) (string, error) {
+	out, err := r.Run("capture-pane", "-S", "-", "-E", "-", "-e", "-p", "-t", target)
+	if err != nil {
+		return "", fmt.Errorf("capturing full pane %q: %w", target, CmdErr(err, out))
+	}
+	return out, nil
+}
+
 // CapturePanePlainArgs is the command that reads a pane as plain text —
 // CapturePane without "-e". The agent-state detector matches patterns against
 // this, and SGR escapes interleaved with the text would break those matches

@@ -160,7 +160,7 @@ type TUI struct {
 	Agent Agent `toml:"agent"`
 }
 
-// Agent configures the "this pane is waiting for you" markers.
+// Agent configures the "this pane is waiting for you" markers and notifications.
 type Agent struct {
 	// Enabled turns agent detection on. Defaults to true. Turning it off also
 	// stops the pane captures it costs.
@@ -176,6 +176,27 @@ type Agent struct {
 	// idle. A non-empty list replaces the built-in profile entirely rather than
 	// adding to it — otherwise one agent's chrome could decide another's state.
 	Profiles []AgentProfile `toml:"profiles"`
+	// Notify configures terminal and desktop notifications when an agent changes state.
+	Notify AgentNotify `toml:"notify"`
+}
+
+// AgentNotify configures notification delivery for agent state changes.
+type AgentNotify struct {
+	// Enabled turns agent notifications on. Defaults to false.
+	Enabled *bool `toml:"enabled"`
+	// Desktop enables OS desktop notifications (osascript on macOS, notify-send on Linux). Defaults to true if notify is enabled.
+	Desktop *bool `toml:"desktop"`
+	// Bell enables terminal bell escape sequence (\a). Defaults to false.
+	Bell *bool `toml:"bell"`
+	// OSC enables terminal OSC 9 / OSC 777 notification escape sequences. Defaults to false.
+	OSC *bool `toml:"osc"`
+	// OnBlocked triggers notification when an agent transitions to blocked. Defaults to true.
+	OnBlocked *bool `toml:"on_blocked"`
+	// OnIdle triggers notification when an agent transitions to idle. Defaults to false.
+	OnIdle *bool `toml:"on_idle"`
+	// Command is an optional shell command to execute for notifications.
+	// Variables {title}, {message}, {state}, {session}, {pane} are expanded.
+	Command string `toml:"command"`
 }
 
 // AgentProfile mirrors agent.Profile in the settings file. It is duplicated
@@ -205,6 +226,62 @@ func (s *Settings) AgentEnabled() bool {
 		return true
 	}
 	return *s.TUI.Agent.Enabled
+}
+
+// AgentNotifyEnabled reports whether agent state notifications are enabled.
+func (s *Settings) AgentNotifyEnabled() bool {
+	if s == nil || s.TUI.Agent.Notify.Enabled == nil {
+		return false
+	}
+	return *s.TUI.Agent.Notify.Enabled
+}
+
+// AgentNotifyDesktop reports whether desktop notifications are enabled.
+func (s *Settings) AgentNotifyDesktop() bool {
+	if s == nil || s.TUI.Agent.Notify.Desktop == nil {
+		return true
+	}
+	return *s.TUI.Agent.Notify.Desktop
+}
+
+// AgentNotifyBell reports whether terminal bell notifications are enabled.
+func (s *Settings) AgentNotifyBell() bool {
+	if s == nil || s.TUI.Agent.Notify.Bell == nil {
+		return false
+	}
+	return *s.TUI.Agent.Notify.Bell
+}
+
+// AgentNotifyOSC reports whether OSC 9 / OSC 777 escape notifications are enabled.
+func (s *Settings) AgentNotifyOSC() bool {
+	if s == nil || s.TUI.Agent.Notify.OSC == nil {
+		return false
+	}
+	return *s.TUI.Agent.Notify.OSC
+}
+
+// AgentNotifyOnBlocked reports whether notifications fire when an agent becomes blocked.
+func (s *Settings) AgentNotifyOnBlocked() bool {
+	if s == nil || s.TUI.Agent.Notify.OnBlocked == nil {
+		return true
+	}
+	return *s.TUI.Agent.Notify.OnBlocked
+}
+
+// AgentNotifyOnIdle reports whether notifications fire when an agent becomes idle.
+func (s *Settings) AgentNotifyOnIdle() bool {
+	if s == nil || s.TUI.Agent.Notify.OnIdle == nil {
+		return false
+	}
+	return *s.TUI.Agent.Notify.OnIdle
+}
+
+// AgentNotifyCommand returns the custom notification shell command template.
+func (s *Settings) AgentNotifyCommand() string {
+	if s == nil {
+		return ""
+	}
+	return s.TUI.Agent.Notify.Command
 }
 
 // ZoxideEnabled reports whether the TUI should list zoxide-known

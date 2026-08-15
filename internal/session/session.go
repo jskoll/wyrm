@@ -344,6 +344,37 @@ func buildWindow(r tmux.Runner, windowID, initialPane string, w config.Window, c
 	// caller supplies everything else; this is the one thing scoped to a single
 	// window, so it is created here rather than passed in.
 	ctx.done = map[string]bool{}
+
+	// Window-level synchronize-panes
+	if (w.Synchronize != nil && *w.Synchronize) || (w.SynchronizePanes != nil && *w.SynchronizePanes) {
+		if out, err := r.Run("set-window-option", "-t", windowID, "synchronize-panes", "on"); err != nil {
+			warnf(stderr, "failed to enable synchronize-panes for window %q: %v", w.Name, tmux.CmdErr(err, out))
+		}
+	}
+
+	// Window-level remain-on-exit
+	if w.RemainOnExit != nil && *w.RemainOnExit {
+		if out, err := r.Run("set-window-option", "-t", windowID, "remain-on-exit", "on"); err != nil {
+			warnf(stderr, "failed to enable remain-on-exit for window %q: %v", w.Name, tmux.CmdErr(err, out))
+		}
+	}
+
+	var paneToZoom string
+	ctx.onPaneCreated = func(paneID string, s config.Split) {
+		if s.RemainOnExit != nil && *s.RemainOnExit {
+			if out, err := r.Run("set-option", "-p", "-t", paneID, "remain-on-exit", "on"); err != nil {
+				warnf(stderr, "failed to set remain-on-exit on pane %s: %v", paneID, tmux.CmdErr(err, out))
+			}
+		}
+		if (s.Zoomed != nil && *s.Zoomed) || (s.Zoom != nil && *s.Zoom) {
+			paneToZoom = paneID
+		}
+	}
+
+	if len(w.Splits) > 0 && w.Splits[0].Type == "" {
+		ctx.onPaneCreated(initialPane, w.Splits[0])
+	}
+
 	switch {
 	case len(w.Splits) > 0:
 		applySplits(r, initialPane, w.Splits, ctx, stderr)
@@ -352,17 +383,24 @@ func buildWindow(r tmux.Runner, windowID, initialPane string, w config.Window, c
 	case w.PreWindow != "":
 		sendPreWindow(ctx.keys, initialPane, w.PreWindow, ctx.done)
 	}
+
+	if paneToZoom != "" {
+		if out, err := r.Run("resize-pane", "-Z", "-t", paneToZoom); err != nil {
+			warnf(stderr, "failed to zoom pane %s: %v", paneToZoom, tmux.CmdErr(err, out))
+		}
+	}
 }
 
 // splitCtx is what a level of the split tree inherits from the one above it:
 // the directory new panes open in, the environment they get, the window's
 // pre_window command, and the per-pane record of where it has already run.
 type splitCtx struct {
-	root      string
-	env       []string
-	preWindow string
-	done      map[string]bool
-	keys      *keyBatch
+	root          string
+	env           []string
+	preWindow     string
+	done          map[string]bool
+	keys          *keyBatch
+	onPaneCreated func(paneID string, s config.Split)
 }
 
 // applySplits walks a split tree. Each entry with a type splits the pane of
@@ -397,6 +435,9 @@ func applySplits(r tmux.Runner, basePane string, splits []config.Split, ctx spli
 				continue // panes[i] stays "": skipped below
 			}
 			pane = newPane
+			if ctx.onPaneCreated != nil {
+				ctx.onPaneCreated(pane, s)
+			}
 		}
 		panes[i] = pane
 		current = pane
@@ -425,6 +466,9 @@ func applySplits(r tmux.Runner, basePane string, splits []config.Split, ctx spli
 		}
 		child := ctx
 		child.root = roots[i]
+		if len(s.Children) > 0 && s.Children[0].Type == "" && ctx.onPaneCreated != nil {
+			ctx.onPaneCreated(pane, s.Children[0])
+		}
 		applySplits(r, pane, s.Children, child, stderr)
 	}
 }

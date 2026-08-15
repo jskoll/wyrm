@@ -401,11 +401,17 @@ name = "w"
 layout = "tiled"
 pre_window = "true"
 post_window = "true"
+synchronize = true
+synchronize_panes = true
+remain_on_exit = true
 
   [[windows.splits]]
   type = "h"
   size = 30
   command = "nvim"
+  remain_on_exit = true
+  zoomed = true
+  zoom = true
 
     [[windows.splits.children]]
     type = "v"
@@ -429,5 +435,99 @@ name = "legacy"
 		if strings.Contains(w, "unknown key") {
 			t.Errorf("documented key reported as unknown: %s", w)
 		}
+	}
+}
+
+func TestInterpolate(t *testing.T) {
+	path := writeConfig(t, `
+[session]
+name = "app-{{.port}}"
+root = "~/code/{{branch}}"
+on_project_start = "echo start {{port}}"
+
+[session.env]
+PORT = "{{.port}}"
+BRANCH = "$branch"
+
+[[windows]]
+name = "server-{{.port}}"
+root = "{{subdir}}"
+pre_window = "export P={{port}}"
+post_window = "curl http://localhost:{{port}}"
+
+  [[windows.splits]]
+  command = "npm run dev -- --port={{port}}"
+  root = "api/{{branch}}"
+
+  [[windows.splits]]
+  type = "h"
+  run = "go run main.go -p {{.port}}"
+
+    [[windows.splits.children]]
+    type = "v"
+    command = "echo ${port}"
+
+[[windows]]
+name = "legacy"
+  [[windows.panes]]
+  command = "ping localhost:{{port}}"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	cfg.Interpolate(map[string]string{
+		"port":   "8080",
+		"branch": "feat-login",
+		"subdir": "frontend",
+		"extra":  "value",
+	})
+
+	if cfg.Session.Name != "app-8080" {
+		t.Errorf("Session.Name = %q, want %q", cfg.Session.Name, "app-8080")
+	}
+	if cfg.Session.Root != "~/code/feat-login" {
+		t.Errorf("Session.Root = %q, want %q", cfg.Session.Root, "~/code/feat-login")
+	}
+	if cfg.Session.OnProjectStart != "echo start 8080" {
+		t.Errorf("Session.OnProjectStart = %q, want %q", cfg.Session.OnProjectStart, "echo start 8080")
+	}
+	if cfg.Session.Env["PORT"] != "8080" {
+		t.Errorf("Env[PORT] = %q, want %q", cfg.Session.Env["PORT"], "8080")
+	}
+	if cfg.Session.Env["BRANCH"] != "feat-login" {
+		t.Errorf("Env[BRANCH] = %q, want %q", cfg.Session.Env["BRANCH"], "feat-login")
+	}
+	if cfg.Session.Env["extra"] != "value" {
+		t.Errorf("Env[extra] = %q, want %q", cfg.Session.Env["extra"], "value")
+	}
+
+	if cfg.Windows[0].Name != "server-8080" {
+		t.Errorf("Windows[0].Name = %q, want %q", cfg.Windows[0].Name, "server-8080")
+	}
+	if cfg.Windows[0].Root != "frontend" {
+		t.Errorf("Windows[0].Root = %q, want %q", cfg.Windows[0].Root, "frontend")
+	}
+	if cfg.Windows[0].PreWindow != "export P=8080" {
+		t.Errorf("Windows[0].PreWindow = %q, want %q", cfg.Windows[0].PreWindow, "export P=8080")
+	}
+	if cfg.Windows[0].PostWindow != "curl http://localhost:8080" {
+		t.Errorf("Windows[0].PostWindow = %q, want %q", cfg.Windows[0].PostWindow, "curl http://localhost:8080")
+	}
+	if cfg.Windows[0].Splits[0].Command != "npm run dev -- --port=8080" {
+		t.Errorf("Splits[0].Command = %q, want %q", cfg.Windows[0].Splits[0].Command, "npm run dev -- --port=8080")
+	}
+	if cfg.Windows[0].Splits[0].Root != "api/feat-login" {
+		t.Errorf("Splits[0].Root = %q, want %q", cfg.Windows[0].Splits[0].Root, "api/feat-login")
+	}
+	if cfg.Windows[0].Splits[1].Run != "go run main.go -p 8080" {
+		t.Errorf("Splits[1].Run = %q, want %q", cfg.Windows[0].Splits[1].Run, "go run main.go -p 8080")
+	}
+	if cfg.Windows[0].Splits[1].Children[0].Command != "echo 8080" {
+		t.Errorf("Children[0].Command = %q, want %q", cfg.Windows[0].Splits[1].Children[0].Command, "echo 8080")
+	}
+	if cfg.Windows[1].Panes[0].Command != "ping localhost:8080" {
+		t.Errorf("Panes[0].Command = %q, want %q", cfg.Windows[1].Panes[0].Command, "ping localhost:8080")
 	}
 }

@@ -150,6 +150,15 @@ mouse = true
 enabled = true
 commands = ["claude"]
 
+[tui.agent.notify]
+enabled = true
+desktop = true
+bell = true
+osc = true
+on_blocked = true
+on_idle = true
+command = "echo {title}"
+
 [[tui.agent.profiles]]
 commands = ["aider"]
 busy = ["thinking"]
@@ -175,6 +184,37 @@ track = true
 	}
 	if len(s.Warnings()) != 0 {
 		t.Errorf("Warnings() = %v, want none", s.Warnings())
+	}
+	if !s.AgentNotifyEnabled() || !s.AgentNotifyDesktop() || !s.AgentNotifyBell() || !s.AgentNotifyOSC() || !s.AgentNotifyOnBlocked() || !s.AgentNotifyOnIdle() {
+		t.Errorf("expected notify settings enabled, got: %+v", s.TUI.Agent.Notify)
+	}
+	if s.AgentNotifyCommand() != "echo {title}" {
+		t.Errorf("AgentNotifyCommand = %q, want %q", s.AgentNotifyCommand(), "echo {title}")
+	}
+}
+
+func TestAgentNotifyDefaults(t *testing.T) {
+	var s *Settings
+	if s.AgentNotifyEnabled() {
+		t.Error("nil Settings AgentNotifyEnabled should be false")
+	}
+	if !s.AgentNotifyDesktop() {
+		t.Error("nil Settings AgentNotifyDesktop should default true")
+	}
+	if s.AgentNotifyBell() {
+		t.Error("nil Settings AgentNotifyBell should default false")
+	}
+	if s.AgentNotifyOSC() {
+		t.Error("nil Settings AgentNotifyOSC should default false")
+	}
+	if !s.AgentNotifyOnBlocked() {
+		t.Error("nil Settings AgentNotifyOnBlocked should default true")
+	}
+	if s.AgentNotifyOnIdle() {
+		t.Error("nil Settings AgentNotifyOnIdle should default false")
+	}
+	if s.AgentNotifyCommand() != "" {
+		t.Error("nil Settings AgentNotifyCommand should be empty")
 	}
 }
 
