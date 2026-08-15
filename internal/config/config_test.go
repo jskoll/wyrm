@@ -531,3 +531,67 @@ name = "legacy"
 		t.Errorf("Panes[0].Command = %q, want %q", cfg.Windows[1].Panes[0].Command, "ping localhost:8080")
 	}
 }
+
+func TestInterpolateString(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		vars     map[string]string
+		expected string
+	}{
+		{
+			name:     "empty string and vars",
+			input:    "",
+			vars:     map[string]string{"foo": "bar"},
+			expected: "",
+		},
+		{
+			name:     "no vars",
+			input:    "echo $PORT",
+			vars:     nil,
+			expected: "echo $PORT",
+		},
+		{
+			name:  "delimited forms",
+			input: "{{PORT}} {{.PORT}} {{var.PORT}} {{.var.PORT}} ${PORT}",
+			vars: map[string]string{
+				"PORT": "8080",
+			},
+			expected: "8080 8080 8080 8080 8080",
+		},
+		{
+			name:  "prefix isolation with bare variable",
+			input: "connect to $PORT and $PORT_SSL or $PORT80 or $PORT/tcp",
+			vars: map[string]string{
+				"PORT": "8080",
+			},
+			expected: "connect to 8080 and $PORT_SSL or $PORT80 or 8080/tcp",
+		},
+		{
+			name:  "single character variable does not clobber words",
+			input: "$a and $app and $api and $a/path",
+			vars: map[string]string{
+				"a": "foo",
+			},
+			expected: "foo and $app and $api and foo/path",
+		},
+		{
+			name:  "deterministic long prefix matching over short prefix",
+			input: "$VARIABLE and $VAR",
+			vars: map[string]string{
+				"VAR":      "foo",
+				"VARIABLE": "bar",
+			},
+			expected: "bar and foo",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := InterpolateString(tt.input, tt.vars)
+			if got != tt.expected {
+				t.Errorf("InterpolateString(%q, %v) = %q, want %q", tt.input, tt.vars, got, tt.expected)
+			}
+		})
+	}
+}

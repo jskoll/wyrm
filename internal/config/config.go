@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -507,19 +508,67 @@ func interpolateSplits(splits []Split, vars map[string]string) {
 	}
 }
 
-// InterpolateString substitutes template variables in s.
+// InterpolateString performs deterministic, boundary-safe template variable substitution.
+// It supports {{.var}}, {{var}}, {{.var.name}}, {{var.name}}, ${var}, and bare $var identifiers.
 func InterpolateString(s string, vars map[string]string) string {
 	if s == "" || len(vars) == 0 {
 		return s
 	}
+
+	keys := make([]string, 0, len(vars))
+	for k := range vars {
+		keys = append(keys, k)
+	}
+	// Sort keys by descending length first, then alphabetically, ensuring deterministic substitution
+	// and that longer prefixes are replaced before shorter substrings.
+	sort.Slice(keys, func(i, j int) bool {
+		if len(keys[i]) != len(keys[j]) {
+			return len(keys[i]) > len(keys[j])
+		}
+		return keys[i] < keys[j]
+	})
+
 	res := s
-	for k, v := range vars {
-		res = strings.ReplaceAll(res, "{{."+k+"}}", v)
-		res = strings.ReplaceAll(res, "{{"+k+"}}", v)
+	for _, k := range keys {
+		v := vars[k]
 		res = strings.ReplaceAll(res, "{{.var."+k+"}}", v)
 		res = strings.ReplaceAll(res, "{{var."+k+"}}", v)
+		res = strings.ReplaceAll(res, "{{."+k+"}}", v)
+		res = strings.ReplaceAll(res, "{{"+k+"}}", v)
 		res = strings.ReplaceAll(res, "${"+k+"}", v)
-		res = strings.ReplaceAll(res, "$"+k, v)
+		res = replaceBareVar(res, k, v)
 	}
 	return res
+}
+
+func isIdentChar(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
+}
+
+func replaceBareVar(s, k, v string) string {
+	target := "$" + k
+	if !strings.Contains(s, target) {
+		return s
+	}
+	var sb strings.Builder
+	targetLen := len(target)
+	i := 0
+	for i < len(s) {
+		idx := strings.Index(s[i:], target)
+		if idx == -1 {
+			sb.WriteString(s[i:])
+			break
+		}
+		pos := i + idx
+		sb.WriteString(s[i:pos])
+		nextIdx := pos + targetLen
+		if nextIdx < len(s) && isIdentChar(s[nextIdx]) {
+			// Next character continues an identifier (e.g. $PORT_SSL when matching $PORT), so keep as is
+			sb.WriteString(target)
+		} else {
+			sb.WriteString(v)
+		}
+		i = nextIdx
+	}
+	return sb.String()
 }
