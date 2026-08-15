@@ -37,6 +37,27 @@ func TestNotificationFormatting(t *testing.T) {
 	}
 }
 
+func TestSanitizeTerminalString(t *testing.T) {
+	cases := []struct {
+		input    string
+		expected string
+	}{
+		{"normal text", "normal text"},
+		{"hello\x1b]0;hacked\x07world", "hello]0;hackedworld"},
+		{"line\nfeed\rand\ttab", "linefeedandtab"},
+		{"delete\x7fchar", "deletechar"},
+		{"bell\a alert", "bell alert"},
+		{"\x00\x01\x02\x1fclean", "clean"},
+	}
+
+	for _, tc := range cases {
+		got := SanitizeTerminalString(tc.input)
+		if got != tc.expected {
+			t.Errorf("SanitizeTerminalString(%q) = %q, want %q", tc.input, got, tc.expected)
+		}
+	}
+}
+
 func TestDispatchBellAndOSC(t *testing.T) {
 	var buf bytes.Buffer
 	n := Notification{
@@ -66,6 +87,36 @@ func TestDispatchBellAndOSC(t *testing.T) {
 	}
 	if !strings.Contains(out, "\x1b]9;") {
 		t.Errorf("expected OSC 9 in output: %q", out)
+	}
+}
+
+func TestDispatchOSCSanitization(t *testing.T) {
+	var buf bytes.Buffer
+	n := Notification{
+		Title:   "Malicious\x1b]0;Title\x07",
+		Message: "Payload\x1b\\Escape\r\nTest",
+		State:   StateBlocked,
+	}
+	cfg := NotifyConfig{
+		Enabled:   true,
+		OSC:       true,
+		OnBlocked: true,
+	}
+
+	if err := Dispatch(n, cfg, &buf); err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+
+	out := buf.String()
+	// Should not contain raw internal escape or carriage return / line feed
+	if strings.Contains(out, "\r") || strings.Contains(out, "\n") || strings.Contains(out, "\x07") {
+		t.Errorf("OSC output contains unsanitized control characters: %q", out)
+	}
+	if !strings.Contains(out, "Malicious]0;Title") {
+		t.Errorf("Sanitized title missing in OSC output: %q", out)
+	}
+	if !strings.Contains(out, "Payload\\EscapeTest") {
+		t.Errorf("Sanitized message missing in OSC output: %q", out)
 	}
 }
 
