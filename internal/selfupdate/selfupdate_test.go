@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -134,5 +135,24 @@ func TestCompareVersions(t *testing.T) {
 		if got := CompareVersions(tt.a, tt.b); got != tt.want {
 			t.Errorf("CompareVersions(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
 		}
+	}
+}
+
+func TestGetDownloadExceedsLimit(t *testing.T) {
+	// A server that streams infinite zeroes
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		chunk := make([]byte, 1024*1024)
+		for i := 0; i < (MaxDownloadSize/(1024*1024) + 2); i++ {
+			_, _ = w.Write(chunk)
+		}
+	}))
+	defer srv.Close()
+
+	_, err := Get(http.DefaultClient, srv.URL)
+	if err == nil {
+		t.Fatal("Get: want error for download exceeding MaxDownloadSize, got nil")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Errorf("Get error = %q, want size limit error message", err.Error())
 	}
 }

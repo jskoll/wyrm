@@ -37,8 +37,11 @@ func checksumFor(checksumsTxt []byte, filename string) (string, error) {
 	return "", fmt.Errorf("%s not listed in checksums.txt", filename)
 }
 
+// MaxBinarySize is the maximum permitted size (64 MB) for a single extracted binary.
+const MaxBinarySize = 64 * 1024 * 1024
+
 // ExtractFile pulls a single named regular file's contents out of a .tar.gz
-// archive.
+// archive, bounded by MaxBinarySize to prevent decompression bombs and OOM crashes.
 func ExtractFile(archive []byte, name string) ([]byte, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
@@ -56,7 +59,14 @@ func ExtractFile(archive []byte, name string) ([]byte, error) {
 			return nil, fmt.Errorf("reading archive: %w", err)
 		}
 		if hdr.Typeflag == tar.TypeReg && hdr.Name == name {
-			return io.ReadAll(tr)
+			data, err := io.ReadAll(io.LimitReader(tr, MaxBinarySize+1))
+			if err != nil {
+				return nil, fmt.Errorf("reading %s from archive: %w", name, err)
+			}
+			if len(data) > MaxBinarySize {
+				return nil, fmt.Errorf("%s exceeds maximum permitted binary size of %d bytes", name, MaxBinarySize)
+			}
+			return data, nil
 		}
 	}
 	return nil, fmt.Errorf("%s not found in archive", name)

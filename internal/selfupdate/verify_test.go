@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -75,5 +76,44 @@ func TestExtractFileNotFound(t *testing.T) {
 	archive := buildArchive(t, map[string]string{"README.md": "docs"})
 	if _, err := ExtractFile(archive, "wyrm"); err == nil {
 		t.Fatal("ExtractFile: want error for missing file, got nil")
+	}
+}
+
+func TestExtractFileExceedsLimit(t *testing.T) {
+	// Construct an archive with a header claiming or containing data > MaxBinarySize
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	oversize := MaxBinarySize + 10
+	hdr := &tar.Header{Name: "wyrm", Mode: 0o755, Size: int64(oversize)}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+	// Write MaxBinarySize + 10 bytes of zeroes
+	chunk := make([]byte, 1024*1024)
+	written := 0
+	for written < oversize {
+		toWrite := len(chunk)
+		if oversize-written < toWrite {
+			toWrite = oversize - written
+		}
+		if _, err := tw.Write(chunk[:toWrite]); err != nil {
+			t.Fatal(err)
+		}
+		written += toWrite
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ExtractFile(buf.Bytes(), "wyrm")
+	if err == nil {
+		t.Fatal("ExtractFile: want error for binary exceeding MaxBinarySize, got nil")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum permitted binary size") {
+		t.Errorf("ExtractFile error = %q, want size limit message", err.Error())
 	}
 }
