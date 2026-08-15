@@ -6,6 +6,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-15
+
+### Added
+- Template variables via `--var` flags for dynamic config variable interpolation (`{{ .var.name }}`).
+- `wyrm status` command to display agent state across sessions with support for multiple output formats (`text`, `json`, `tmux`, `waybar`, `sketchybar`).
+- TUI pager mode for viewing scrollback history with interactive search (`/`, `n`, `N`).
+- Clipboard copy support in TUI with `y` key.
+- Pane configuration options: `synchronize-panes`, `remain-on-exit`, and `zoom`.
+- Cryptographic Ed25519 signature verification for release checksums (`checksums.txt.sig`) in `wyrm selfupdate`.
+- `-no-start` flag in `wyrm clone` to clone without executing lifecycle hooks, and interactive confirmation prompt before executing untrusted post-clone hooks.
+
+### Changed
+- Improved `$EDITOR` parsing to safely handle quoted paths and arguments containing spaces.
+- Hardened `interpolateString` template variable expansion using a deterministic boundary scanner.
+- Switched `~/.config/wyrm/state.toml` persistence and config writes to atomic temporary-file renames.
+- Enforced 30-second default request timeout on `wyrm selfupdate` HTTP client.
+- Pinned all third-party GitHub Actions in CI/CD workflows to immutable commit SHAs.
+
+### Fixed
+- Sanitized terminal escape sequences (OSC/ANSI control characters) in agent desktop and terminal notifications.
+- Fixed command injection risks in Windows toast notification script building and custom notification command execution.
+- Fixed Git argument injection vulnerability in `wyrm clone` by explicitly delimiting flags with `--`.
+- Prevented decompression bomb and unbounded memory consumption in `wyrm selfupdate` by enforcing strict file and archive size limits.
+- Prevented potential recursive walk denial-of-service in wildcard configuration matching by skipping hidden and dependency directories (`.git`, `node_modules`, `vendor`, `.venv`, etc.).
+- Handled tmux race condition when the tmux server exits unexpectedly during last session teardown.
+
 ## [0.8.0] - 2026-08-02
 
 ### Added
@@ -682,7 +708,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/jskoll/wyrm/compare/v0.8.0...v1.0.0
 [0.8.0]: https://github.com/jskoll/wyrm/compare/v0.7.0...v0.8.0
 [0.6.2]: https://github.com/jskoll/wyrm/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/jskoll/wyrm/compare/v0.6.0...v0.6.1
