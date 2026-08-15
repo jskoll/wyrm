@@ -96,10 +96,37 @@ func (s *Store) save() error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		return err
+	return AtomicWriteFile(s.path, data, 0o644)
+}
+
+// AtomicWriteFile atomically writes data to path with the given mode by first writing
+// to a temporary file in path's parent directory and then renaming it over path.
+func AtomicWriteFile(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("creating directory %s: %w", dir, err)
 	}
-	return os.WriteFile(s.path, data, 0o644)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("writing to %s: %w", tmpPath, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("closing %s: %w", tmpPath, err)
+	}
+	if err := os.Chmod(tmpPath, mode); err != nil {
+		return fmt.Errorf("chmod %s: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("renaming %s to %s: %w", tmpPath, path, err)
+	}
+	return nil
 }
 
 // statePath returns the path to the state file, honoring $XDG_CONFIG_HOME
