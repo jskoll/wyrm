@@ -17,6 +17,21 @@ directory's basename) inside `shared_dir` first, falling back to the normal
 local search if it's missing. Run `wyrm migrate-config` to move an existing
 local config into the shared directory under the right name.
 
+## Creating a config (`wyrm init`)
+
+Run `wyrm init` to generate a new `.wyrm.toml` for the current project. By default it guides you through an interactive wizard (session name, root directory, window layout presets, and pane commands), or you can scaffold starter templates non-interactively:
+
+```sh
+wyrm init                       # interactive wizard
+wyrm init -template go          # Go template
+wyrm init -template node        # Node.js template
+wyrm init -template python      # Python template
+wyrm init -template rust        # Rust template
+wyrm init -template monorepo    # Monorepo template
+wyrm init -template minimal     # Minimal 2-pane template
+wyrm init -force                # overwrite an existing config without confirmation
+```
+
 ## `[[wildcard]]` — one config, many directories
 
 A `[[wildcard]]` entry applies one template config to every directory

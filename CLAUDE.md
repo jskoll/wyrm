@@ -37,7 +37,7 @@ Docs site (mkdocs material, published to GitHub Pages): `make docs-install`,
 policy. Verb implementations live in `cmd_*.go` grouped by what they act on:
 
 - `cmd_session.go` — `up`, `restart`, `kill`, attach-by-name
-- `cmd_config.go` — `edit`, `validate`, `save`, `migrate-config`, `list-configs`
+- `cmd_config.go` — `edit`, `validate`, `save`, `migrate-config`, `list-configs`, `init`
 - `cmd_ui.go` — `pick`, `tui`, `list`
 
 `run` takes stdio, a `tmux.Runner`, `insideTmux`, and `attach` as parameters, and
