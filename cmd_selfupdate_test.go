@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -14,6 +16,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/jskoll/wyrm/internal/selfupdate"
 )
 
 // rewriteTransport sends every request to srv regardless of the request's
@@ -287,5 +291,127 @@ func TestInstallReleaseMissingAssetForPlatform(t *testing.T) {
 	path, mode := writeFakeBinary(t, "old binary contents")
 	if err := a.installRelease(a.httpClient, rel, path, mode, "1.0.0"); err == nil {
 		t.Fatal("installRelease: want an error for a missing platform asset, got nil")
+	}
+}
+
+func TestInstallReleaseSignatureVerification(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tag, ver := "v2.0.0", "2.0.0"
+	asset := assetName(ver)
+	archive := buildTestArchive(t, "signed binary contents")
+	sum := sha256.Sum256(archive)
+	checksums := []byte(fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), asset))
+	sig := ed25519.Sign(priv, checksums)
+
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+	mux.HandleFunc("/repos/jskoll/wyrm/releases/latest", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{
+			"tag_name": %q,
+			"assets": [
+				{"name": "checksums.txt", "browser_download_url": %q},
+				{"name": "checksums.txt.sig", "browser_download_url": %q},
+				{"name": %q, "browser_download_url": %q}
+			]
+		}`, tag, srv.URL+"/assets/checksums.txt", srv.URL+"/assets/checksums.txt.sig", asset, srv.URL+"/assets/archive")
+	})
+	mux.HandleFunc("/assets/archive", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archive)
+	})
+	mux.HandleFunc("/assets/checksums.txt", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(checksums)
+	})
+	mux.HandleFunc("/assets/checksums.txt.sig", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(sig)
+	})
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	// Set public key
+	oldKey := selfupdate.DefaultSigningPublicKey
+	selfupdate.DefaultSigningPublicKey = pub
+	defer func() { selfupdate.DefaultSigningPublicKey = oldKey }()
+
+	a, stdout, _ := testApp(srv)
+	rel, err := fetchRelease(a.httpClient, "")
+	if err != nil {
+		t.Fatalf("fetchRelease: %v", err)
+	}
+	path, mode := writeFakeBinary(t, "old binary contents")
+
+	if err := a.installRelease(a.httpClient, rel, path, mode, "1.0.0"); err != nil {
+		t.Fatalf("installRelease with valid signature: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "signed binary contents" {
+		t.Errorf("installed content = %q, want signed binary contents", data)
+	}
+	if !strings.Contains(stdout.String(), "updated wyrm") {
+		t.Errorf("stdout = %q, want updated message", stdout.String())
+	}
+}
+
+func TestInstallReleaseInvalidSignatureFails(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, anotherPriv, _ := ed25519.GenerateKey(rand.Reader)
+
+	tag, ver := "v2.0.0", "2.0.0"
+	asset := assetName(ver)
+	archive := buildTestArchive(t, "signed binary contents")
+	sum := sha256.Sum256(archive)
+	checksums := []byte(fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), asset))
+	// Sign with a different private key
+	badSig := ed25519.Sign(anotherPriv, checksums)
+
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+	mux.HandleFunc("/repos/jskoll/wyrm/releases/latest", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{
+			"tag_name": %q,
+			"assets": [
+				{"name": "checksums.txt", "browser_download_url": %q},
+				{"name": "checksums.txt.sig", "browser_download_url": %q},
+				{"name": %q, "browser_download_url": %q}
+			]
+		}`, tag, srv.URL+"/assets/checksums.txt", srv.URL+"/assets/checksums.txt.sig", asset, srv.URL+"/assets/archive")
+	})
+	mux.HandleFunc("/assets/archive", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archive)
+	})
+	mux.HandleFunc("/assets/checksums.txt", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(checksums)
+	})
+	mux.HandleFunc("/assets/checksums.txt.sig", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(badSig)
+	})
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	oldKey := selfupdate.DefaultSigningPublicKey
+	selfupdate.DefaultSigningPublicKey = pub
+	defer func() { selfupdate.DefaultSigningPublicKey = oldKey }()
+
+	a, _, _ := testApp(srv)
+	rel, err := fetchRelease(a.httpClient, "")
+	if err != nil {
+		t.Fatalf("fetchRelease: %v", err)
+	}
+	path, mode := writeFakeBinary(t, "old binary contents")
+
+	if err := a.installRelease(a.httpClient, rel, path, mode, "1.0.0"); err == nil {
+		t.Fatal("installRelease with invalid signature: want error, got nil")
 	}
 }
