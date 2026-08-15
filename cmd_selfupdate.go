@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/jskoll/wyrm/internal/selfupdate"
 )
@@ -32,7 +33,9 @@ func (a *app) selfupdate(args []string) error {
 
 	client := a.httpClient
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{
+			Timeout: 30 * time.Second,
+		}
 	}
 
 	rel, err := fetchRelease(client, *pin)

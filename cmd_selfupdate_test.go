@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jskoll/wyrm/internal/selfupdate"
 )
@@ -176,6 +177,23 @@ func TestSelfupdateRejectsPositionalArgs(t *testing.T) {
 	a := &app{stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}}
 	if err := a.selfupdate([]string{"extra"}); err == nil {
 		t.Fatal("selfupdate: want error for unexpected positional argument, got nil")
+	}
+}
+
+func TestSelfupdateTimesOut(t *testing.T) {
+	// A server that hangs without responding
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+	}))
+	defer srv.Close()
+
+	client := &http.Client{
+		Transport: rewriteTransport{addr: srv.Listener.Addr().String()},
+		Timeout:   50 * time.Millisecond,
+	}
+	a := &app{stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, httpClient: client}
+	if err := a.selfupdate([]string{"-check"}); err == nil {
+		t.Fatal("selfupdate: want error on stalled/timed out request, got nil")
 	}
 }
 
