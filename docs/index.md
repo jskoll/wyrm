@@ -86,7 +86,7 @@ wyrm validate             # check the effective config parses and validates (-st
 wyrm list                 # list running tmux sessions non-interactively
 wyrm list-configs         # list candidate config file paths (used by shell completion)
 wyrm migrate-config       # move the local config into the shared config directory
-wyrm clone REPO [DEST]    # git clone, then build (and attach to) a session for it
+wyrm clone REPO [DEST]    # git clone, then build (and attach to) a session for it (-no-start to skip)
 wyrm selfupdate           # download and install the latest release
 wyrm version
 ```
