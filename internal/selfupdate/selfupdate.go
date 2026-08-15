@@ -91,7 +91,10 @@ func AssetName(version, goos, goarch string) string {
 	return fmt.Sprintf("%s_%s_%s_%s.tar.gz", repo, version, goos, goarch)
 }
 
-// Get downloads a URL's full body. Release archives are a few MB, small
+// MaxDownloadSize is the maximum size (100 MB) permitted for a downloaded release asset.
+const MaxDownloadSize = 100 * 1024 * 1024
+
+// Get downloads a URL's full body up to MaxDownloadSize. Release archives are a few MB, small
 // enough to hold in memory rather than streaming to a temp file.
 func Get(client HTTPDoer, url string) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -106,7 +109,14 @@ func Get(client HTTPDoer, url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("downloading %s: %s", url, resp.Status)
 	}
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxDownloadSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading response from %s: %w", url, err)
+	}
+	if len(data) > MaxDownloadSize {
+		return nil, fmt.Errorf("download from %s exceeds maximum size of %d bytes", url, MaxDownloadSize)
+	}
+	return data, nil
 }
 
 // CompareVersions orders two dotted-numeric versions (a leading "v" and any
