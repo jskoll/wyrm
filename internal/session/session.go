@@ -115,14 +115,23 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 	// Every window's root is resolved up front so a bad one fails before any
 	// tmux state exists, rather than half way through a build.
 	roots := make([]string, len(cfg.Windows))
+	winEnvs := make([]map[string]string, len(cfg.Windows))
+	initEnvs := make([]map[string]string, len(cfg.Windows))
 	for i, w := range cfg.Windows {
 		wr, rerr := config.ResolveRoot(root, w.Root)
 		if rerr != nil {
 			return "", "", false, fmt.Errorf("window %q: %w", w.Name, rerr)
 		}
 		roots[i] = wr
+
+		we := mergeEnv(cfg.Session.Env, w.Env)
+		winEnvs[i] = we
+		ie := we
+		if len(w.Splits) > 0 && w.Splits[0].Type == "" {
+			ie = mergeEnv(we, w.Splits[0].Env)
+		}
+		initEnvs[i] = ie
 	}
-	env := envArgs(cfg.Session.Env)
 
 	// Commands are collected while the layout is built and typed in one tmux
 	// process afterwards — see keyBatch. In a three-window, six-pane build that
@@ -132,7 +141,7 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 	// The first window comes from new-session and the rest from new-window:
 	// different commands, different output shapes, and only the later ones leave
 	// a half-built session worth rolling back.
-	first, err := newSession(r, name, cfg.Windows[0], roots[0], env)
+	first, err := newSession(r, name, cfg.Windows[0], roots[0], envArgs(initEnvs[0]))
 	if err != nil {
 		return "", "", false, err
 	}
@@ -151,14 +160,14 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 		windowID, paneID := first.windowID, first.paneID
 		if i > 0 {
 			var werr error
-			windowID, paneID, werr = newWindow(r, id, w, roots[i], env)
+			windowID, paneID, werr = newWindow(r, id, w, roots[i], envArgs(initEnvs[i]))
 			if werr != nil {
 				return "", "", false, rollback(r, id, stderr, werr)
 			}
 		}
 		_, _ = fmt.Fprintf(stdout, "window %s: %s\n", windowID, w.Name)
 		buildWindow(r, windowID, paneID, w, splitCtx{
-			root: roots[i], env: env, preWindow: w.PreWindow, keys: keys,
+			root: roots[i], envMap: winEnvs[i], preWindow: w.PreWindow, keys: keys,
 		}, stderr)
 	}
 
@@ -170,7 +179,7 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 	// been sent first, not just the pane to exist. Sequential and in window
 	// order, matching the order windows were built in.
 	for i, w := range cfg.Windows {
-		if err := runHook(o, w.PostWindow, roots[i], "post_window", cfg.Session.Env, stderr); err != nil {
+		if err := runHook(o, w.PostWindow, roots[i], "post_window", winEnvs[i], stderr); err != nil {
 			warnf(stderr, "post_window failed for window %q: %v", w.Name, err)
 		}
 	}
@@ -396,7 +405,7 @@ func buildWindow(r tmux.Runner, windowID, initialPane string, w config.Window, c
 // pre_window command, and the per-pane record of where it has already run.
 type splitCtx struct {
 	root          string
-	env           []string
+	envMap        map[string]string
 	preWindow     string
 	done          map[string]bool
 	keys          *keyBatch
@@ -418,6 +427,7 @@ type splitCtx struct {
 func applySplits(r tmux.Runner, basePane string, splits []config.Split, ctx splitCtx, stderr io.Writer) {
 	panes := make([]string, len(splits))
 	roots := make([]string, len(splits))
+	splitEnvs := make([]map[string]string, len(splits))
 	current := basePane
 	for i, s := range splits {
 		root, err := config.ResolveRoot(ctx.root, s.Root)
@@ -426,10 +436,12 @@ func applySplits(r tmux.Runner, basePane string, splits []config.Split, ctx spli
 			root = ctx.root
 		}
 		roots[i] = root
+		splitEnv := mergeEnv(ctx.envMap, s.Env)
+		splitEnvs[i] = splitEnv
 
 		pane := current
 		if s.Type != "" {
-			newPane, err := splitPane(r, current, s, root, ctx.env)
+			newPane, err := splitPane(r, current, s, root, envArgs(splitEnv))
 			if err != nil {
 				warnf(stderr, "failed to split pane: %v", err)
 				continue // panes[i] stays "": skipped below
@@ -466,6 +478,7 @@ func applySplits(r tmux.Runner, basePane string, splits []config.Split, ctx spli
 		}
 		child := ctx
 		child.root = roots[i]
+		child.envMap = splitEnvs[i]
 		if len(s.Children) > 0 && s.Children[0].Type == "" && ctx.onPaneCreated != nil {
 			ctx.onPaneCreated(pane, s.Children[0])
 		}
@@ -526,7 +539,7 @@ func applyPanes(r tmux.Runner, windowID, initialPane string, w config.Window, ct
 		if ctx.root != "" {
 			args = append(args, "-c", ctx.root) // see splitPane
 		}
-		args = append(args, ctx.env...)
+		args = append(args, envArgs(ctx.envMap)...)
 		out, err := r.Run(args...)
 		if err != nil {
 			warnf(stderr, "failed to split pane: %v (%s)", err, out)
@@ -819,4 +832,18 @@ func hookEnv(env map[string]string) []string {
 
 func warnf(w io.Writer, format string, args ...any) {
 	_, _ = fmt.Fprintf(w, "wyrm: warning: "+format+"\n", args...)
+}
+
+func mergeEnv(parent, child map[string]string) map[string]string {
+	if len(parent) == 0 && len(child) == 0 {
+		return nil
+	}
+	res := make(map[string]string, len(parent)+len(child))
+	for k, v := range parent {
+		res[k] = v
+	}
+	for k, v := range child {
+		res[k] = v
+	}
+	return res
 }

@@ -973,6 +973,91 @@ func TestCreatePassesEnv(t *testing.T) {
 	}
 }
 
+func TestCreateCascadesEnv(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{
+			Name: "proj",
+			Root: "/tmp/proj",
+			Env: map[string]string{
+				"GLOBAL":   "1",
+				"OVERRIDE": "session",
+				"PORT":     "3000",
+			},
+		},
+		Windows: []config.Window{
+			{
+				Name: "api",
+				Env: map[string]string{
+					"OVERRIDE": "window",
+					"API_KEY":  "secret",
+				},
+				Splits: []config.Split{
+					{
+						Env:     map[string]string{"OVERRIDE": "split0"},
+						Command: "npm run dev",
+					},
+					{
+						Type:    "h",
+						Env:     map[string]string{"OVERRIDE": "split1", "SUB": "child"},
+						Command: "npm test",
+					},
+				},
+			},
+			{
+				Name: "web",
+				Splits: []config.Split{
+					{
+						Env:     map[string]string{"PORT": "4000"},
+						Command: "python app.py",
+					},
+				},
+			},
+		},
+	}
+
+	r := &fakeRunner{}
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	calls := r.joined()
+	// Check new-session (window 0 initial pane)
+	newSessionCall := ""
+	for _, c := range calls {
+		if strings.HasPrefix(c, "new-session") {
+			newSessionCall = c
+			break
+		}
+	}
+	if newSessionCall == "" || !strings.Contains(newSessionCall, "-e API_KEY=secret -e GLOBAL=1 -e OVERRIDE=split0 -e PORT=3000") {
+		t.Errorf("new-session call %q missing cascaded env", newSessionCall)
+	}
+
+	// Check split-window (window 0 split 1)
+	splitCall := ""
+	for _, c := range calls {
+		if strings.HasPrefix(c, "split-window") {
+			splitCall = c
+			break
+		}
+	}
+	if splitCall == "" || !strings.Contains(splitCall, "-e API_KEY=secret -e GLOBAL=1 -e OVERRIDE=split1 -e PORT=3000 -e SUB=child") {
+		t.Errorf("split-window call %q missing cascaded env", splitCall)
+	}
+
+	// Check new-window (window 1 initial pane)
+	newWinCall := ""
+	for _, c := range calls {
+		if strings.HasPrefix(c, "new-window") {
+			newWinCall = c
+			break
+		}
+	}
+	if newWinCall == "" || !strings.Contains(newWinCall, "-e GLOBAL=1 -e OVERRIDE=session -e PORT=4000") {
+		t.Errorf("new-window call %q missing cascaded env", newWinCall)
+	}
+}
+
 // batchingRunner is a fakeRunner that also implements tmux.BatchRunner, so a
 // test can see that the build actually batches rather than quietly falling back
 // to one call per command — which is what every other mock here does.

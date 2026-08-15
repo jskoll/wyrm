@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Support for per-window (`[windows.env]`) and per-split (`[windows.splits.env]`) environment variables, cascaded with precedence: Split > Window > Session.
+
 ## [1.0.0] - 2026-08-15
 
 ### Added

@@ -99,10 +99,11 @@ type Window struct {
 	// Before this existed the only way to express it was pre_window = "cd api",
 	// which types a visible cd into every pane of the window and races that
 	// pane's own command.
-	Root      string  `toml:"root,omitempty"`
-	Splits    []Split `toml:"splits,omitempty"`
-	Panes     []Pane  `toml:"panes,omitempty"`
-	PreWindow string  `toml:"pre_window,omitempty"`
+	Root      string            `toml:"root,omitempty"`
+	Env       map[string]string `toml:"env,omitempty"`
+	Splits    []Split           `toml:"splits,omitempty"`
+	Panes     []Pane            `toml:"panes,omitempty"`
+	PreWindow string            `toml:"pre_window,omitempty"`
 	// PostWindow is a shell command run (via your $SHELL, or sh, in the
 	// window's root) once all of the window's panes exist, splits and pane
 	// commands included. Unlike PreWindow, it is a real subprocess — not
@@ -136,8 +137,9 @@ type Split struct {
 	Run string `toml:"run,omitempty"`
 	// Root overrides the window's directory for this pane and, unless they
 	// override it themselves, its children.
-	Root     string  `toml:"root,omitempty"`
-	Children []Split `toml:"children,omitempty"`
+	Root     string            `toml:"root,omitempty"`
+	Env      map[string]string `toml:"env,omitempty"`
+	Children []Split           `toml:"children,omitempty"`
 	// RemainOnExit keeps this pane open after its command exits.
 	RemainOnExit *bool `toml:"remain_on_exit,omitempty"`
 	// Zoomed starts this split focused and zoomed.
@@ -264,11 +266,29 @@ func (c *Config) validate() error {
 	default:
 		return fmt.Errorf("session.pane_title_position must be %q or %q, got %q", "top", "bottom", c.Session.PaneTitlePosition)
 	}
+	if err := validateEnv("session.env", c.Session.Env); err != nil {
+		return err
+	}
 	for _, w := range c.Windows {
+		if err := validateEnv(fmt.Sprintf("window %q env", w.Name), w.Env); err != nil {
+			return err
+		}
 		if err := validateSplits(w.Name, w.Splits); err != nil {
 			return err
 		}
 		c.warnings = append(c.warnings, windowWarnings(w)...)
+	}
+	return nil
+}
+
+func validateEnv(where string, env map[string]string) error {
+	for k := range env {
+		if k == "" {
+			return fmt.Errorf("%s: empty environment variable name", where)
+		}
+		if strings.Contains(k, "=") || strings.Contains(k, "\x00") {
+			return fmt.Errorf("%s: invalid environment variable name %q", where, k)
+		}
 	}
 	return nil
 }
@@ -303,6 +323,9 @@ func windowWarnings(w Window) []string {
 
 func validateSplits(window string, splits []Split) error {
 	for i, s := range splits {
+		if err := validateEnv(fmt.Sprintf("window %q split %d env", window, i), s.Env); err != nil {
+			return err
+		}
 		// 0 means "let tmux decide", so it's accepted alongside 1-99.
 		if s.Size < 0 || s.Size > 99 {
 			return fmt.Errorf("window %q split %d: size must be 1-99 (or omitted for tmux's default), got %d", window, i, s.Size)
@@ -492,6 +515,9 @@ func (c *Config) Interpolate(vars map[string]string) {
 		c.Windows[i].Root = InterpolateString(c.Windows[i].Root, vars)
 		c.Windows[i].PreWindow = InterpolateString(c.Windows[i].PreWindow, vars)
 		c.Windows[i].PostWindow = InterpolateString(c.Windows[i].PostWindow, vars)
+		for k, v := range c.Windows[i].Env {
+			c.Windows[i].Env[k] = InterpolateString(v, vars)
+		}
 		interpolateSplits(c.Windows[i].Splits, vars)
 		for j := range c.Windows[i].Panes {
 			c.Windows[i].Panes[j].Command = InterpolateString(c.Windows[i].Panes[j].Command, vars)
@@ -504,6 +530,9 @@ func interpolateSplits(splits []Split, vars map[string]string) {
 		splits[i].Command = InterpolateString(splits[i].Command, vars)
 		splits[i].Run = InterpolateString(splits[i].Run, vars)
 		splits[i].Root = InterpolateString(splits[i].Root, vars)
+		for k, v := range splits[i].Env {
+			splits[i].Env[k] = InterpolateString(v, vars)
+		}
 		interpolateSplits(splits[i].Children, vars)
 	}
 }
