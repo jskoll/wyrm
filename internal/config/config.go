@@ -195,7 +195,7 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// decode parses TOML into a Config and reports any keys the file sets that
+// Decode parses TOML into a Config and reports any keys the file sets that
 // Config has no field for.
 //
 // Unknown keys are collected rather than rejected. A misspelled key is silently
@@ -207,6 +207,10 @@ func Load(path string) (*Config, error) {
 //
 // go-toml still fills the destination when it reports strict errors, so the
 // returned Config is complete either way.
+func Decode(data []byte) (*Config, []string, error) {
+	return decode(data)
+}
+
 func decode(data []byte) (*Config, []string, error) {
 	var cfg Config
 	dec := toml.NewDecoder(bytes.NewReader(data))
@@ -248,6 +252,11 @@ func LoadDefault() (*Config, error) {
 		return nil, fmt.Errorf("default config: %w", err)
 	}
 	return cfg, nil
+}
+
+// Validate checks that the config has a valid session and window structure.
+func (c *Config) Validate() error {
+	return c.validate()
 }
 
 func (c *Config) validate() error {

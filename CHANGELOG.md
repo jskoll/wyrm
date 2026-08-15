@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `wyrm init` interactive configuration wizard and starter templates (`node`, `python`, `go`, `rust`, `monorepo`, `minimal`). Supports `--template` / `-t`, `--force` / `-f`, and `--config` flags.
+
 ## [1.0.0] - 2026-08-15
 
 ### Added
