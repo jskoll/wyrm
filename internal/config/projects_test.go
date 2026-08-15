@@ -145,6 +145,12 @@ func TestDiscoverWildcardProjectsRecursive(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(base, "foo", "bar"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Hidden directories and dependency directories that should be pruned
+	for _, ign := range []string{".git/objects", "node_modules/pkg", "vendor/sub", "foo/venv/bin"} {
+		if err := os.MkdirAll(filepath.Join(base, ign), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	settings := &Settings{Wildcard: []Wildcard{{Pattern: base + "/**", Config: template}}}
 	got := DiscoverWildcardProjects(settings)
