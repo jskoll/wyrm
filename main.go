@@ -228,7 +228,7 @@ Usage:
   wyrm kill [name]           destroy the session (runs on_project_exit first; -n to dry-run)
   wyrm pick                  fuzzy-pick a running session and attach to it
   wyrm tui                   full-screen session manager (browse, preview, manage)
-  wyrm save [-config PATH]   save the running session's layout as this folder's config
+  wyrm save [-config PATH]   save the running session's layout as this folder's config (-stdout, -n)
   wyrm edit [-config PATH]   open the resolved config in $EDITOR, creating one if needed
   wyrm validate [-config P]  check the effective config parses and validates (-strict)
   wyrm status [-format FMT]  print agent status across sessions (FMT: text, json, tmux, waybar, sketchybar)

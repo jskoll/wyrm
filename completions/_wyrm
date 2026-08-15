@@ -51,6 +51,13 @@ _wyrm() {
                 up|restart|kill|edit|validate)
                     _arguments '-config[config file path]:config file:->configs'
                     ;;
+                save)
+                    _arguments '-config[config file path]:config file:->configs' \
+                        '-o[config file path or - for stdout]:config file:->configs' \
+                        '-stdout[print config to stdout]' \
+                        '-n[dry run preview]' \
+                        '-dry-run[dry run preview]'
+                    ;;
                 status)
                     _arguments '-format[output format]:format:(text json tmux waybar sketchybar)' \
                         '-session[filter to session]:session:' \

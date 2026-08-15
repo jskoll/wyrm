@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `--stdout` (or `-o -`) and `-n` / `--dry-run` flags in `wyrm save` to stream generated TOML directly to stdout or preview save results without touching disk.
+
 ## [1.0.0] - 2026-08-15
 
 ### Added

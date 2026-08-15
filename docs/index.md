@@ -326,6 +326,8 @@ way a bare `wyrm` would).
 ```sh
 wyrm save                  # writes .wyrm.toml (or the shared-storage path)
 wyrm save -config PATH     # write to PATH instead of the resolved location
+wyrm save --stdout         # print generated TOML to stdout (or -o -)
+wyrm save -n               # dry run preview without writing to disk
 ```
 
 tmux keeps no record of what was originally typed into a pane, so each

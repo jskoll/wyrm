@@ -42,6 +42,11 @@ complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a '(wyrm lis
 
 # Subcommand flags.
 complete -c wyrm -n '__fish_seen_subcommand_from up restart kill edit validate' -o config -d 'config file path' -r -a '(wyrm list-configs 2>/dev/null)'
+complete -c wyrm -n '__fish_seen_subcommand_from save' -o config -d 'config file path' -r -a '(wyrm list-configs 2>/dev/null)'
+complete -c wyrm -n '__fish_seen_subcommand_from save' -o o -d 'config file path or - for stdout' -r
+complete -c wyrm -n '__fish_seen_subcommand_from save' -o stdout -d 'print config to stdout'
+complete -c wyrm -n '__fish_seen_subcommand_from save' -o n -d 'dry run preview'
+complete -c wyrm -n '__fish_seen_subcommand_from save' -o dry-run -d 'dry run preview'
 complete -c wyrm -n '__fish_seen_subcommand_from status' -o format -d 'output format' -x -a 'text json tmux waybar sketchybar'
 complete -c wyrm -n '__fish_seen_subcommand_from status' -o session -d 'filter to session' -x
 complete -c wyrm -n '__fish_seen_subcommand_from status' -o v -d 'verbose output'
