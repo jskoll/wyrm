@@ -24,11 +24,13 @@ import (
 // under the pattern.
 func (a *app) clone(args []string) error {
 	fs := a.newFlagSet("clone")
+	noStart := fs.Bool("no-start", false, "clone the repository without starting a session")
+	fs.BoolVar(noStart, "n", false, "alias for -no-start")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() < 1 || fs.NArg() > 2 {
-		return usageErrf("wyrm clone needs a repository and an optional destination directory: wyrm clone <repo> [dest]")
+		return usageErrf("wyrm clone needs a repository and an optional destination directory: wyrm clone [-no-start] <repo> [dest]")
 	}
 	repo, dest := fs.Arg(0), fs.Arg(1)
 
@@ -59,6 +61,21 @@ func (a *app) clone(args []string) error {
 	absDest, err := filepath.Abs(dest)
 	if err != nil {
 		return err
+	}
+
+	if *noStart {
+		_, _ = fmt.Fprintf(a.stdout, "cloned %s to %s\n", repo, absDest)
+		return nil
+	}
+
+	for _, name := range []string{config.DefaultFileName, config.LegacyFileName} {
+		cfgPath := filepath.Join(absDest, name)
+		if cfg, err := config.Load(cfgPath); err == nil {
+			if cfg.Session.OnProjectStart != "" || cfg.Session.OnProjectFirstStart != "" {
+				_, _ = fmt.Fprintf(a.stderr, "wyrm: warning: %s defines lifecycle hooks (run with -no-start to clone without executing hooks)\n", name)
+			}
+			break
+		}
 	}
 
 	settings, err := config.LoadSettings()

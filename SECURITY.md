@@ -21,6 +21,10 @@ very much in scope.
 and the lifecycle hooks a config would run, and execute neither. That is the
 supported way to inspect an unfamiliar config.
 
+When cloning untrusted remote repositories, pass `wyrm clone -no-start <repo>`
+(or `wyrm clone -n <repo>`) to clone the repository without automatically executing
+lifecycle hooks or launching a session, allowing you to review `.wyrm.toml` first.
+
 Before 0.6.0, `-n` printed the hooks' tmux commands but ran `on_project_start`
 for real, which defeated the point. If you are on an older build, read the
 config itself rather than relying on `-n`.

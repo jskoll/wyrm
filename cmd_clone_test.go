@@ -138,6 +138,52 @@ func TestCloneUsesLocalConfigIfPresent(t *testing.T) {
 	}
 }
 
+func TestCloneNoStart(t *testing.T) {
+	installFakeGit(t)
+	origin := t.TempDir()
+	chdir(t, origin)
+
+	r := &fakeRunner{}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"clone", "-no-start", "https://example.com/nostart.git"}, &stdout, &stderr, r,
+		func() bool { return false }, func(string) error { return nil })
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "cloned https://example.com/nostart.git to") {
+		t.Errorf("stdout = %q, want clone confirmation without starting session", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "created session") {
+		t.Errorf("stdout = %q, did not want session to be created with -no-start", stdout.String())
+	}
+}
+
+func TestCloneWarnsOnHooks(t *testing.T) {
+	installFakeGit(t)
+	base := t.TempDir()
+	chdir(t, base)
+
+	dest := filepath.Join(base, "withhooks")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "[session]\nname = \"hooked\"\nroot = \".\"\non_project_start = \"echo pwned\"\n\n[[windows]]\nname = \"w\"\n"
+	if err := os.WriteFile(filepath.Join(dest, config.DefaultFileName), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &fakeRunner{}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"clone", "https://example.com/x.git", "withhooks"}, &stdout, &stderr, r,
+		func() bool { return false }, func(string) error { return nil })
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "defines lifecycle hooks") {
+		t.Errorf("stderr = %q, want warning about lifecycle hooks", stderr.String())
+	}
+}
+
 func TestCloneWrongArgCount(t *testing.T) {
 	installFakeGit(t)
 
