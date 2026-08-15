@@ -32,11 +32,18 @@ func (a *app) clone(args []string) error {
 	}
 	repo, dest := fs.Arg(0), fs.Arg(1)
 
+	if strings.HasPrefix(repo, "-") {
+		return usageErrf("invalid repository %q", repo)
+	}
+	if dest != "" && strings.HasPrefix(dest, "-") {
+		return usageErrf("invalid destination directory %q", dest)
+	}
+
 	if _, err := exec.LookPath("git"); err != nil {
 		return errors.New("wyrm clone requires git on PATH")
 	}
 
-	gitArgs := []string{"clone", repo}
+	gitArgs := []string{"clone", "--", repo}
 	if dest != "" {
 		gitArgs = append(gitArgs, dest)
 	}
