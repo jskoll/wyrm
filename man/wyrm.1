@@ -90,6 +90,15 @@ session.
 .B \-strict
 exits non-zero if the config has warnings (typos, deprecations).
 .TP
+.BI "wyrm status [\-format " FMT "] [\-session " NAME "] [\-v] [\-watch] [\-interval " DURATION ]
+Display agent status across sessions.
+.I FMT
+is one of
+.BR text " (default), " json ", " tmux ", " waybar ", or " sketchybar .
+With
+.BR \-watch " (or " \-w ),
+continuously streams status updates.
+.TP
 .BI "wyrm list [\-format " FMT ]
 List running tmux sessions non-interactively.
 .I FMT

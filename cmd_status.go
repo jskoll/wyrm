@@ -3,9 +3,16 @@ package main
 // Subcommands that inspect running agent status across sessions: status, agent-status.
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/jskoll/wyrm/internal/agent"
 	"github.com/jskoll/wyrm/internal/config"
@@ -41,6 +48,9 @@ func (a *app) status(args []string) error {
 	format := fs.String("format", "text", "output format: text, json, tmux, waybar, sketchybar")
 	sessionFilter := fs.String("session", "", "filter to a specific session by name or ID")
 	verbose := fs.Bool("v", false, "verbose text output")
+	watchLong := fs.Bool("watch", false, "continuously stream status output")
+	watchShort := fs.Bool("w", false, "alias for -watch")
+	interval := fs.Duration("interval", 2*time.Second, "polling interval in watch mode")
 
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -48,6 +58,8 @@ func (a *app) status(args []string) error {
 	if err := requireNoArgs(fs); err != nil {
 		return err
 	}
+
+	watch := *watchLong || *watchShort
 
 	settings, _ := config.LoadSettings()
 	var profiles []agent.Profile
@@ -78,14 +90,61 @@ func (a *app) status(args []string) error {
 		profiles = []agent.Profile{agent.DefaultProfile()}
 	}
 
-	refs, err := tmux.ListAllPanes(a.runner)
+	if !watch {
+		report, err := collectStatus(a.runner, *sessionFilter, profiles)
+		if err != nil {
+			return err
+		}
+		return formatStatus(a.stdout, *format, *verbose, report)
+	}
+
+	ctx := a.watchCtx
+	if ctx == nil {
+		var cancel context.CancelFunc
+		ctx, cancel = signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+	}
+
+	ticker := time.NewTicker(*interval)
+	defer ticker.Stop()
+
+	var lastOut string
+	first := true
+
+	for {
+		report, err := collectStatus(a.runner, *sessionFilter, profiles)
+		if err == nil {
+			var buf bytes.Buffer
+			if err := formatStatus(&buf, *format, *verbose, report); err == nil {
+				out := buf.String()
+				if first || out != lastOut {
+					first = false
+					lastOut = out
+					_, _ = fmt.Fprint(a.stdout, out)
+				}
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
+func collectStatus(runner tmux.Runner, sessionFilter string, profiles []agent.Profile) (agentStatusReport, error) {
+	var report agentStatusReport
+	report.Agents = make([]agentStatusPane, 0)
+
+	refs, err := tmux.ListAllPanes(runner)
 	if err != nil {
-		return err
+		return report, err
 	}
 
 	var candidates []tmux.PaneRef
 	for _, ref := range refs {
-		if *sessionFilter != "" && ref.SessionName != *sessionFilter && ref.SessionID != *sessionFilter {
+		if sessionFilter != "" && ref.SessionName != sessionFilter && ref.SessionID != sessionFilter {
 			continue
 		}
 		if agent.IsAgentPane(ref.Command, profiles) {
@@ -93,15 +152,12 @@ func (a *app) status(args []string) error {
 		}
 	}
 
-	var report agentStatusReport
-	report.Agents = make([]agentStatusPane, 0)
-
 	if len(candidates) > 0 {
 		cmds := make([][]string, len(candidates))
 		for i, ref := range candidates {
 			cmds[i] = tmux.CapturePanePlainArgs(ref.PaneID)
 		}
-		contents := tmux.RunOutputs(a.runner, cmds)
+		contents := tmux.RunOutputs(runner, cmds)
 
 		for i, ref := range candidates {
 			if i >= len(contents) || contents[i] == "" {
@@ -134,9 +190,13 @@ func (a *app) status(args []string) error {
 		}
 	}
 
-	switch *format {
+	return report, nil
+}
+
+func formatStatus(w io.Writer, format string, verbose bool, report agentStatusReport) error {
+	switch format {
 	case "json":
-		enc := json.NewEncoder(a.stdout)
+		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
 		return enc.Encode(report)
 
@@ -149,7 +209,7 @@ func (a *app) status(args []string) error {
 			parts = append(parts, fmt.Sprintf("#[fg=cyan]✓ %d idle#[default]", report.Summary.Idle))
 		}
 		if len(parts) > 0 {
-			_, _ = fmt.Fprintln(a.stdout, strings.Join(parts, " · "))
+			_, _ = fmt.Fprintln(w, strings.Join(parts, " · "))
 		}
 		return nil
 
@@ -160,7 +220,7 @@ func (a *app) status(args []string) error {
 			Tooltip string `json:"tooltip"`
 			Class   string `json:"class"`
 		}
-		var w waybarOut
+		var wb waybarOut
 		var parts []string
 		var tooltips []string
 		for _, ag := range report.Agents {
@@ -168,45 +228,45 @@ func (a *app) status(args []string) error {
 		}
 		if report.Summary.Blocked > 0 {
 			parts = append(parts, fmt.Sprintf("⏸ %d", report.Summary.Blocked))
-			w.Class = "blocked"
-			w.Alt = "blocked"
+			wb.Class = "blocked"
+			wb.Alt = "blocked"
 		}
 		if report.Summary.Idle > 0 {
 			parts = append(parts, fmt.Sprintf("✓ %d", report.Summary.Idle))
-			if w.Class == "" {
-				w.Class = "idle"
-				w.Alt = "idle"
+			if wb.Class == "" {
+				wb.Class = "idle"
+				wb.Alt = "idle"
 			}
 		}
 		if len(parts) == 0 {
-			w.Class = "none"
-			w.Alt = "none"
-			w.Tooltip = "No active agents"
+			wb.Class = "none"
+			wb.Alt = "none"
+			wb.Tooltip = "No active agents"
 		} else {
-			w.Text = strings.Join(parts, " · ")
-			w.Tooltip = strings.Join(tooltips, "\n")
+			wb.Text = strings.Join(parts, " · ")
+			wb.Tooltip = strings.Join(tooltips, "\n")
 		}
-		return json.NewEncoder(a.stdout).Encode(w)
+		return json.NewEncoder(w).Encode(wb)
 
 	case "sketchybar":
 		switch {
 		case report.Summary.Blocked > 0:
-			_, _ = fmt.Fprintf(a.stdout, "icon=⏸ label=\"%d blocked\" drawing=on\n", report.Summary.Blocked)
+			_, _ = fmt.Fprintf(w, "icon=⏸ label=\"%d blocked\" drawing=on\n", report.Summary.Blocked)
 		case report.Summary.Idle > 0:
-			_, _ = fmt.Fprintf(a.stdout, "icon=✓ label=\"%d idle\" drawing=on\n", report.Summary.Idle)
+			_, _ = fmt.Fprintf(w, "icon=✓ label=\"%d idle\" drawing=on\n", report.Summary.Idle)
 		default:
-			_, _ = fmt.Fprintln(a.stdout, "drawing=off")
+			_, _ = fmt.Fprintln(w, "drawing=off")
 		}
 		return nil
 
 	case "text":
-		if *verbose {
+		if verbose {
 			if len(report.Agents) == 0 {
-				_, _ = fmt.Fprintln(a.stdout, "no active agents")
+				_, _ = fmt.Fprintln(w, "no active agents")
 				return nil
 			}
 			for _, ag := range report.Agents {
-				_, _ = fmt.Fprintf(a.stdout, "%s: @%d:%s %s (%s) - %s\n",
+				_, _ = fmt.Fprintf(w, "%s: @%d:%s %s (%s) - %s\n",
 					ag.SessionName, ag.WindowIndex, ag.WindowName, ag.PaneID, ag.Command, ag.State)
 			}
 			return nil
@@ -219,11 +279,11 @@ func (a *app) status(args []string) error {
 			parts = append(parts, fmt.Sprintf("✓ %d idle", report.Summary.Idle))
 		}
 		if len(parts) > 0 {
-			_, _ = fmt.Fprintln(a.stdout, strings.Join(parts, " · "))
+			_, _ = fmt.Fprintln(w, strings.Join(parts, " · "))
 		}
 		return nil
 
 	default:
-		return usageErrf("unknown format %q (want text, json, tmux, waybar, sketchybar)", *format)
+		return usageErrf("unknown format %q (want text, json, tmux, waybar, sketchybar)", format)
 	}
 }

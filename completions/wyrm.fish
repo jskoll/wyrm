@@ -60,6 +60,9 @@ complete -c wyrm -n '__fish_seen_subcommand_from init' -o f -d 'overwrite existi
 complete -c wyrm -n '__fish_seen_subcommand_from status' -o format -d 'output format' -x -a 'text json tmux waybar sketchybar'
 complete -c wyrm -n '__fish_seen_subcommand_from status' -o session -d 'filter to session' -x
 complete -c wyrm -n '__fish_seen_subcommand_from status' -o v -d 'verbose output'
+complete -c wyrm -n '__fish_seen_subcommand_from status' -o watch -d 'continuously stream status output'
+complete -c wyrm -n '__fish_seen_subcommand_from status' -o w -d 'continuously stream status output'
+complete -c wyrm -n '__fish_seen_subcommand_from status' -o interval -d 'polling interval in watch mode' -x
 complete -c wyrm -n '__fish_seen_subcommand_from list' -o format -d 'output format' -x -a 'table json toml names'
 complete -c wyrm -n '__fish_seen_subcommand_from selfupdate' -o check -d 'report an available update without installing it'
 complete -c wyrm -n '__fish_seen_subcommand_from selfupdate' -o version -d 'install this version instead of the latest' -x

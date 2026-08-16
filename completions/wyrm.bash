@@ -55,7 +55,7 @@ _wyrm_complete() {
             kill) COMPREPLY=($(compgen -W "-config -n -all -a -yes -y" -- "$cur")) ;;
             save) COMPREPLY=($(compgen -W "-config -stdout -n -dry-run -o" -- "$cur")) ;;
             init) COMPREPLY=($(compgen -W "-config -template -t -force -f" -- "$cur")) ;;
-            status) COMPREPLY=($(compgen -W "-format -session -v" -- "$cur")) ;;
+            status) COMPREPLY=($(compgen -W "-format -session -v -watch -w -interval" -- "$cur")) ;;
             list) COMPREPLY=($(compgen -W "-format" -- "$cur")) ;;
             selfupdate) COMPREPLY=($(compgen -W "-check -version" -- "$cur")) ;;
             *) COMPREPLY=() ;;
