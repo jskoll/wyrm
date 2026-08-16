@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `wyrm send` subcommand for non-interactive command and keystroke execution with dot-safe target resolution (`session[:window[.pane]]`), literal (`-l`), raw key (`-r`), and no-enter (`-n`) flags.
+
 ## [1.0.0] - 2026-08-15
 
 ### Added

@@ -26,6 +26,7 @@ _wyrm() {
         'edit:open the resolved config in $EDITOR'
         'validate:check the effective config without building a session'
         'status:print agent status across sessions'
+        'send:send command or keys to target session/window/pane'
         'list:list running tmux sessions non-interactively'
         'list-configs:list candidate config file paths'
         'migrate-config:move the local config into the shared config directory'

@@ -162,6 +162,8 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 		return a.report(a.selfupdate(args[1:]))
 	case "status":
 		return a.report(a.status(args[1:]))
+	case "send":
+		return a.report(a.send(args[1:]))
 	default:
 		if strings.HasPrefix(cmd, "-") {
 			// A bare flag with no subcommand (e.g. `wyrm -config x`) drives the
@@ -232,6 +234,7 @@ Usage:
   wyrm edit [-config PATH]   open the resolved config in $EDITOR, creating one if needed
   wyrm validate [-config P]  check the effective config parses and validates (-strict)
   wyrm status [-format FMT]  print agent status across sessions (FMT: text, json, tmux, waybar, sketchybar)
+  wyrm send [target] [cmd]   send command or keys to target session/window/pane (-l, -n, -r)
   wyrm list [-format FMT]    list running sessions (FMT: table, json, toml, names)
   wyrm list-configs          list candidate config file paths (used by shell completion)
   wyrm migrate-config        move the local config into the shared config directory
@@ -334,7 +337,7 @@ func (a *app) resolveConfig(settings *config.Settings, explicitPath string) (*co
 // list can't silently drift from the real dispatch table). Used only to
 // power the "did you mean" hint in attachByName.
 var knownSubcommands = []string{
-	"up", "restart", "kill", "pick", "tui", "save", "edit", "validate", "status",
+	"up", "restart", "kill", "pick", "tui", "save", "edit", "validate", "status", "send",
 	"list", "list-configs", "migrate-config", "clone", "selfupdate", "version", "help",
 }
 

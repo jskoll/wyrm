@@ -15,7 +15,7 @@
 # not "--config"), hence "-o" (old-style option) below rather than fish's
 # usual "-l" (GNU-style long option).
 
-set -l subcommands up restart kill pick tui save edit validate status list list-configs migrate-config clone selfupdate version help
+set -l subcommands up restart kill pick tui save edit validate status send list list-configs migrate-config clone selfupdate version help
 
 # Don't fall back to filename completion.
 complete -c wyrm -f
@@ -30,6 +30,7 @@ complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a save -d 's
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a edit -d 'open the resolved config in $EDITOR'
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a validate -d 'check the effective config'
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a status -d 'print agent status across sessions'
+complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a send -d 'send command or keys to target session/window/pane'
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a list -d 'list running tmux sessions'
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a list-configs -d 'list candidate config file paths'
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a migrate-config -d 'move the local config into the shared dir'
