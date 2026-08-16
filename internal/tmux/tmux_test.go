@@ -249,14 +249,14 @@ func TestListWindowsMalformedLine(t *testing.T) {
 }
 
 func TestListPanes(t *testing.T) {
-	r := stubRunner{out: "%0|0|1|nvim\n%1|1|0|htop\n"}
+	r := stubRunner{out: "%0|0|1|nvim|/path/to/nvim\n%1|1|0|htop|/path/to/htop\n"}
 	panes, err := ListPanes(r, "@1")
 	if err != nil {
 		t.Fatalf("ListPanes: %v", err)
 	}
 	want := []PaneInfo{
-		{ID: "%0", Index: 0, Active: true, Command: "nvim"},
-		{ID: "%1", Index: 1, Active: false, Command: "htop"},
+		{ID: "%0", Index: 0, Active: true, Command: "nvim", Path: "/path/to/nvim"},
+		{ID: "%1", Index: 1, Active: false, Command: "htop", Path: "/path/to/htop"},
 	}
 	if len(panes) != len(want) {
 		t.Fatalf("ListPanes returned %d panes, want %d", len(panes), len(want))
@@ -369,4 +369,58 @@ func TestFindSessionIDTreatsNoServerAsEmpty(t *testing.T) {
 	if ok || id != "" {
 		t.Errorf("FindSessionID = (%q, %v), want empty", id, ok)
 	}
+}
+
+func TestSwapWindow(t *testing.T) {
+	r := &recordingRunner{out: ""}
+	if err := SwapWindow(r, "@1", "@2"); err != nil {
+		t.Fatalf("SwapWindow: %v", err)
+	}
+	want := []string{"swap-window", "-s", "@1", "-t", "@2"}
+	if strings.Join(r.args, " ") != strings.Join(want, " ") {
+		t.Errorf("args = %v, want %v", r.args, want)
+	}
+}
+
+func TestMoveWindow(t *testing.T) {
+	r := &recordingRunner{out: ""}
+	if err := MoveWindow(r, "@1", "$2"); err != nil {
+		t.Fatalf("MoveWindow: %v", err)
+	}
+	want := []string{"move-window", "-s", "@1", "-t", "$2:"}
+	if strings.Join(r.args, " ") != strings.Join(want, " ") {
+		t.Errorf("args = %v, want %v", r.args, want)
+	}
+}
+
+func TestSplitPane(t *testing.T) {
+	t.Run("vertical split", func(t *testing.T) {
+		r := &recordingRunner{out: "%2\n"}
+		pane, err := SplitPane(r, "%1", false, "top", "/tmp")
+		if err != nil {
+			t.Fatalf("SplitPane: %v", err)
+		}
+		if pane != "%2" {
+			t.Errorf("SplitPane = %q, want %%2", pane)
+		}
+		want := []string{"split-window", "-P", "-F", "#{pane_id}", "-t", "%1", "-v", "-c", "/tmp", "top"}
+		if strings.Join(r.args, " ") != strings.Join(want, " ") {
+			t.Errorf("args = %v, want %v", r.args, want)
+		}
+	})
+
+	t.Run("horizontal split", func(t *testing.T) {
+		r := &recordingRunner{out: "%3\n"}
+		pane, err := SplitPane(r, "%1", true, "", "")
+		if err != nil {
+			t.Fatalf("SplitPane: %v", err)
+		}
+		if pane != "%3" {
+			t.Errorf("SplitPane = %q, want %%3", pane)
+		}
+		want := []string{"split-window", "-P", "-F", "#{pane_id}", "-t", "%1", "-h"}
+		if strings.Join(r.args, " ") != strings.Join(want, " ") {
+			t.Errorf("args = %v, want %v", r.args, want)
+		}
+	})
 }

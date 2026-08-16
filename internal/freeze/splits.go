@@ -20,9 +20,12 @@ import (
 // the percentage handed to cell i-1 out of whatever remained after cells
 // 0..i-2 were carved off, then reduces "remaining" by cell i-1's share
 // before moving on.
-func splitsFromNode(n *layoutNode, commands map[string]string) []config.Split {
+func splitsFromNode(n *layoutNode, commands, paths map[string]string, winBase string) []config.Split {
 	if n.Type == 0 {
-		return []config.Split{{Command: paneCommand(commands, n.PaneID)}}
+		return []config.Split{{
+			Command: paneCommand(commands, n.PaneID),
+			Root:    relPath(winBase, paths[n.PaneID]),
+		}}
 	}
 
 	splitType := "h"
@@ -54,8 +57,9 @@ func splitsFromNode(n *layoutNode, commands map[string]string) []config.Split {
 		}
 		if c.Type == 0 {
 			entry.Command = paneCommand(commands, c.PaneID)
+			entry.Root = relPath(winBase, paths[c.PaneID])
 		} else {
-			entry.Children = splitsFromNode(c, commands)
+			entry.Children = splitsFromNode(c, commands, paths, winBase)
 		}
 		splits[i] = entry
 	}

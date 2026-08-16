@@ -104,6 +104,7 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 	if id, ok, ferr := tmux.FindSessionID(r, name); ferr != nil {
 		return "", "", false, ferr
 	} else if ok {
+		_ = RunAttachHook(cfg, stderr, opts...)
 		return name, id, false, nil
 	}
 
@@ -115,24 +116,41 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 	// Every window's root is resolved up front so a bad one fails before any
 	// tmux state exists, rather than half way through a build.
 	roots := make([]string, len(cfg.Windows))
+	winEnvs := make([]map[string]string, len(cfg.Windows))
+	initEnvs := make([]map[string]string, len(cfg.Windows))
 	for i, w := range cfg.Windows {
 		wr, rerr := config.ResolveRoot(root, w.Root)
 		if rerr != nil {
 			return "", "", false, fmt.Errorf("window %q: %w", w.Name, rerr)
 		}
 		roots[i] = wr
+
+		we := mergeEnv(cfg.Session.Env, w.Env)
+		winEnvs[i] = we
+		ie := we
+		if len(w.Splits) > 0 && w.Splits[0].Type == "" {
+			ie = mergeEnv(we, w.Splits[0].Env)
+		}
+		initEnvs[i] = ie
 	}
-	env := envArgs(cfg.Session.Env)
 
 	// Commands are collected while the layout is built and typed in one tmux
 	// process afterwards — see keyBatch. In a three-window, six-pane build that
 	// is twelve send-keys calls collapsed into one.
 	keys := &keyBatch{}
 
-	// The first window comes from new-session and the rest from new-window:
-	// different commands, different output shapes, and only the later ones leave
-	// a half-built session worth rolling back.
-	first, err := newSession(r, name, cfg.Windows[0], roots[0], env)
+	initRoots := make([]string, len(cfg.Windows))
+	for i, w := range cfg.Windows {
+		initRoot := roots[i]
+		if w.Root == "" && len(w.Splits) > 0 && w.Splits[0].Type == "" && w.Splits[0].Root != "" {
+			if ir, err := config.ResolveRoot(roots[i], w.Splits[0].Root); err == nil {
+				initRoot = ir
+			}
+		}
+		initRoots[i] = initRoot
+	}
+
+	first, err := newSession(r, name, cfg.Windows[0], initRoots[0], envArgs(initEnvs[0]))
 	if err != nil {
 		return "", "", false, err
 	}
@@ -151,14 +169,14 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 		windowID, paneID := first.windowID, first.paneID
 		if i > 0 {
 			var werr error
-			windowID, paneID, werr = newWindow(r, id, w, roots[i], env)
+			windowID, paneID, werr = newWindow(r, id, w, initRoots[i], envArgs(initEnvs[i]))
 			if werr != nil {
 				return "", "", false, rollback(r, id, stderr, werr)
 			}
 		}
 		_, _ = fmt.Fprintf(stdout, "window %s: %s\n", windowID, w.Name)
 		buildWindow(r, windowID, paneID, w, splitCtx{
-			root: roots[i], env: env, preWindow: w.PreWindow, keys: keys,
+			root: roots[i], envMap: winEnvs[i], preWindow: w.PreWindow, keys: keys,
 		}, stderr)
 	}
 
@@ -170,7 +188,7 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 	// been sent first, not just the pane to exist. Sequential and in window
 	// order, matching the order windows were built in.
 	for i, w := range cfg.Windows {
-		if err := runHook(o, w.PostWindow, roots[i], "post_window", cfg.Session.Env, stderr); err != nil {
+		if err := runHook(o, w.PostWindow, roots[i], "post_window", winEnvs[i], stderr); err != nil {
 			warnf(stderr, "post_window failed for window %q: %v", w.Name, err)
 		}
 	}
@@ -187,7 +205,29 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 			warnf(stderr, "failed to select the first window: %v", err)
 		}
 	}
+	if cfg.Session.OnProjectDetach != "" {
+		if _, err := r.Run("set-hook", "-t", id, "client-detached", fmt.Sprintf("run-shell %q", cfg.Session.OnProjectDetach)); err != nil {
+			warnf(stderr, "failed to configure on_project_detach hook: %v", err)
+		}
+	}
+	_ = RunAttachHook(cfg, stderr, opts...)
 	return name, id, true, nil
+}
+
+// RunAttachHook executes cfg.Session.OnProjectAttach if non-empty.
+func RunAttachHook(cfg *config.Config, stderr io.Writer, opts ...Option) error {
+	if cfg == nil || cfg.Session.OnProjectAttach == "" {
+		return nil
+	}
+	o := newOptions(opts)
+	_, root, err := cfg.Session.Resolve(cfg.Dir())
+	if err != nil {
+		root = cfg.Dir()
+	}
+	if err := runHook(o, cfg.Session.OnProjectAttach, root, "on_project_attach", cfg.Session.Env, stderr); err != nil {
+		warnf(stderr, "on_project_attach failed: %v", err)
+	}
+	return nil
 }
 
 // newIDs is what a session- or window-creating tmux command reports back.
@@ -396,7 +436,7 @@ func buildWindow(r tmux.Runner, windowID, initialPane string, w config.Window, c
 // pre_window command, and the per-pane record of where it has already run.
 type splitCtx struct {
 	root          string
-	env           []string
+	envMap        map[string]string
 	preWindow     string
 	done          map[string]bool
 	keys          *keyBatch
@@ -418,6 +458,7 @@ type splitCtx struct {
 func applySplits(r tmux.Runner, basePane string, splits []config.Split, ctx splitCtx, stderr io.Writer) {
 	panes := make([]string, len(splits))
 	roots := make([]string, len(splits))
+	splitEnvs := make([]map[string]string, len(splits))
 	current := basePane
 	for i, s := range splits {
 		root, err := config.ResolveRoot(ctx.root, s.Root)
@@ -426,10 +467,12 @@ func applySplits(r tmux.Runner, basePane string, splits []config.Split, ctx spli
 			root = ctx.root
 		}
 		roots[i] = root
+		splitEnv := mergeEnv(ctx.envMap, s.Env)
+		splitEnvs[i] = splitEnv
 
 		pane := current
 		if s.Type != "" {
-			newPane, err := splitPane(r, current, s, root, ctx.env)
+			newPane, err := splitPane(r, current, s, root, envArgs(splitEnv))
 			if err != nil {
 				warnf(stderr, "failed to split pane: %v", err)
 				continue // panes[i] stays "": skipped below
@@ -466,6 +509,7 @@ func applySplits(r tmux.Runner, basePane string, splits []config.Split, ctx spli
 		}
 		child := ctx
 		child.root = roots[i]
+		child.envMap = splitEnvs[i]
 		if len(s.Children) > 0 && s.Children[0].Type == "" && ctx.onPaneCreated != nil {
 			ctx.onPaneCreated(pane, s.Children[0])
 		}
@@ -526,7 +570,7 @@ func applyPanes(r tmux.Runner, windowID, initialPane string, w config.Window, ct
 		if ctx.root != "" {
 			args = append(args, "-c", ctx.root) // see splitPane
 		}
-		args = append(args, ctx.env...)
+		args = append(args, envArgs(ctx.envMap)...)
 		out, err := r.Run(args...)
 		if err != nil {
 			warnf(stderr, "failed to split pane: %v (%s)", err, out)
@@ -819,4 +863,18 @@ func hookEnv(env map[string]string) []string {
 
 func warnf(w io.Writer, format string, args ...any) {
 	_, _ = fmt.Fprintf(w, "wyrm: warning: "+format+"\n", args...)
+}
+
+func mergeEnv(parent, child map[string]string) map[string]string {
+	if len(parent) == 0 && len(child) == 0 {
+		return nil
+	}
+	res := make(map[string]string, len(parent)+len(child))
+	for k, v := range parent {
+		res[k] = v
+	}
+	for k, v := range child {
+		res[k] = v
+	}
+	return res
 }

@@ -29,9 +29,13 @@ _wyrm_complete() {
             COMPREPLY=($(compgen -W "table json toml names" -- "$cur"))
             return
             ;;
+        -template|-t)
+            COMPREPLY=($(compgen -W "node python go rust monorepo minimal" -- "$cur"))
+            return
+            ;;
     esac
 
-    local subcommands="up restart kill pick tui save edit validate status list list-configs migrate-config clone selfupdate setup-tmux version help"
+    local subcommands="up restart kill pick tui save edit validate status send setup-tmux list list-configs migrate-config clone init selfupdate version help"
 
     # First token: a subcommand, or a running session name to attach to.
     if [[ "$COMP_CWORD" -eq 1 ]]; then
@@ -46,8 +50,14 @@ _wyrm_complete() {
     # Subcommand-specific flags.
     if [[ "$cur" == -* ]]; then
         case "$cmd" in
-            up|restart|kill|edit|validate) COMPREPLY=($(compgen -W "-config" -- "$cur")) ;;
-            status) COMPREPLY=($(compgen -W "-format -session -v" -- "$cur")) ;;
+            up|edit|validate) COMPREPLY=($(compgen -W "-config" -- "$cur")) ;;
+            restart) COMPREPLY=($(compgen -W "-config -n -d -all -a -yes -y -var" -- "$cur")) ;;
+            kill) COMPREPLY=($(compgen -W "-config -n -all -a -yes -y" -- "$cur")) ;;
+            save) COMPREPLY=($(compgen -W "-config -stdout -n -dry-run -o" -- "$cur")) ;;
+            init) COMPREPLY=($(compgen -W "-config -template -t -force -f" -- "$cur")) ;;
+            status) COMPREPLY=($(compgen -W "-format -session -v -watch -w -interval" -- "$cur")) ;;
+            send) COMPREPLY=($(compgen -W "-l -literal -n -no-enter -r -raw" -- "$cur")) ;;
+            setup-tmux) COMPREPLY=($(compgen -W "-a -append -w -write -key-pick -key-tui -status" -- "$cur")) ;;
             list) COMPREPLY=($(compgen -W "-format" -- "$cur")) ;;
             selfupdate) COMPREPLY=($(compgen -W "-check -version" -- "$cur")) ;;
             *) COMPREPLY=() ;;

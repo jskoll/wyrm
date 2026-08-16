@@ -26,10 +26,12 @@ _wyrm() {
         'edit:open the resolved config in $EDITOR'
         'validate:check the effective config without building a session'
         'status:print agent status across sessions'
+        'send:send command or keys to target session/window/pane'
         'list:list running tmux sessions non-interactively'
         'list-configs:list candidate config file paths'
         'migrate-config:move the local config into the shared config directory'
         'clone:git clone, then build and attach a session'
+        'init:scaffold a project config interactively or from a template'
         'selfupdate:download and install the latest release'
         'setup-tmux:generate or append recommended tmux popup configuration'
         'version:print version and exit'
@@ -49,13 +51,47 @@ _wyrm() {
             ;;
         args)
             case "$words[1]" in
-                up|restart|kill|edit|validate)
+                up|edit|validate)
                     _arguments '-config[config file path]:config file:->configs'
+                    ;;
+                restart)
+                    _arguments '-config[config file path]:config file:->configs' \
+                        '-all[restart all active tmux sessions]' \
+                        '-a[restart all active tmux sessions]' \
+                        '-yes[skip confirmation prompt]' \
+                        '-y[skip confirmation prompt]' \
+                        '-n[dry run]' \
+                        '-d[skip attaching]'
+                    ;;
+                kill)
+                    _arguments '-config[config file path]:config file:->configs' \
+                        '-all[kill all active tmux sessions]' \
+                        '-a[kill all active tmux sessions]' \
+                        '-yes[skip confirmation prompt]' \
+                        '-y[skip confirmation prompt]' \
+                        '-n[dry run]'
+                    ;;
+                save)
+                    _arguments '-config[config file path]:config file:->configs' \
+                        '-o[config file path or - for stdout]:config file:->configs' \
+                        '-stdout[print config to stdout]' \
+                        '-n[dry run preview]' \
+                        '-dry-run[dry run preview]'
+                    ;;
+                init)
+                    _arguments '-config[config file path]:config file:->configs' \
+                        '-template[starter template]:template:(node python go rust monorepo minimal)' \
+                        '-t[starter template]:template:(node python go rust monorepo minimal)' \
+                        '-force[overwrite existing config without prompting]' \
+                        '-f[overwrite existing config without prompting]'
                     ;;
                 status)
                     _arguments '-format[output format]:format:(text json tmux waybar sketchybar)' \
                         '-session[filter to session]:session:' \
-                        '-v[verbose output]'
+                        '-v[verbose output]' \
+                        '-watch[continuously stream status output]' \
+                        '-w[continuously stream status output]' \
+                        '-interval[polling interval in watch mode]:interval:'
                     ;;
                 list)
                     _arguments '-format[output format]:format:(table json toml names)'

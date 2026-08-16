@@ -83,9 +83,11 @@ wyrm tui                  # full-screen session manager (browse, preview, kill, 
 wyrm save                 # save the running session's layout as this folder's config
 wyrm edit                 # open the resolved config in $EDITOR, creating one if needed
 wyrm validate             # check the effective config parses and validates (-strict fails on warnings)
+wyrm send TARGET [CMD]     # send command or keys to target session/window/pane (-l, -n, -r)
 wyrm list                 # list running tmux sessions non-interactively
 wyrm list-configs         # list candidate config file paths (used by shell completion)
 wyrm migrate-config       # move the local config into the shared config directory
+wyrm init                 # scaffold a project config interactively or with -template (-force)
 wyrm clone REPO [DEST]    # git clone, then build (and attach to) a session for it (-no-start to skip)
 wyrm selfupdate           # download and install the latest release
 wyrm setup-tmux           # generate or append recommended tmux popup configuration (-a)
@@ -258,6 +260,10 @@ already running.
 | `x` | kill the focused session / window / pane (or, on Projects, stop the session running `on_project_exit`) — with a confirm |
 | `r` | rename the focused session or window |
 | `n` | new window in the current session |
+| `<` / `>` (or `K` / `J`) | reorder focused window up or down (`swap-window`) |
+| `W` | move focused window to another session |
+| `s` / `v` | split focused pane vertically (new pane below) |
+| `S` | split focused pane horizontally (new pane to the right) |
 | `L` | cycle the focused window through tmux's standard layouts |
 | `z` | toggle zoom on the focused pane |
 | `e` | edit the selected project's config in `$EDITOR` |
@@ -316,6 +322,21 @@ color and drops them entirely under [`NO_COLOR`](https://no-color.org).
 program (Bubble Tea / Lipgloss); the core build/attach path stays free of it,
 so `wyrm up` never renders anything.
 
+## Initializing a new configuration
+
+`wyrm init` scaffolds a well-commented `.wyrm.toml` config, either interactively via a step-by-step wizard or from a starter template:
+
+```sh
+wyrm init                       # interactive wizard (session name, root, layout presets, commands)
+wyrm init -template go          # non-interactively scaffold a Go starter template
+wyrm init -template node        # Node.js template
+wyrm init -template python      # Python template
+wyrm init -template rust        # Rust template
+wyrm init -template monorepo    # Monorepo template
+wyrm init -template minimal     # Minimal 2-pane template
+wyrm init -force                # overwrite an existing config without confirmation
+```
+
 ## Saving a running session
 
 `wyrm save` snapshots a running tmux session's windows, split layout, and
@@ -327,6 +348,8 @@ way a bare `wyrm` would).
 ```sh
 wyrm save                  # writes .wyrm.toml (or the shared-storage path)
 wyrm save -config PATH     # write to PATH instead of the resolved location
+wyrm save --stdout         # print generated TOML to stdout (or -o -)
+wyrm save -n               # dry run preview without writing to disk
 ```
 
 tmux keeps no record of what was originally typed into a pane, so each
