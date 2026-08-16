@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Window reordering (`<` / `>`, `K` / `J`) and cross-session window moving (`W`) directly within `wyrm tui` with modal session picker and context menu integration.
+
 ## [1.0.0] - 2026-08-15
 
 ### Added

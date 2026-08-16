@@ -257,6 +257,8 @@ already running.
 | `x` | kill the focused session / window / pane (or, on Projects, stop the session running `on_project_exit`) — with a confirm |
 | `r` | rename the focused session or window |
 | `n` | new window in the current session |
+| `<` / `>` (or `K` / `J`) | reorder focused window up or down (`swap-window`) |
+| `W` | move focused window to another session |
 | `L` | cycle the focused window through tmux's standard layouts |
 | `z` | toggle zoom on the focused pane |
 | `e` | edit the selected project's config in `$EDITOR` |

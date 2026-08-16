@@ -90,7 +90,7 @@ var panelSpecs = [numPanels]panelSpec{
 		title:  "Windows",
 		length: func(m Model) int { return len(m.visibleWindows()) },
 		rows:   windowRows,
-		keys:   "↵: attach  x: kill  r: rename  n: new-win  L: layout  " + navKeys,
+		keys:   "↵: attach  x: kill  r: rename  n: new-win  </>: reorder  W: move-to  L: layout  " + navKeys,
 		menu:   windowMenu,
 		kill:   killWindow,
 		child:  panelPanes,

@@ -142,3 +142,19 @@ func ZoomPane(r Runner, paneID string) error {
 	}
 	return nil
 }
+
+// SwapWindow swaps the positions of two windows by ID.
+func SwapWindow(r Runner, srcWindowID, dstWindowID string) error {
+	if out, err := r.Run("swap-window", "-s", srcWindowID, "-t", dstWindowID); err != nil {
+		return fmt.Errorf("swapping windows %q and %q: %w", srcWindowID, dstWindowID, CmdErr(err, out))
+	}
+	return nil
+}
+
+// MoveWindow transfers a window by ID to the target session.
+func MoveWindow(r Runner, windowID, targetSessionID string) error {
+	if out, err := r.Run("move-window", "-s", windowID, "-t", targetSessionID+":"); err != nil {
+		return fmt.Errorf("moving window %q to session %q: %w", windowID, targetSessionID, CmdErr(err, out))
+	}
+	return nil
+}

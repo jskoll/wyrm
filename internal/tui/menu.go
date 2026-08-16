@@ -21,6 +21,9 @@ const (
 	menuLayout
 	menuZoom
 	menuKill
+	menuSwapUp
+	menuSwapDown
+	menuMoveWindow
 )
 
 // menuEntry is one row of the menu. key is the keyboard equivalent, shown
@@ -79,6 +82,9 @@ func windowMenu(m Model) []menuEntry {
 		{menuAttach, "Attach here", "↵"},
 		{menuRename, "Rename window", "r"},
 		{menuNewWindow, "New window", "n"},
+		{menuSwapUp, "Move up", "<"},
+		{menuSwapDown, "Move down", ">"},
+		{menuMoveWindow, "Move to session...", "W"},
 		{menuLayout, "Cycle layout", "L"},
 		{menuKill, "Kill window", "x"},
 	}
@@ -171,6 +177,12 @@ func (m Model) runMenuEntry() (tea.Model, tea.Cmd) {
 		return m.startRename()
 	case menuNewWindow:
 		return m.startNewWindow()
+	case menuSwapUp:
+		return m.swapWindow(-1)
+	case menuSwapDown:
+		return m.swapWindow(1)
+	case menuMoveWindow:
+		return m.startMoveWindow()
 	case menuLayout:
 		return m.cycleLayout()
 	case menuZoom:

@@ -43,7 +43,7 @@ func TestMenuEntriesPerPanel(t *testing.T) {
 		want  []menuOp
 	}{
 		{panelSessions, []menuOp{menuAttach, menuRename, menuNewWindow, menuKill}},
-		{panelWindows, []menuOp{menuAttach, menuRename, menuNewWindow, menuLayout, menuKill}},
+		{panelWindows, []menuOp{menuAttach, menuRename, menuNewWindow, menuSwapUp, menuSwapDown, menuMoveWindow, menuLayout, menuKill}},
 		{panelPanes, []menuOp{menuAttach, menuZoom, menuKill}},
 	}
 	for _, tt := range tests {
