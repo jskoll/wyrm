@@ -218,10 +218,36 @@ func (a *app) edit(args []string) error {
 // hooks or comments.
 func (a *app) save(args []string) error {
 	fs := a.newFlagSet("save")
-	configPath := fs.String("config", "", "path to write the saved config (default: the discovered/shared location)")
+	var configPath, outputFlag string
+	var stdoutFlag bool
+	var dryRun, dryRunLong bool
+
+	fs.StringVar(&configPath, "config", "", "path to write the saved config (default: the discovered/shared location)")
+	fs.StringVar(&outputFlag, "o", "", "path to write the saved config, or '-' for stdout")
+	fs.BoolVar(&stdoutFlag, "stdout", false, "print the generated config to stdout instead of saving to disk")
+	fs.BoolVar(&dryRun, "n", false, "dry run: preview the save destination and generated config without writing to disk")
+	fs.BoolVar(&dryRunLong, "dry-run", false, "alias for -n")
+
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
+	if err := requireNoArgs(fs); err != nil {
+		return err
+	}
+
+	if outputFlag == "-" {
+		stdoutFlag = true
+	} else if outputFlag != "" {
+		if configPath != "" && configPath != outputFlag {
+			return usageErrf("cannot specify both -config and -o with different paths")
+		}
+		configPath = outputFlag
+	}
+
+	if stdoutFlag && configPath != "" {
+		return usageErrf("cannot specify both -stdout and -config")
+	}
+
 	settings, err := config.LoadSettings()
 	if err != nil {
 		return err
@@ -232,7 +258,20 @@ func (a *app) save(args []string) error {
 		return err
 	}
 
-	dest, err := a.saveDestination(settings, *configPath)
+	if stdoutFlag {
+		cfg, err := freeze.Config(a.runner, sessionID, sessionName, ".")
+		if err != nil {
+			return err
+		}
+		data, err := toml.Marshal(cfg)
+		if err != nil {
+			return err
+		}
+		_, err = a.stdout.Write(data)
+		return err
+	}
+
+	dest, err := a.saveDestination(settings, configPath)
 	if err != nil {
 		return err
 	}
@@ -244,6 +283,11 @@ func (a *app) save(args []string) error {
 	data, err := toml.Marshal(cfg)
 	if err != nil {
 		return err
+	}
+
+	if dryRun || dryRunLong {
+		_, _ = fmt.Fprintf(a.stdout, "# Dry run: would save session %s to %s\n%s", sessionName, dest, string(data))
+		return nil
 	}
 
 	if err := state.AtomicWriteFile(dest, data, 0o644); err != nil {

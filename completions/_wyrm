@@ -49,8 +49,15 @@ _wyrm() {
             ;;
         args)
             case "$words[1]" in
-                up|restart|kill|edit|validate|save)
+                up|restart|kill|edit|validate)
                     _arguments '-config[config file path]:config file:->configs'
+                    ;;
+                save)
+                    _arguments '-config[config file path]:config file:->configs' \
+                        '-o[config file path or - for stdout]:config file:->configs' \
+                        '-stdout[print config to stdout]' \
+                        '-n[dry run preview]' \
+                        '-dry-run[dry run preview]'
                     ;;
                 init)
                     _arguments '-config[config file path]:config file:->configs' \
