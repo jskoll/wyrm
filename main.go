@@ -71,6 +71,16 @@ func (a *app) in() io.Reader {
 	return os.Stdin
 }
 
+func (a *app) promptConfirm(msg string) bool {
+	_, _ = fmt.Fprint(a.stdout, msg)
+	var resp string
+	if _, err := fmt.Fscanln(a.in(), &resp); err != nil {
+		return false
+	}
+	resp = strings.ToLower(strings.TrimSpace(resp))
+	return resp == "y" || resp == "yes"
+}
+
 // exitErr is a subcommand failure carrying an explicit exit status. A nil Err
 // means the failure has already been reported — the flag package prints its own
 // parse errors and -h output — so only the code is left to convey.
@@ -128,8 +138,10 @@ func (a *app) report(err error) int {
 // silently-ignored or mutually-exclusive top-level flags can't arise.
 //
 // The verb implementations live in cmd_*.go, grouped by what they act on.
+var appStdin io.Reader
+
 func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux func() bool, attach func(string) error) int {
-	a := &app{stdout: stdout, stderr: stderr, runner: runner, insideTmux: insideTmux, attach: attach}
+	a := &app{stdin: appStdin, stdout: stdout, stderr: stderr, runner: runner, insideTmux: insideTmux, attach: attach}
 
 	if len(args) == 0 {
 		return a.report(a.up(nil))
@@ -234,8 +246,8 @@ Usage:
   wyrm [-config PATH]        build or attach the current folder's session (default)
   wyrm up [-config PATH]     same as bare wyrm, spelled explicitly (-n to dry-run, -d to skip attaching)
   wyrm <name>                attach to a running session, or start a known project, by name
-  wyrm restart [-config P]   stop the session and build it again (-n to dry-run, -d to skip attaching)
-  wyrm kill [name]           destroy the session (runs on_project_exit first; -n to dry-run)
+  wyrm restart [-config P]   stop the session and build it again (-all, -n, -d, -y)
+  wyrm kill [name]           destroy the session (runs on_project_exit first; -all, -n, -y)
   wyrm pick                  fuzzy-pick a running session and attach to it
   wyrm tui                   full-screen session manager (browse, preview, manage)
   wyrm save [-config PATH]   save the running session's layout as this folder's config (-stdout, -n)

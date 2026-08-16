@@ -49,8 +49,25 @@ _wyrm() {
             ;;
         args)
             case "$words[1]" in
-                up|restart|kill|edit|validate)
+                up|edit|validate)
                     _arguments '-config[config file path]:config file:->configs'
+                    ;;
+                restart)
+                    _arguments '-config[config file path]:config file:->configs' \
+                        '-all[restart all active tmux sessions]' \
+                        '-a[restart all active tmux sessions]' \
+                        '-yes[skip confirmation prompt]' \
+                        '-y[skip confirmation prompt]' \
+                        '-n[dry run]' \
+                        '-d[skip attaching]'
+                    ;;
+                kill)
+                    _arguments '-config[config file path]:config file:->configs' \
+                        '-all[kill all active tmux sessions]' \
+                        '-a[kill all active tmux sessions]' \
+                        '-yes[skip confirmation prompt]' \
+                        '-y[skip confirmation prompt]' \
+                        '-n[dry run]'
                     ;;
                 save)
                     _arguments '-config[config file path]:config file:->configs' \
