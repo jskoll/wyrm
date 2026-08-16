@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-16
+
 ### Added
 - `wyrm setup-tmux` subcommand to generate or append recommended tmux popup bindings (`display-popup`) and status bar configuration with duplicate detection.
 - `wyrm send` subcommand for non-interactive command and keystroke execution with dot-safe target resolution (`session[:window[.pane]]`), literal (`-l`), raw key (`-r`), and no-enter (`-n`) flags.
