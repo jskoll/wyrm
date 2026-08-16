@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Pane split actions directly within `wyrm tui`: split panes vertically (`s` / `v`) or horizontally (`S` / `h`) with optional startup commands and context menu integration.
+
 ## [1.0.0] - 2026-08-15
 
 ### Added

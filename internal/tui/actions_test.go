@@ -231,6 +231,91 @@ func TestActionErrStored(t *testing.T) {
 	}
 }
 
+func TestSplitPaneVerticalFlow(t *testing.T) {
+	var calls []string
+	r := funcRunner{fn: func(args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		if args[0] == "split-window" {
+			return "%2\n", nil
+		}
+		return "", nil
+	}}
+	m := modelWithData(r)
+	m.focus = panelPanes
+
+	// 's' opens the command prompt
+	m, _ = update(m, key("s"))
+	if m.mode != modePrompt {
+		t.Fatalf("mode = %d, want modePrompt", m.mode)
+	}
+	if !strings.Contains(m.promptTitle, "Split vertically") {
+		t.Errorf("promptTitle = %q, want Split vertically", m.promptTitle)
+	}
+
+	// Submit text "htop"
+	m.textInput.SetValue("htop")
+	m, cmd := update(m, key("enter"))
+	if m.mode != modeNormal {
+		t.Errorf("mode = %d, want modeNormal after submitting", m.mode)
+	}
+	msg := run(cmd)
+	if _, ok := msg.(panesMsg); !ok {
+		t.Fatalf("split produced %T, want panesMsg", msg)
+	}
+	want := "split-window -P -F #{pane_id} -t %1 -v htop"
+	found := false
+	for _, c := range calls {
+		if c == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected call %q, got %v", want, calls)
+	}
+}
+
+func TestSplitPaneHorizontalFlow(t *testing.T) {
+	var calls []string
+	r := funcRunner{fn: func(args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		if args[0] == "split-window" {
+			return "%3\n", nil
+		}
+		return "", nil
+	}}
+	m := modelWithData(r)
+	m.focus = panelWindows
+
+	// 'S' opens horizontal split prompt
+	m, _ = update(m, key("S"))
+	if m.mode != modePrompt {
+		t.Fatalf("mode = %d, want modePrompt", m.mode)
+	}
+	if !strings.Contains(m.promptTitle, "Split horizontally") {
+		t.Errorf("promptTitle = %q, want Split horizontally", m.promptTitle)
+	}
+
+	// Submit empty text
+	m, cmd := update(m, key("enter"))
+	if m.mode != modeNormal {
+		t.Errorf("mode = %d, want modeNormal after submitting", m.mode)
+	}
+	msg := run(cmd)
+	if _, ok := msg.(panesMsg); !ok {
+		t.Fatalf("split produced %T, want panesMsg", msg)
+	}
+	want := "split-window -P -F #{pane_id} -t %1 -h"
+	found := false
+	for _, c := range calls {
+		if c == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected call %q, got %v", want, calls)
+	}
+}
+
 var errTest = &stringErr{"kaboom"}
 
 type stringErr struct{ s string }

@@ -21,6 +21,8 @@ const (
 	menuLayout
 	menuZoom
 	menuKill
+	menuSplitV
+	menuSplitH
 )
 
 // menuEntry is one row of the menu. key is the keyboard equivalent, shown
@@ -79,6 +81,8 @@ func windowMenu(m Model) []menuEntry {
 		{menuAttach, "Attach here", "↵"},
 		{menuRename, "Rename window", "r"},
 		{menuNewWindow, "New window", "n"},
+		{menuSplitV, "Split vertically", "s"},
+		{menuSplitH, "Split horizontally", "S"},
 		{menuLayout, "Cycle layout", "L"},
 		{menuKill, "Kill window", "x"},
 	}
@@ -90,6 +94,8 @@ func paneMenu(m Model) []menuEntry {
 	}
 	return []menuEntry{
 		{menuAttach, "Attach here", "↵"},
+		{menuSplitV, "Split vertically", "s"},
+		{menuSplitH, "Split horizontally", "S"},
 		{menuZoom, "Toggle zoom", "z"},
 		{menuKill, "Kill pane", "x"},
 	}
@@ -171,6 +177,10 @@ func (m Model) runMenuEntry() (tea.Model, tea.Cmd) {
 		return m.startRename()
 	case menuNewWindow:
 		return m.startNewWindow()
+	case menuSplitV:
+		return m.startSplitPane(false)
+	case menuSplitH:
+		return m.startSplitPane(true)
 	case menuLayout:
 		return m.cycleLayout()
 	case menuZoom:
