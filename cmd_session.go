@@ -306,11 +306,27 @@ func (a *app) attachByName(name string, extraArgs []string) error {
 		}
 	}
 
+	settings, err := config.LoadSettings()
+	if err != nil {
+		return err
+	}
+
 	id, ok, err := tmux.FindSessionID(a.runner, name)
 	if err != nil {
 		return err
 	}
 	if ok {
+		if project, found := config.FindProject(settings, name); found {
+			if cfg, err := config.Load(project.Path); err == nil {
+				if project.Wildcard {
+					cfg.Session.Root = project.Root
+				}
+				if len(vars) > 0 {
+					cfg.Interpolate(vars)
+				}
+				_ = session.RunAttachHook(cfg, a.stderr)
+			}
+		}
 		return a.attachOrSwitch(id)
 	}
 
@@ -318,10 +334,6 @@ func (a *app) attachByName(name string, extraArgs []string) error {
 	// is what makes shared storage worth using: without it, centralizing every
 	// project's config buys nothing, because the only way to start one is still
 	// to cd into its folder first.
-	settings, err := config.LoadSettings()
-	if err != nil {
-		return err
-	}
 	if project, found := config.FindProject(settings, name); found {
 		return a.startProject(project, vars)
 	}

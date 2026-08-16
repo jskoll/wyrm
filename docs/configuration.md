@@ -204,6 +204,8 @@ file uses the same `[session]` / `[[windows]]` format documented below.
 | `root` | string | `.` | Default working directory for every window and pane; `~` and `$VAR` are expanded |
 | `on_project_start` | string | — | Shell command run (via your $SHELL, or sh, in `root`) before the session is created |
 | `on_project_exit` | string | — | Shell command run before `wyrm kill` destroys the session |
+| `on_project_attach` | string | — | Shell command run every time you attach to the session (fresh build or reattach) |
+| `on_project_detach` | string | — | Shell command run inside tmux when client detaches |
 | `on_project_first_start` | string | — | Runs alongside `on_project_start`, but only the very first time this project is ever started |
 | `on_project_restart` | string | — | Runs alongside `on_project_start` on every start after the first |
 | `startup_window` | string | first window | Window (name or index) to focus after creation. Without it the session opens on the first window, focused on its first pane |
@@ -279,6 +281,8 @@ its own working directory:
 | `session.on_project_start` | Before the session is created, every fresh build |
 | `session.on_project_first_start` | Alongside `on_project_start`, only the very first time this project is ever started |
 | `session.on_project_restart` | Alongside `on_project_start`, every start after the first |
+| `session.on_project_attach` | Every time you attach to the session (fresh build or reattach) |
+| `session.on_project_detach` | Inside tmux when client detaches |
 | `session.on_project_exit` | Before `wyrm kill` destroys the session |
 | `windows.pre_window` | Typed into every pane of a window, before that pane's own command |
 | `windows.post_window` | Run once a window's panes and their commands all exist |

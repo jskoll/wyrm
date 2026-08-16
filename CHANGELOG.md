@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Session lifecycle hooks `on_project_attach` (runs whenever attaching to a fresh or existing session) and `on_project_detach` (tmux `client-detached` hook).
+
 ## [1.0.0] - 2026-08-15
 
 ### Added

@@ -104,6 +104,7 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 	if id, ok, ferr := tmux.FindSessionID(r, name); ferr != nil {
 		return "", "", false, ferr
 	} else if ok {
+		_ = RunAttachHook(cfg, stderr, opts...)
 		return name, id, false, nil
 	}
 
@@ -187,7 +188,29 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 			warnf(stderr, "failed to select the first window: %v", err)
 		}
 	}
+	if cfg.Session.OnProjectDetach != "" {
+		if _, err := r.Run("set-hook", "-t", id, "client-detached", fmt.Sprintf("run-shell %q", cfg.Session.OnProjectDetach)); err != nil {
+			warnf(stderr, "failed to configure on_project_detach hook: %v", err)
+		}
+	}
+	_ = RunAttachHook(cfg, stderr, opts...)
 	return name, id, true, nil
+}
+
+// RunAttachHook executes cfg.Session.OnProjectAttach if non-empty.
+func RunAttachHook(cfg *config.Config, stderr io.Writer, opts ...Option) error {
+	if cfg == nil || cfg.Session.OnProjectAttach == "" {
+		return nil
+	}
+	o := newOptions(opts)
+	_, root, err := cfg.Session.Resolve(cfg.Dir())
+	if err != nil {
+		root = cfg.Dir()
+	}
+	if err := runHook(o, cfg.Session.OnProjectAttach, root, "on_project_attach", cfg.Session.Env, stderr); err != nil {
+		warnf(stderr, "on_project_attach failed: %v", err)
+	}
+	return nil
 }
 
 // newIDs is what a session- or window-creating tmux command reports back.
