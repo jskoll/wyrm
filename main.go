@@ -162,6 +162,8 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 		return a.report(a.selfupdate(args[1:]))
 	case "status":
 		return a.report(a.status(args[1:]))
+	case "setup-tmux":
+		return a.report(a.setupTmux(args[1:]))
 	default:
 		if strings.HasPrefix(cmd, "-") {
 			// A bare flag with no subcommand (e.g. `wyrm -config x`) drives the
@@ -237,6 +239,7 @@ Usage:
   wyrm migrate-config        move the local config into the shared config directory
   wyrm clone REPO [DEST]     git clone, then build (and attach to) a session for it
   wyrm selfupdate            download and install the latest release (-check, -version V)
+  wyrm setup-tmux            generate or append recommended tmux popup configuration (-a)
   wyrm version               print version and exit
   wyrm help                  show this help
 
@@ -334,7 +337,7 @@ func (a *app) resolveConfig(settings *config.Settings, explicitPath string) (*co
 // list can't silently drift from the real dispatch table). Used only to
 // power the "did you mean" hint in attachByName.
 var knownSubcommands = []string{
-	"up", "restart", "kill", "pick", "tui", "save", "edit", "validate", "status",
+	"up", "restart", "kill", "pick", "tui", "save", "edit", "validate", "status", "setup-tmux",
 	"list", "list-configs", "migrate-config", "clone", "selfupdate", "version", "help",
 }
 

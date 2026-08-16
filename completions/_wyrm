@@ -31,6 +31,7 @@ _wyrm() {
         'migrate-config:move the local config into the shared config directory'
         'clone:git clone, then build and attach a session'
         'selfupdate:download and install the latest release'
+        'setup-tmux:generate or append recommended tmux popup configuration'
         'version:print version and exit'
         'help:show help'
     )
