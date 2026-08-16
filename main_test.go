@@ -82,6 +82,16 @@ func (f *fakeRunner) Run(args ...string) (string, error) {
 		f.seq++
 		return fmt.Sprintf("%%%d", f.seq), nil
 	case "list-sessions":
+		if len(args) >= 3 && args[1] == "-F" && args[2] == "#{session_id}|#{session_name}" {
+			var lines []string
+			for _, line := range strings.Split(f.listOutput, "\n") {
+				parts := strings.Split(line, "|")
+				if len(parts) >= 2 {
+					lines = append(lines, parts[0]+"|"+parts[len(parts)-1])
+				}
+			}
+			return strings.Join(lines, "\n"), nil
+		}
 		return f.listOutput, nil
 	case "display-message":
 		return f.displayMessageOutput, nil
@@ -626,6 +636,94 @@ func TestRunSaveCurrentSessionError(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "wyrm:") {
 		t.Errorf("stderr = %q, want a wyrm: prefixed error", stderr.String())
+	}
+}
+
+func TestRunSaveStdout(t *testing.T) {
+	chdir(t, t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		displayMessageOutput: "$3|myproj",
+		listWindowsOutput:    "0|@1|1|abcd,80x24,0,0,0|main",
+		listPanesOutput:      map[string]string{"@1": "%0|0|1|nvim"},
+	}
+	code := run([]string{"save", "-stdout"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, `name = 'myproj'`) || !strings.Contains(out, `command = 'nvim'`) {
+		t.Errorf("stdout = %q, want TOML containing session name and command", out)
+	}
+	if _, err := os.Stat(config.DefaultFileName); err == nil {
+		t.Errorf("expected %s not to be created when -stdout is used", config.DefaultFileName)
+	}
+}
+
+func TestRunSaveOutputDash(t *testing.T) {
+	chdir(t, t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		displayMessageOutput: "$3|myproj",
+		listWindowsOutput:    "0|@1|1|abcd,80x24,0,0,0|main",
+		listPanesOutput:      map[string]string{"@1": "%0|0|1|nvim"},
+	}
+	code := run([]string{"save", "-o", "-"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, `name = 'myproj'`) || !strings.Contains(out, `command = 'nvim'`) {
+		t.Errorf("stdout = %q, want TOML containing session name and command", out)
+	}
+}
+
+func TestRunSaveDryRun(t *testing.T) {
+	chdir(t, t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		displayMessageOutput: "$3|myproj",
+		listWindowsOutput:    "0|@1|1|abcd,80x24,0,0,0|main",
+		listPanesOutput:      map[string]string{"@1": "%0|0|1|nvim"},
+	}
+	code := run([]string{"save", "-n"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "# Dry run: would save session myproj to") {
+		t.Errorf("stdout = %q, want dry-run header", out)
+	}
+	if !strings.Contains(out, `name = 'myproj'`) {
+		t.Errorf("stdout = %q, want generated TOML in dry run preview", out)
+	}
+	if _, err := os.Stat(config.DefaultFileName); err == nil {
+		t.Errorf("expected %s not to be created under -n", config.DefaultFileName)
+	}
+}
+
+func TestRunSaveIncompatibleFlags(t *testing.T) {
+	chdir(t, t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		displayMessageOutput: "$3|myproj",
+	}
+
+	// -stdout with -config
+	code := run([]string{"save", "-stdout", "-config", "custom.toml"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2 for incompatible flags", code)
+	}
+
+	// -o mismatch with -config
+	stderr.Reset()
+	code = run([]string{"save", "-config", "a.toml", "-o", "b.toml"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2 for conflicting config and -o", code)
 	}
 }
 
@@ -1430,5 +1528,163 @@ name = "main"
 	}
 	if !strings.Contains(stdout.String(), "config valid") {
 		t.Errorf("expected config valid in stdout, got %q", stdout.String())
+	}
+}
+
+func TestRunKillAllFlagYes(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		listOutput: strings.Join([]string{
+			"$1|1|0|1000|alpha",
+			"$2|1|0|1000|beta",
+		}, "\n"),
+	}
+	code := run([]string{"kill", "-all", "-y"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "killed session alpha") || !strings.Contains(out, "killed session beta") {
+		t.Errorf("stdout = %q, want killed messages for alpha and beta", out)
+	}
+}
+
+func TestRunKillAllConfirmed(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		listOutput: "$1|1|0|1000|alpha",
+	}
+	appStdin = strings.NewReader("y\n")
+	defer func() { appStdin = nil }()
+	code := run([]string{"kill", "--all"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "killed session alpha") {
+		t.Errorf("stdout = %q, want killed session alpha", stdout.String())
+	}
+}
+
+func TestRunKillAllAborted(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		listOutput: "$1|1|0|1000|alpha",
+	}
+	appStdin = strings.NewReader("n\n")
+	defer func() { appStdin = nil }()
+	code := run([]string{"kill", "--all"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "aborted") {
+		t.Errorf("stdout = %q, want aborted message", stdout.String())
+	}
+}
+
+func TestRunKillAllDryRun(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		listOutput: "$1|1|0|1000|alpha",
+	}
+	code := run([]string{"kill", "--all", "-n"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "tmux kill-session -t $1") {
+		t.Errorf("stdout = %q, want tmux kill-session command", stdout.String())
+	}
+}
+
+func TestRunKillAllNoSessions(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{}
+	code := run([]string{"kill", "--all"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "no active sessions to kill") {
+		t.Errorf("stdout = %q, want no active sessions message", stdout.String())
+	}
+}
+
+func TestRunKillAllIncompatibleFlags(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{}
+	code := run([]string{"kill", "--all", "-config", "foo.toml"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
+	}
+
+	stderr.Reset()
+	code = run([]string{"kill", "--all", "somesession"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
+	}
+}
+
+func TestRunRestartAll(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	settingsDir := filepath.Join(home, ".config", "wyrm")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sharedDir := filepath.Join(settingsDir, "settings")
+	if err := os.MkdirAll(sharedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgContent := "[session]\nname = 'alpha'\n[[windows]]\nname = 'w'\n"
+	if err := os.WriteFile(filepath.Join(sharedDir, "alpha.wyrm.toml"), []byte(cfgContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		listOutput: "$1|1|0|1000|alpha",
+	}
+	code := run([]string{"restart", "--all", "-y"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "killed session alpha") || !strings.Contains(out, "created session alpha") {
+		t.Errorf("stdout = %q, want killed and created messages for alpha", out)
+	}
+}
+
+func TestRunRestartAllDryRun(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	settingsDir := filepath.Join(home, ".config", "wyrm")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sharedDir := filepath.Join(settingsDir, "settings")
+	if err := os.MkdirAll(sharedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgContent := "[session]\nname = 'alpha'\n[[windows]]\nname = 'w'\n"
+	if err := os.WriteFile(filepath.Join(sharedDir, "alpha.wyrm.toml"), []byte(cfgContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		listOutput: "$1|1|0|1000|alpha",
+	}
+	code := run([]string{"restart", "--all", "-n"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Restarting session alpha") {
+		t.Errorf("stdout = %q, want Restarting session alpha header", stdout.String())
 	}
 }

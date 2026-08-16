@@ -21,6 +21,7 @@ type PaneInfo struct {
 	Index   int
 	Active  bool
 	Command string // #{pane_current_command}: the pane's foreground process
+	Path    string // #{pane_current_path}: the pane's current working directory
 }
 
 // SessionPath returns a session's working directory (#{session_path}) — the
@@ -219,7 +220,7 @@ func CheckIDs(sessionID, windowID, paneID string) error {
 	return nil
 }
 
-const paneListFormat = "#{pane_id}|#{pane_index}|#{?pane_active,1,0}|#{pane_current_command}"
+const paneListFormat = "#{pane_id}|#{pane_index}|#{?pane_active,1,0}|#{pane_current_command}|#{pane_current_path}"
 
 // ListPanes returns the panes of target (a window ID such as "@2", or a
 // session ID to list every pane in the session).
@@ -228,9 +229,20 @@ func ListPanes(r Runner, target string) ([]PaneInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listing panes: %w", CmdErr(err, out))
 	}
-	recs, err := records(out, 4, "list-panes")
-	if err != nil {
-		return nil, err
+	var recs [][]string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			continue
+		}
+		fields := strings.SplitN(line, "|", 5)
+		if len(fields) < 4 {
+			return nil, fmt.Errorf("unexpected list-panes output %q", line)
+		}
+		if len(fields) == 4 {
+			fields = append(fields, "")
+		}
+		recs = append(recs, fields)
 	}
 	panes := make([]PaneInfo, 0, len(recs))
 	for _, f := range recs {
@@ -246,6 +258,7 @@ func ListPanes(r Runner, target string) ([]PaneInfo, error) {
 			Index:   index,
 			Active:  f[2] == "1",
 			Command: f[3],
+			Path:    f[4],
 		})
 	}
 	return panes, nil
