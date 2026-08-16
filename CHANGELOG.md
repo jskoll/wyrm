@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Capture pane working directories (`pane_current_path`) during `wyrm save` and `freeze`, preserving relative and absolute directory paths across windows and splits.
 - `wyrm init` interactive configuration wizard and starter templates (`node`, `python`, `go`, `rust`, `monorepo`, `minimal`). Supports `--template` / `-t`, `--force` / `-f`, and `--config` flags.
 
 ## [1.0.0] - 2026-08-15
