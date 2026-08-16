@@ -974,6 +974,16 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.startNewWindow()
+	case "s", "v":
+		if m.focus != panelWindows && m.focus != panelPanes {
+			return m, nil
+		}
+		return m.startSplitPane(false)
+	case "S":
+		if m.focus != panelWindows && m.focus != panelPanes {
+			return m, nil
+		}
+		return m.startSplitPane(true)
 	case "L":
 		if m.focus != panelWindows {
 			return m, nil
@@ -1261,6 +1271,32 @@ func (m Model) startNewWindow() (tea.Model, tea.Cmd) {
 	return m.openPrompt("New window name:", "")
 }
 
+// startSplitPane opens a text prompt for an optional startup command in the new split pane.
+func (m Model) startSplitPane(horizontal bool) (tea.Model, tea.Cmd) {
+	w, wok := m.currentWindow()
+	if !wok {
+		return m, nil
+	}
+	targetPaneID := ""
+	if p, pok := m.currentPane(); pok {
+		targetPaneID = p.ID
+	} else if len(m.panes) > 0 {
+		targetPaneID = m.panes[0].ID
+	}
+	if targetPaneID == "" {
+		return m, nil
+	}
+
+	op := opSplitPaneVertical
+	title := "Split vertically (command, blank for shell):"
+	if horizontal {
+		op = opSplitPaneHorizontal
+		title = "Split horizontally (command, blank for shell):"
+	}
+	m.pending = pendingAction{op: op, windowID: w.ID, paneID: targetPaneID}
+	return m.openPrompt(title, "")
+}
+
 func (m Model) openPrompt(title, initial string) (tea.Model, tea.Cmd) {
 	ti := textinput.New()
 	// Without a Width the input has no scroll window, so a value longer than
@@ -1345,7 +1381,7 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		value := m.textInput.Value()
 		m.mode = modeNormal
-		if value == "" {
+		if value == "" && m.pending.op != opSplitPaneVertical && m.pending.op != opSplitPaneHorizontal {
 			m.pending = pendingAction{}
 			return m, nil
 		}

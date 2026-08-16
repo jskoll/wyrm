@@ -370,3 +370,35 @@ func TestFindSessionIDTreatsNoServerAsEmpty(t *testing.T) {
 		t.Errorf("FindSessionID = (%q, %v), want empty", id, ok)
 	}
 }
+
+func TestSplitPane(t *testing.T) {
+	t.Run("vertical split", func(t *testing.T) {
+		r := &recordingRunner{out: "%2\n"}
+		pane, err := SplitPane(r, "%1", false, "top", "/tmp")
+		if err != nil {
+			t.Fatalf("SplitPane: %v", err)
+		}
+		if pane != "%2" {
+			t.Errorf("SplitPane = %q, want %%2", pane)
+		}
+		want := []string{"split-window", "-P", "-F", "#{pane_id}", "-t", "%1", "-v", "-c", "/tmp", "top"}
+		if strings.Join(r.args, " ") != strings.Join(want, " ") {
+			t.Errorf("args = %v, want %v", r.args, want)
+		}
+	})
+
+	t.Run("horizontal split", func(t *testing.T) {
+		r := &recordingRunner{out: "%3\n"}
+		pane, err := SplitPane(r, "%1", true, "", "")
+		if err != nil {
+			t.Fatalf("SplitPane: %v", err)
+		}
+		if pane != "%3" {
+			t.Errorf("SplitPane = %q, want %%3", pane)
+		}
+		want := []string{"split-window", "-P", "-F", "#{pane_id}", "-t", "%1", "-h"}
+		if strings.Join(r.args, " ") != strings.Join(want, " ") {
+			t.Errorf("args = %v, want %v", r.args, want)
+		}
+	})
+}

@@ -142,3 +142,29 @@ func ZoomPane(r Runner, paneID string) error {
 	}
 	return nil
 }
+
+// SplitPane splits the target pane either horizontally (-h) or vertically (-v)
+// and returns the new pane ID. command and root are optional.
+func SplitPane(r Runner, target string, horizontal bool, command, root string) (string, error) {
+	args := []string{"split-window", "-P", "-F", "#{pane_id}", "-t", target}
+	if horizontal {
+		args = append(args, "-h")
+	} else {
+		args = append(args, "-v")
+	}
+	if root != "" {
+		args = append(args, "-c", root)
+	}
+	if command != "" {
+		args = append(args, command)
+	}
+	out, err := r.Run(args...)
+	if err != nil {
+		return "", fmt.Errorf("splitting pane %q: %w", target, CmdErr(err, out))
+	}
+	pane := strings.TrimSpace(out)
+	if err := CheckID(PaneSigil, "pane", pane); err != nil {
+		return "", fmt.Errorf("splitting pane %q: %w", target, err)
+	}
+	return pane, nil
+}
