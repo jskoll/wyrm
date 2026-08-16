@@ -225,7 +225,7 @@ func TestCreateMultipleWindowsAndStartup(t *testing.T) {
 	// is %2.
 	r := &fakeRunner{
 		listWindowsOutput: "0|@1|0|layout|first\n1|@2|1|layout|second",
-		listPanesOutput:   map[string]string{"@2": "%2|1|1|zsh"},
+		listPanesOutput:   map[string]string{"@2": "%2|1|1|zsh|/tmp/proj"},
 	}
 	_, sessionID, _, err := Create(r, cfg, io.Discard, io.Discard)
 	if err != nil {

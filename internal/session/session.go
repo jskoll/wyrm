@@ -138,10 +138,18 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 	// is twelve send-keys calls collapsed into one.
 	keys := &keyBatch{}
 
-	// The first window comes from new-session and the rest from new-window:
-	// different commands, different output shapes, and only the later ones leave
-	// a half-built session worth rolling back.
-	first, err := newSession(r, name, cfg.Windows[0], roots[0], envArgs(initEnvs[0]))
+	initRoots := make([]string, len(cfg.Windows))
+	for i, w := range cfg.Windows {
+		initRoot := roots[i]
+		if w.Root == "" && len(w.Splits) > 0 && w.Splits[0].Type == "" && w.Splits[0].Root != "" {
+			if ir, err := config.ResolveRoot(roots[i], w.Splits[0].Root); err == nil {
+				initRoot = ir
+			}
+		}
+		initRoots[i] = initRoot
+	}
+
+	first, err := newSession(r, name, cfg.Windows[0], initRoots[0], envArgs(initEnvs[0]))
 	if err != nil {
 		return "", "", false, err
 	}
@@ -160,7 +168,7 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 		windowID, paneID := first.windowID, first.paneID
 		if i > 0 {
 			var werr error
-			windowID, paneID, werr = newWindow(r, id, w, roots[i], envArgs(initEnvs[i]))
+			windowID, paneID, werr = newWindow(r, id, w, initRoots[i], envArgs(initEnvs[i]))
 			if werr != nil {
 				return "", "", false, rollback(r, id, stderr, werr)
 			}
