@@ -83,6 +83,7 @@ wyrm tui                  # full-screen session manager (browse, preview, kill, 
 wyrm save                 # save the running session's layout as this folder's config
 wyrm edit                 # open the resolved config in $EDITOR, creating one if needed
 wyrm validate             # check the effective config parses and validates (-strict fails on warnings)
+wyrm send TARGET [CMD]     # send command or keys to target session/window/pane (-l, -n, -r)
 wyrm list                 # list running tmux sessions non-interactively
 wyrm list-configs         # list candidate config file paths (used by shell completion)
 wyrm migrate-config       # move the local config into the shared config directory
