@@ -2,6 +2,7 @@ package session_test
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jskoll/wyrm/internal/config"
+	"github.com/jskoll/wyrm/internal/freeze"
 	"github.com/jskoll/wyrm/internal/session"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
@@ -182,5 +184,127 @@ func TestIntegrationDottedSessionName(t *testing.T) {
 	}
 	if _, ok, err := tmux.FindSessionID(r, "wyrm.vim"); err != nil || ok {
 		t.Errorf("session still exists after Kill: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestIntegrationFreezeWorkingDirectoryRoundtrip(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+
+	r := tmux.Exec{SocketName: fmt.Sprintf("wyrm-it-freeze-%d", os.Getpid())}
+	t.Cleanup(func() { r.Run("kill-server") }) //nolint:errcheck
+
+	root := t.TempDir()
+	frontendDir := filepath.Join(root, "frontend")
+	backendDir := filepath.Join(root, "backend")
+	docsDir := filepath.Join(root, "docs")
+	for _, d := range []string{frontendDir, backendDir, docsDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := &config.Config{
+		Session: config.Session{
+			Name: "freeze-dirs",
+			Root: root,
+		},
+		Windows: []config.Window{
+			{
+				Name: "web",
+				Root: "frontend",
+				Splits: []config.Split{
+					{Command: "# web-1"},
+					{Type: "h", Size: 50, Command: "# web-2"},
+				},
+			},
+			{
+				Name: "mixed",
+				Splits: []config.Split{
+					{Root: "backend", Command: "# api"},
+					{Type: "h", Size: 50, Root: "docs", Command: "# docs"},
+				},
+			},
+		},
+	}
+
+	_, sessionID, _, err := session.Create(r, cfg, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	frozen, err := freeze.Config(r, sessionID, "freeze-dirs-rebuilt", root)
+	if err != nil {
+		t.Fatalf("freeze.Config: %v", err)
+	}
+
+	if len(frozen.Windows) != 2 {
+		t.Fatalf("expected 2 windows in frozen config, got %d", len(frozen.Windows))
+	}
+	if frozen.Windows[0].Root != "frontend" {
+		t.Errorf("window 0 root = %q, want 'frontend'", frozen.Windows[0].Root)
+	}
+	if len(frozen.Windows[1].Splits) < 2 {
+		t.Fatalf("window 1 has %d splits, want at least 2", len(frozen.Windows[1].Splits))
+	}
+	if frozen.Windows[1].Splits[0].Root != "backend" {
+		t.Errorf("window 1 split 0 root = %q, want 'backend'", frozen.Windows[1].Splits[0].Root)
+	}
+	if frozen.Windows[1].Splits[1].Root != "docs" {
+		t.Errorf("window 1 split 1 root = %q, want 'docs'", frozen.Windows[1].Splits[1].Root)
+	}
+
+	// Kill and rebuild from frozen config
+	if _, err := session.Kill(r, cfg, io.Discard); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+
+	_, rebuiltID, _, err := session.Create(r, frozen, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("Create rebuilt: %v", err)
+	}
+
+	windows, err := tmux.ListWindows(r, rebuiltID)
+	if err != nil {
+		t.Fatalf("ListWindows rebuilt: %v", err)
+	}
+	if len(windows) != 2 {
+		t.Fatalf("rebuilt session has %d windows, want 2", len(windows))
+	}
+
+	samePath := func(a, b string) bool {
+		ea, erra := filepath.EvalSymlinks(a)
+		eb, errb := filepath.EvalSymlinks(b)
+		if erra == nil && errb == nil {
+			return filepath.Clean(ea) == filepath.Clean(eb)
+		}
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+
+	panes0, err := tmux.ListPanes(r, windows[0].ID)
+	if err != nil {
+		t.Fatalf("ListPanes window 0: %v", err)
+	}
+	for i, p := range panes0 {
+		if !samePath(p.Path, frontendDir) {
+			t.Errorf("window 0 pane %d path = %q, want %q", i, p.Path, frontendDir)
+		}
+	}
+
+	panes1, err := tmux.ListPanes(r, windows[1].ID)
+	if err != nil {
+		t.Fatalf("ListPanes window 1: %v", err)
+	}
+	if len(panes1) == 2 {
+		if !samePath(panes1[0].Path, backendDir) {
+			t.Errorf("window 1 pane 0 path = %q, want %q", panes1[0].Path, backendDir)
+		}
+		if !samePath(panes1[1].Path, docsDir) {
+			t.Errorf("window 1 pane 1 path = %q, want %q", panes1[1].Path, docsDir)
+		}
 	}
 }
