@@ -97,6 +97,7 @@ wyrm migrate-config         # move the local config into the shared config direc
 wyrm init                   # scaffold a project config interactively or with -template (-force)
 wyrm clone REPO [DEST]      # git clone, then build (and attach to) a session for it
 wyrm selfupdate             # download and install the latest release (-check, -version V)
+wyrm setup-tmux             # generate or append recommended tmux popup configuration (-a)
 wyrm version                # print version
 wyrm help                   # usage overview
 ```

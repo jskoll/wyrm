@@ -15,7 +15,7 @@
 # not "--config"), hence "-o" (old-style option) below rather than fish's
 # usual "-l" (GNU-style long option).
 
-set -l subcommands up restart kill pick tui save edit validate status send list list-configs migrate-config clone init selfupdate version help
+set -l subcommands up restart kill pick tui save edit validate status send setup-tmux list list-configs migrate-config clone init selfupdate version help
 
 # Don't fall back to filename completion.
 complete -c wyrm -f
@@ -37,6 +37,7 @@ complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a migrate-co
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a clone -d 'git clone, then build and attach a session'
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a init -d 'scaffold a new config interactively or from a template'
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a selfupdate -d 'download and install the latest release'
+complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a setup-tmux -d 'generate or append recommended tmux popup configuration'
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a version -d 'print version and exit'
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a help -d 'show help'
 # ...and running session names (bare `wyrm <name>` attaches by name).
@@ -67,3 +68,16 @@ complete -c wyrm -n '__fish_seen_subcommand_from status' -o interval -d 'polling
 complete -c wyrm -n '__fish_seen_subcommand_from list' -o format -d 'output format' -x -a 'table json toml names'
 complete -c wyrm -n '__fish_seen_subcommand_from selfupdate' -o check -d 'report an available update without installing it'
 complete -c wyrm -n '__fish_seen_subcommand_from selfupdate' -o version -d 'install this version instead of the latest' -x
+complete -c wyrm -n '__fish_seen_subcommand_from send' -o l -d 'send keystrokes literally without translation'
+complete -c wyrm -n '__fish_seen_subcommand_from send' -o literal -d 'send keystrokes literally without translation'
+complete -c wyrm -n '__fish_seen_subcommand_from send' -o n -d 'do not append Enter/newline to the command'
+complete -c wyrm -n '__fish_seen_subcommand_from send' -o no-enter -d 'do not append Enter/newline to the command'
+complete -c wyrm -n '__fish_seen_subcommand_from send' -o r -d 'send raw key name(s) directly to tmux'
+complete -c wyrm -n '__fish_seen_subcommand_from send' -o raw -d 'send raw key name(s) directly to tmux'
+complete -c wyrm -n '__fish_seen_subcommand_from setup-tmux' -o a -d 'append directly to tmux.conf'
+complete -c wyrm -n '__fish_seen_subcommand_from setup-tmux' -o append -d 'append directly to tmux.conf'
+complete -c wyrm -n '__fish_seen_subcommand_from setup-tmux' -o w -d 'append directly to tmux.conf'
+complete -c wyrm -n '__fish_seen_subcommand_from setup-tmux' -o write -d 'append directly to tmux.conf'
+complete -c wyrm -n '__fish_seen_subcommand_from setup-tmux' -o key-pick -d 'key combination for pick popup' -x
+complete -c wyrm -n '__fish_seen_subcommand_from setup-tmux' -o key-tui -d 'key combination for tui popup' -x
+complete -c wyrm -n '__fish_seen_subcommand_from setup-tmux' -o status -d 'include status line snippet' -x

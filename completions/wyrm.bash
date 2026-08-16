@@ -35,7 +35,7 @@ _wyrm_complete() {
             ;;
     esac
 
-    local subcommands="up restart kill pick tui save edit validate status send list list-configs migrate-config clone init selfupdate version help"
+    local subcommands="up restart kill pick tui save edit validate status send setup-tmux list list-configs migrate-config clone init selfupdate version help"
 
     # First token: a subcommand, or a running session name to attach to.
     if [[ "$COMP_CWORD" -eq 1 ]]; then
@@ -57,6 +57,7 @@ _wyrm_complete() {
             init) COMPREPLY=($(compgen -W "-config -template -t -force -f" -- "$cur")) ;;
             status) COMPREPLY=($(compgen -W "-format -session -v -watch -w -interval" -- "$cur")) ;;
             send) COMPREPLY=($(compgen -W "-l -literal -n -no-enter -r -raw" -- "$cur")) ;;
+            setup-tmux) COMPREPLY=($(compgen -W "-a -append -w -write -key-pick -key-tui -status" -- "$cur")) ;;
             list) COMPREPLY=($(compgen -W "-format" -- "$cur")) ;;
             selfupdate) COMPREPLY=($(compgen -W "-check -version" -- "$cur")) ;;
             *) COMPREPLY=() ;;

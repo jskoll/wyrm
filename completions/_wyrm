@@ -33,6 +33,7 @@ _wyrm() {
         'clone:git clone, then build and attach a session'
         'init:scaffold a project config interactively or from a template'
         'selfupdate:download and install the latest release'
+        'setup-tmux:generate or append recommended tmux popup configuration'
         'version:print version and exit'
         'help:show help'
     )
