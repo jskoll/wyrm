@@ -17,6 +17,21 @@ directory's basename) inside `shared_dir` first, falling back to the normal
 local search if it's missing. Run `wyrm migrate-config` to move an existing
 local config into the shared directory under the right name.
 
+## Creating a config (`wyrm init`)
+
+Run `wyrm init` to generate a new `.wyrm.toml` for the current project. By default it guides you through an interactive wizard (session name, root directory, window layout presets, and pane commands), or you can scaffold starter templates non-interactively:
+
+```sh
+wyrm init                       # interactive wizard
+wyrm init -template go          # Go template
+wyrm init -template node        # Node.js template
+wyrm init -template python      # Python template
+wyrm init -template rust        # Rust template
+wyrm init -template monorepo    # Monorepo template
+wyrm init -template minimal     # Minimal 2-pane template
+wyrm init -force                # overwrite an existing config without confirmation
+```
+
 ## `[[wildcard]]` — one config, many directories
 
 A `[[wildcard]]` entry applies one template config to every directory
@@ -189,6 +204,22 @@ with its own config or a `~`-marked wildcard match. This is a `wyrm
 tui`-only feature — `wyrm <name>` and `wyrm pick` don't resolve zoxide
 directories by name.
 
+## `[discovery]` — upward config traversal
+
+When `wyrm` is run inside a subdirectory of a repository or project, it
+automatically traverses parent directories to find the repository's `.wyrm.toml`.
+Traversal stops at git repository boundaries (`.git`), the user's home
+directory, or the filesystem root.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `discovery.upward` | bool | `true` | Walk upward from the current working directory to find `.wyrm.toml` |
+
+```toml
+[discovery]
+upward = true
+```
+
 ## Custom default config
 
 When no project config is found at all, wyrm falls back to
@@ -204,6 +235,8 @@ file uses the same `[session]` / `[[windows]]` format documented below.
 | `root` | string | `.` | Default working directory for every window and pane; `~` and `$VAR` are expanded |
 | `on_project_start` | string | — | Shell command run (via your $SHELL, or sh, in `root`) before the session is created |
 | `on_project_exit` | string | — | Shell command run before `wyrm kill` destroys the session |
+| `on_project_attach` | string | — | Shell command run every time you attach to the session (fresh build or reattach) |
+| `on_project_detach` | string | — | Shell command run inside tmux when client detaches |
 | `on_project_first_start` | string | — | Runs alongside `on_project_start`, but only the very first time this project is ever started |
 | `on_project_restart` | string | — | Runs alongside `on_project_start` on every start after the first |
 | `startup_window` | string | first window | Window (name or index) to focus after creation. Without it the session opens on the first window, focused on its first pane |
@@ -279,6 +312,8 @@ its own working directory:
 | `session.on_project_start` | Before the session is created, every fresh build |
 | `session.on_project_first_start` | Alongside `on_project_start`, only the very first time this project is ever started |
 | `session.on_project_restart` | Alongside `on_project_start`, every start after the first |
+| `session.on_project_attach` | Every time you attach to the session (fresh build or reattach) |
+| `session.on_project_detach` | Inside tmux when client detaches |
 | `session.on_project_exit` | Before `wyrm kill` destroys the session |
 | `windows.pre_window` | Typed into every pane of a window, before that pane's own command |
 | `windows.post_window` | Run once a window's panes and their commands all exist |
@@ -296,6 +331,7 @@ with a bigger hook.
 |---|---|---|---|
 | `name` | string | — | Window name |
 | `root` | string | session root | This window's working directory. A relative path resolves against `session.root`, so `root = "api"` means the `api` folder inside the project |
+| `env` | table | — | Environment variables set for all panes of this window, overriding `session.env` |
 | `pre_window` | string | — | Command typed once into **every pane of the window**, before that pane's own command (e.g. `nvm use 18`) |
 | `post_window` | string | — | Shell command **run** (not typed) once all of the window's panes and their commands exist |
 | `splits` | list | — | Split tree (below) — the recommended layout format |
@@ -329,6 +365,7 @@ A failure warns and continues, same as every other per-window failure — see
 | `command` | string | — | **Typed** into the pane's shell; entries starting with `#` are comments and skipped |
 | `run` | string | — | **Run** as the pane's own process, with no shell under it (below). Mutually exclusive with `command` |
 | `root` | string | window root | This pane's working directory, relative to the window's root unless absolute |
+| `env` | table | — | Environment variables for this pane and its children, overriding window and session env |
 | `children` | list | — | Nested splits, applied inside this entry's pane |
 
 ### `command` vs `run`

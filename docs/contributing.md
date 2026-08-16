@@ -25,7 +25,7 @@ The integration tests run a real tmux server on an isolated socket
 ```
 main.go            subcommand dispatch, error/exit-code policy, shared helpers
 cmd_session.go     up, restart, kill, attach-by-name
-cmd_config.go      edit, validate, save, migrate-config, list-configs
+cmd_config.go      edit, validate, save, migrate-config, list-configs, init
 cmd_ui.go          pick, tui, list
 internal/config/   TOML types, parsing, validation, settings, project discovery
 internal/tmux/     Runner interface, real exec implementation, dry-run recorder
