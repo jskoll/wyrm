@@ -231,6 +231,84 @@ func TestActionErrStored(t *testing.T) {
 	}
 }
 
+func TestSwapWindowReorder(t *testing.T) {
+	var calls []string
+	r := funcRunner{fn: func(args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		return "", nil
+	}}
+	m := modelWithData(r)
+	m.windows = []tmux.WindowInfo{
+		{Index: 0, ID: "@1", Name: "code"},
+		{Index: 1, ID: "@2", Name: "server"},
+	}
+	m.focus = panelWindows
+	m.cur[panelWindows] = 0
+
+	// Swap down ('>')
+	m, cmd := update(m, key(">"))
+	if m.cur[panelWindows] != 1 {
+		t.Errorf("cur[panelWindows] = %d, want 1 after swapping down", m.cur[panelWindows])
+	}
+	msg := run(cmd)
+	if _, ok := msg.(windowsMsg); !ok {
+		t.Fatalf("swap produced %T, want windowsMsg", msg)
+	}
+	want := "swap-window -s @1 -t @2"
+	found := false
+	for _, c := range calls {
+		if c == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected %q, got %v", want, calls)
+	}
+}
+
+func TestMoveWindowToSession(t *testing.T) {
+	var calls []string
+	r := funcRunner{fn: func(args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		return "", nil
+	}}
+	m := modelWithData(r)
+	m.sessions = []sessions.Session{
+		{ID: "$1", Name: "webapp"},
+		{ID: "$2", Name: "infra"},
+	}
+	m.focus = panelWindows
+
+	// 'W' opens session picker
+	m, _ = update(m, key("W"))
+	if m.mode != modeMoveWindow {
+		t.Fatalf("mode = %d, want modeMoveWindow", m.mode)
+	}
+	if len(m.moveWindowSessions) != 1 || m.moveWindowSessions[0].ID != "$2" {
+		t.Fatalf("moveWindowSessions = %+v, want only $2", m.moveWindowSessions)
+	}
+
+	// Press Enter to move
+	m, cmd := update(m, key("enter"))
+	if m.mode != modeNormal {
+		t.Errorf("mode = %d, want modeNormal after enter", m.mode)
+	}
+	msg := run(cmd)
+	if _, ok := msg.(windowsMsg); !ok {
+		t.Fatalf("move produced %T, want windowsMsg", msg)
+	}
+	want := "move-window -s @1 -t $2:"
+	found := false
+	for _, c := range calls {
+		if c == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected %q, got %v", want, calls)
+	}
+}
+
 func TestSplitPaneVerticalFlow(t *testing.T) {
 	var calls []string
 	r := funcRunner{fn: func(args ...string) (string, error) {

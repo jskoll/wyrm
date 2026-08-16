@@ -371,6 +371,28 @@ func TestFindSessionIDTreatsNoServerAsEmpty(t *testing.T) {
 	}
 }
 
+func TestSwapWindow(t *testing.T) {
+	r := &recordingRunner{out: ""}
+	if err := SwapWindow(r, "@1", "@2"); err != nil {
+		t.Fatalf("SwapWindow: %v", err)
+	}
+	want := []string{"swap-window", "-s", "@1", "-t", "@2"}
+	if strings.Join(r.args, " ") != strings.Join(want, " ") {
+		t.Errorf("args = %v, want %v", r.args, want)
+	}
+}
+
+func TestMoveWindow(t *testing.T) {
+	r := &recordingRunner{out: ""}
+	if err := MoveWindow(r, "@1", "$2"); err != nil {
+		t.Fatalf("MoveWindow: %v", err)
+	}
+	want := []string{"move-window", "-s", "@1", "-t", "$2:"}
+	if strings.Join(r.args, " ") != strings.Join(want, " ") {
+		t.Errorf("args = %v, want %v", r.args, want)
+	}
+}
+
 func TestSplitPane(t *testing.T) {
 	t.Run("vertical split", func(t *testing.T) {
 		r := &recordingRunner{out: "%2\n"}

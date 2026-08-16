@@ -21,6 +21,9 @@ const (
 	menuLayout
 	menuZoom
 	menuKill
+	menuSwapUp
+	menuSwapDown
+	menuMoveWindow
 	menuSplitV
 	menuSplitH
 )
@@ -81,6 +84,9 @@ func windowMenu(m Model) []menuEntry {
 		{menuAttach, "Attach here", "↵"},
 		{menuRename, "Rename window", "r"},
 		{menuNewWindow, "New window", "n"},
+		{menuSwapUp, "Move up", "<"},
+		{menuSwapDown, "Move down", ">"},
+		{menuMoveWindow, "Move to session...", "W"},
 		{menuSplitV, "Split vertically", "s"},
 		{menuSplitH, "Split horizontally", "S"},
 		{menuLayout, "Cycle layout", "L"},
@@ -177,6 +183,12 @@ func (m Model) runMenuEntry() (tea.Model, tea.Cmd) {
 		return m.startRename()
 	case menuNewWindow:
 		return m.startNewWindow()
+	case menuSwapUp:
+		return m.swapWindow(-1)
+	case menuSwapDown:
+		return m.swapWindow(1)
+	case menuMoveWindow:
+		return m.startMoveWindow()
 	case menuSplitV:
 		return m.startSplitPane(false)
 	case menuSplitH:

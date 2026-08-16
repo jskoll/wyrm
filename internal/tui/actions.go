@@ -106,6 +106,26 @@ func newWindowCmd(r tmux.Runner, sessionID, name string) tea.Cmd {
 	}
 }
 
+func swapWindowCmd(r tmux.Runner, sessionID, srcWindowID, dstWindowID string) tea.Cmd {
+	return func() tea.Msg {
+		if err := tmux.SwapWindow(r, srcWindowID, dstWindowID); err != nil {
+			return actionErrMsg{err}
+		}
+		w, err := tmux.ListWindows(r, sessionID)
+		return windowsMsg{sessionID: sessionID, windows: w, err: err}
+	}
+}
+
+func moveWindowCmd(r tmux.Runner, srcSessionID, windowID, dstSessionID string) tea.Cmd {
+	return func() tea.Msg {
+		if err := tmux.MoveWindow(r, windowID, dstSessionID); err != nil {
+			return actionErrMsg{err}
+		}
+		w, err := tmux.ListWindows(r, srcSessionID)
+		return windowsMsg{sessionID: srcSessionID, windows: w, err: err}
+	}
+}
+
 func splitPaneCmd(r tmux.Runner, windowID, paneID string, horizontal bool, command string) tea.Cmd {
 	return func() tea.Msg {
 		if _, err := tmux.SplitPane(r, paneID, horizontal, command, ""); err != nil {

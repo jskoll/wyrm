@@ -104,6 +104,9 @@ func (m Model) View() string {
 	if m.ready && m.mode == modePager {
 		return m.renderPagerOverlay()
 	}
+	if m.ready && m.mode == modeMoveWindow {
+		return m.renderMoveWindowOverlay()
+	}
 
 	if !m.ready || m.width < minWidth || m.height < m.minHeight() {
 		return fmt.Sprintf("wyrm: terminal too small (need at least %dx%d, have %dx%d)",
@@ -488,6 +491,8 @@ var helpSections = []helpSection{
 		{"x", "kill the window"},
 		{"r", "rename the window"},
 		{"n", "new window"},
+		{"< / >", "reorder window up / down"},
+		{"W", "move window to session"},
 		{"s / v", "split pane vertically"},
 		{"S", "split pane horizontally"},
 		{"L", "cycle the window layout"},
@@ -671,6 +676,39 @@ func (m Model) renderFindPaneOverlay() string {
 		len(list), len(m.allPanes)))
 
 	box := focusedBorder.Padding(0, 1).Render(lipgloss.JoinVertical(lipgloss.Left, title, query, body, footer))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// renderMoveWindowOverlay draws the session picker modal to move a window.
+func (m Model) renderMoveWindowOverlay() string {
+	list := m.moveWindowSessions
+	rowW := 40
+	if m.width-12 < rowW {
+		rowW = max(20, m.width-12)
+	}
+	visible := min(len(list), m.height-6)
+	if visible < 1 {
+		visible = 1
+	}
+	start, end := viewport(m.moveWindowCur, len(list), visible)
+
+	title := focusedTitle.Render("wyrm — move window to session")
+	var lines []string
+	if len(list) == 0 {
+		lines = append(lines, hintStyle.Render("no other active sessions"))
+	}
+	for i := start; i < end; i++ {
+		s := list[i]
+		row := []span{
+			plain(s.Name),
+			{hintStyle, fmt.Sprintf(" (%d windows)", s.Windows)},
+		}
+		lines = append(lines, renderRow(row, rowW, selectedRow, i == m.moveWindowCur))
+	}
+	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	footer := hintStyle.Render("↑↓/jk move  ·  enter transfer  ·  esc cancel")
+
+	box := focusedBorder.Padding(0, 1).Render(lipgloss.JoinVertical(lipgloss.Left, title, body, footer))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 

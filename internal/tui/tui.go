@@ -107,6 +107,8 @@ const (
 	modeFindPane
 	// modePager is the full scrollback buffer pager and search mode ("p" / "[").
 	modePager
+	// modeMoveWindow is the cross-session window transfer picker ("W").
+	modeMoveWindow
 )
 
 // Model is the Bubble Tea model for the TUI. It is a plain value type; Update
@@ -232,6 +234,12 @@ type Model struct {
 	menuX, menuY int
 
 	err error
+
+	// modeMoveWindow picker state
+	moveWindowSessions     []sessions.Session
+	moveWindowCur          int
+	moveWindowSrcID        string
+	moveWindowSrcSessionID string
 
 	// pendingAttach is the tmux session ID (e.g. "$3") to hand the terminal to
 	// once the program exits. The alt-screen program can't attach in-place, so
@@ -777,6 +785,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleFindPaneKey(msg)
 	case modePager:
 		return m.handlePagerKey(msg)
+	case modeMoveWindow:
+		return m.handleMoveWindowKey(msg)
 	}
 	// Any key clears a reported error or info notice, so the footer returns to
 	// the key hints once it's been seen.
@@ -974,6 +984,21 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.startNewWindow()
+	case "<", "K":
+		if m.focus != panelWindows {
+			return m, nil
+		}
+		return m.swapWindow(-1)
+	case ">", "J":
+		if m.focus != panelWindows {
+			return m, nil
+		}
+		return m.swapWindow(1)
+	case "w", "W":
+		if m.focus != panelWindows {
+			return m, nil
+		}
+		return m.startMoveWindow()
 	case "s", "v":
 		if m.focus != panelWindows && m.focus != panelPanes {
 			return m, nil
@@ -1314,6 +1339,85 @@ func (m Model) openPrompt(title, initial string) (tea.Model, tea.Cmd) {
 	m.promptTitle = title
 	m.mode = modePrompt
 	return m, cmd
+}
+
+// swapWindow swaps the focused window with the one delta positions away (+1 down, -1 up).
+func (m Model) swapWindow(delta int) (tea.Model, tea.Cmd) {
+	if m.focus != panelWindows {
+		return m, nil
+	}
+	s, sok := m.currentSession()
+	w, wok := m.currentWindow()
+	if !sok || !wok {
+		return m, nil
+	}
+	visible := m.visibleWindows()
+	cur := m.cur[panelWindows]
+	target := cur + delta
+	if target < 0 || target >= len(visible) {
+		return m, nil
+	}
+	dst := visible[target]
+	m.cur[panelWindows] = target
+	return m, swapWindowCmd(m.runner, s.ID, w.ID, dst.ID)
+}
+
+// startMoveWindow opens a session picker modal to transfer the current window to another session.
+func (m Model) startMoveWindow() (tea.Model, tea.Cmd) {
+	if m.focus != panelWindows {
+		return m, nil
+	}
+	s, sok := m.currentSession()
+	w, wok := m.currentWindow()
+	if !sok || !wok {
+		return m, nil
+	}
+	var targets []sessions.Session
+	for _, sess := range m.sessions {
+		if sess.ID != s.ID {
+			targets = append(targets, sess)
+		}
+	}
+	if len(targets) == 0 {
+		m.info = "no other running sessions to move window to"
+		return m, nil
+	}
+	m.mode = modeMoveWindow
+	m.moveWindowSessions = targets
+	m.moveWindowCur = 0
+	m.moveWindowSrcID = w.ID
+	m.moveWindowSrcSessionID = s.ID
+	return m, nil
+}
+
+func (m Model) handleMoveWindowKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q", "ctrl+c":
+		m.mode = modeNormal
+		m.moveWindowSessions = nil
+		return m, nil
+	case "up", "k":
+		if len(m.moveWindowSessions) > 0 {
+			m.moveWindowCur = wrap(m.moveWindowCur-1, len(m.moveWindowSessions))
+		}
+		return m, nil
+	case "down", "j":
+		if len(m.moveWindowSessions) > 0 {
+			m.moveWindowCur = wrap(m.moveWindowCur+1, len(m.moveWindowSessions))
+		}
+		return m, nil
+	case "enter":
+		if m.moveWindowCur >= 0 && m.moveWindowCur < len(m.moveWindowSessions) {
+			target := m.moveWindowSessions[m.moveWindowCur]
+			m.mode = modeNormal
+			m.moveWindowSessions = nil
+			return m, moveWindowCmd(m.runner, m.moveWindowSrcSessionID, m.moveWindowSrcID, target.ID)
+		}
+		m.mode = modeNormal
+		m.moveWindowSessions = nil
+		return m, nil
+	}
+	return m, nil
 }
 
 // cycleLayout advances the focused window through tmux's standard layouts.

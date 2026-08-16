@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Window reordering (`<` / `>`, `K` / `J`) and cross-session window moving (`W`) directly within `wyrm tui` with modal session picker and context menu integration.
 - Pane split actions directly within `wyrm tui`: split panes vertically (`s` / `v`) or horizontally (`S` / `h`) with optional startup commands and context menu integration.
 - `wyrm status --watch` (`-w`) mode with `--interval` flag to continuously stream agent status updates for Waybar, Sketchybar, and Tmux status bars.
 - Bulk session operations: `--all` (or `-a`) and `--yes` (or `-y`) flags for `wyrm kill` and `wyrm restart` to gracefully stop or rebuild all active tmux sessions.
