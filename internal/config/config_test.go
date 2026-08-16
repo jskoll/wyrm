@@ -347,6 +347,63 @@ func TestDiscover(t *testing.T) {
 	}
 }
 
+func TestDiscoverUpwardInGitRepo(t *testing.T) {
+	repoRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(repoRoot, DefaultFileName)
+	if err := os.WriteFile(cfgPath, []byte("[session]\nname = 'myrepo'\n[[windows]]\nname = 'w'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	nestedDir := filepath.Join(repoRoot, "src", "packages", "ui")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	chdir(t, nestedDir)
+
+	got, err := Discover()
+	if err != nil {
+		t.Fatalf("Discover from nested dir: %v", err)
+	}
+	if filepath.Clean(got) != filepath.Clean(cfgPath) {
+		t.Errorf("Discover() = %q, want %q", got, cfgPath)
+	}
+
+	cfg, err := Load(got)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if filepath.Clean(cfg.Dir()) != filepath.Clean(repoRoot) {
+		t.Errorf("cfg.Dir() = %q, want %q", cfg.Dir(), repoRoot)
+	}
+}
+
+func TestDiscoverUpwardHaltsAtGitRoot(t *testing.T) {
+	outerDir := t.TempDir()
+	outerCfg := filepath.Join(outerDir, DefaultFileName)
+	if err := os.WriteFile(outerCfg, []byte("[session]\nname = 'outer'\n[[windows]]\nname = 'w'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	innerRepo := filepath.Join(outerDir, "inner")
+	if err := os.MkdirAll(filepath.Join(innerRepo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(innerRepo, "pkg")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	chdir(t, nested)
+
+	if got, err := Discover(); err == nil {
+		t.Errorf("Discover() = %q, expected error because traversal should halt at inner .git boundary", got)
+	}
+}
+
 // TestLoadWarnsOnUnknownKeys: a misspelled key is dropped silently by a plain
 // TOML unmarshal, so a config whose every key was a typo passed `wyrm validate`
 // — the exact mistake validate exists to catch.
@@ -396,6 +453,9 @@ enable_pane_titles = true
 pane_title_position = "top"
 pane_title_format = "#{pane_index}"
 
+[session.env]
+GLOBAL = "1"
+
 [[windows]]
 name = "w"
 layout = "tiled"
@@ -405,6 +465,9 @@ synchronize = true
 synchronize_panes = true
 remain_on_exit = true
 
+[windows.env]
+WIN = "2"
+
   [[windows.splits]]
   type = "h"
   size = 30
@@ -412,6 +475,9 @@ remain_on_exit = true
   remain_on_exit = true
   zoomed = true
   zoom = true
+
+  [windows.splits.env]
+  SPLIT = "3"
 
     [[windows.splits.children]]
     type = "v"
@@ -593,5 +659,110 @@ func TestInterpolateString(t *testing.T) {
 				t.Errorf("InterpolateString(%q, %v) = %q, want %q", tt.input, tt.vars, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestWindowAndSplitEnvValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		toml    string
+		wantErr bool
+	}{
+		{
+			name: "valid window and split env",
+			toml: `
+[session]
+name = "test"
+[session.env]
+A = "1"
+
+[[windows]]
+name = "w"
+[windows.env]
+PORT = "8080"
+[[windows.splits]]
+command = "ls"
+[windows.splits.env]
+NODE_ENV = "test"
+`,
+			wantErr: false,
+		},
+		{
+			name: "invalid window env with equals",
+			toml: `
+[session]
+name = "test"
+[[windows]]
+name = "w"
+[windows.env]
+"A=B" = "1"
+[[windows.splits]]
+command = "ls"
+`,
+			wantErr: true,
+		},
+		{
+			name: "invalid split env with null",
+			toml: `
+[session]
+name = "test"
+[[windows]]
+name = "w"
+[[windows.splits]]
+command = "ls"
+[windows.splits.env]
+"A\u0000B" = "1"
+`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeConfig(t, tt.toml)
+			cfg, err := Load(path)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Load() expected error, got cfg: %+v", cfg)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("Load() unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestWindowAndSplitEnvInterpolation(t *testing.T) {
+	raw := `
+[session]
+name = "test"
+
+[[windows]]
+name = "w"
+[windows.env]
+PORT = "{{PORT}}"
+[[windows.splits]]
+command = "run"
+[windows.splits.env]
+HOST = "{{HOST}}"
+`
+	path := writeConfig(t, raw)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg.Interpolate(map[string]string{
+		"PORT": "9000",
+		"HOST": "127.0.0.1",
+	})
+
+	if cfg.Windows[0].Env["PORT"] != "9000" {
+		t.Errorf("Windows[0].Env[PORT] = %q, want '9000'", cfg.Windows[0].Env["PORT"])
+	}
+	if cfg.Windows[0].Splits[0].Env["HOST"] != "127.0.0.1" {
+		t.Errorf("Splits[0].Env[HOST] = %q, want '127.0.0.1'", cfg.Windows[0].Splits[0].Env["HOST"])
 	}
 }

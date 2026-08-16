@@ -142,18 +142,38 @@ func (a *app) restart(args []string) error {
 	configPath := fs.String("config", "", "path to config file (default: .wyrm.toml, then .tmuxconfig)")
 	dryRun := fs.Bool("n", false, "print the tmux commands and hooks that would run, without touching tmux")
 	detach := fs.Bool("d", false, "build the session without attaching")
+	allFlag := fs.Bool("all", false, "restart all active tmux sessions")
+	allShort := fs.Bool("a", false, "alias for -all")
+	yesFlag := fs.Bool("y", false, "skip confirmation prompt when restarting all sessions")
+	yesLong := fs.Bool("yes", false, "alias for -y")
 	var vars varMapFlag
 	fs.Var(&vars, "var", "set template variable (KEY=VALUE, can be repeated)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	if err := requireNoArgs(fs); err != nil {
-		return err
-	}
+
+	all := *allFlag || *allShort
+	yes := *yesFlag || *yesLong
+
 	settings, err := config.LoadSettings()
 	if err != nil {
 		return err
 	}
+
+	if all {
+		if *configPath != "" {
+			return usageErrf("-config and -all are mutually exclusive")
+		}
+		if fs.NArg() > 0 {
+			return usageErrf("session name and -all are mutually exclusive")
+		}
+		return a.restartAll(settings, *dryRun, yes, vars)
+	}
+
+	if err := requireNoArgs(fs); err != nil {
+		return err
+	}
+
 	cfg, _, err := a.resolveConfig(settings, *configPath)
 	if err != nil {
 		return err
@@ -198,6 +218,77 @@ func (a *app) restart(args []string) error {
 	return a.attachOrSwitch(sessionID)
 }
 
+func (a *app) restartAll(settings *config.Settings, dryRun, yes bool, vars map[string]string) error {
+	active, err := sessions.List(a.runner)
+	if err != nil {
+		return err
+	}
+	if len(active) == 0 {
+		_, _ = fmt.Fprintln(a.stdout, "no active sessions to restart")
+		return nil
+	}
+
+	if !dryRun && !yes {
+		if !a.promptConfirm(fmt.Sprintf("Restart all %d active tmux session(s)? (y/N): ", len(active))) {
+			_, _ = fmt.Fprintln(a.stdout, "aborted")
+			return nil
+		}
+	}
+
+	hist, err := state.Load()
+	if err != nil {
+		return err
+	}
+
+	var opts []session.Option
+	if dryRun {
+		opts = a.teardownDryRun()
+	}
+
+	for _, s := range active {
+		project, found := config.FindProject(settings, s.Name)
+		if !found {
+			_, _ = fmt.Fprintf(a.stderr, "wyrm: skipping session %q: no project config found\n", s.Name)
+			continue
+		}
+		cfg, err := config.Load(project.Path)
+		if err != nil {
+			_, _ = fmt.Fprintf(a.stderr, "wyrm: warning: skipping session %q: %v\n", s.Name, err)
+			continue
+		}
+		if len(vars) > 0 {
+			cfg.Interpolate(vars)
+		}
+
+		if dryRun {
+			_, _ = fmt.Fprintf(a.stdout, "# Restarting session %s (%s)\n", s.Name, project.Path)
+			if _, kerr := session.Kill(a.runner, cfg, a.stderr, opts...); kerr != nil {
+				_, _ = fmt.Fprintf(a.stderr, "wyrm: nothing to stop (%v)\n", kerr)
+			}
+			dry := tmux.NewDryRun(a.stdout)
+			_, _, _, err := session.Create(dry, cfg, io.Discard, a.stderr, session.DryRun(a.stdout), session.WithHistory(hist))
+			if err != nil {
+				_, _ = fmt.Fprintf(a.stderr, "wyrm: warning: dry-run create failed for %s: %v\n", s.Name, err)
+			}
+			continue
+		}
+
+		if name, kerr := session.Kill(a.runner, cfg, a.stderr); kerr != nil {
+			_, _ = fmt.Fprintf(a.stderr, "wyrm: nothing to stop (%v)\n", kerr)
+		} else {
+			_, _ = fmt.Fprintf(a.stdout, "killed session %s\n", name)
+		}
+
+		name, _, _, err := session.Create(a.runner, cfg, a.stdout, a.stderr, session.WithHistory(hist))
+		if err != nil {
+			_, _ = fmt.Fprintf(a.stderr, "wyrm: warning: failed to restart session %s: %v\n", s.Name, err)
+			continue
+		}
+		_, _ = fmt.Fprintf(a.stdout, "created session %s\n", name)
+	}
+	return nil
+}
+
 // kill runs the on_project_exit hook and destroys the session. With a
 // positional name it targets that session instead of the current folder's,
 // mirroring `wyrm <name>` — killing by name was previously only possible from
@@ -206,16 +297,34 @@ func (a *app) kill(args []string) error {
 	fs := a.newFlagSet("kill")
 	configPath := fs.String("config", "", "path to config file (default: .wyrm.toml, then .tmuxconfig)")
 	dryRun := fs.Bool("n", false, "print the hook and kill that would run, without touching tmux")
+	allFlag := fs.Bool("all", false, "kill all active tmux sessions")
+	allShort := fs.Bool("a", false, "alias for -all")
+	yesFlag := fs.Bool("y", false, "skip confirmation prompt when killing all sessions")
+	yesLong := fs.Bool("yes", false, "alias for -y")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	if fs.NArg() > 1 {
-		return usageErrf("unexpected argument %q (kill takes at most one session name)", fs.Arg(1))
-	}
+
+	all := *allFlag || *allShort
+	yes := *yesFlag || *yesLong
 
 	settings, err := config.LoadSettings()
 	if err != nil {
 		return err
+	}
+
+	if all {
+		if *configPath != "" {
+			return usageErrf("-config and -all are mutually exclusive")
+		}
+		if fs.NArg() > 0 {
+			return usageErrf("session name and -all are mutually exclusive")
+		}
+		return a.killAll(settings, *dryRun, yes)
+	}
+
+	if fs.NArg() > 1 {
+		return usageErrf("unexpected argument %q (kill takes at most one session name)", fs.Arg(1))
 	}
 
 	// A named target resolves through the project list first, so its
@@ -243,6 +352,54 @@ func (a *app) kill(args []string) error {
 	}
 	if !*dryRun {
 		_, _ = fmt.Fprintf(a.stdout, "killed session %s\n", name)
+	}
+	return nil
+}
+
+func (a *app) killAll(settings *config.Settings, dryRun, yes bool) error {
+	active, err := sessions.List(a.runner)
+	if err != nil {
+		return err
+	}
+	if len(active) == 0 {
+		_, _ = fmt.Fprintln(a.stdout, "no active sessions to kill")
+		return nil
+	}
+
+	if !dryRun && !yes {
+		if !a.promptConfirm(fmt.Sprintf("Kill all %d active tmux session(s)? (y/N): ", len(active))) {
+			_, _ = fmt.Fprintln(a.stdout, "aborted")
+			return nil
+		}
+	}
+
+	var opts []session.Option
+	if dryRun {
+		opts = a.teardownDryRun()
+	}
+
+	for _, s := range active {
+		if project, found := config.FindProject(settings, s.Name); found {
+			if cfg, err := config.Load(project.Path); err == nil {
+				name, kerr := session.Kill(a.runner, cfg, a.stderr, opts...)
+				if kerr != nil {
+					_, _ = fmt.Fprintf(a.stderr, "wyrm: warning: failed to kill session %s: %v\n", s.Name, kerr)
+				} else if !dryRun {
+					_, _ = fmt.Fprintf(a.stdout, "killed session %s\n", name)
+				}
+				continue
+			}
+		}
+
+		if dryRun {
+			_, _ = fmt.Fprintf(a.stdout, "tmux kill-session -t %s\n", s.ID)
+		} else {
+			if out, err := a.runner.Run("kill-session", "-t", s.ID); err != nil {
+				_, _ = fmt.Fprintf(a.stderr, "wyrm: warning: failed to kill session %s: %v\n", s.Name, tmux.CmdErr(err, out))
+			} else {
+				_, _ = fmt.Fprintf(a.stdout, "killed session %s\n", s.Name)
+			}
+		}
 	}
 	return nil
 }

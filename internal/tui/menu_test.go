@@ -43,8 +43,8 @@ func TestMenuEntriesPerPanel(t *testing.T) {
 		want  []menuOp
 	}{
 		{panelSessions, []menuOp{menuAttach, menuRename, menuNewWindow, menuKill}},
-		{panelWindows, []menuOp{menuAttach, menuRename, menuNewWindow, menuLayout, menuKill}},
-		{panelPanes, []menuOp{menuAttach, menuZoom, menuKill}},
+		{panelWindows, []menuOp{menuAttach, menuRename, menuNewWindow, menuSwapUp, menuSwapDown, menuMoveWindow, menuSplitV, menuSplitH, menuLayout, menuKill}},
+		{panelPanes, []menuOp{menuAttach, menuSplitV, menuSplitH, menuZoom, menuKill}},
 	}
 	for _, tt := range tests {
 		got := m.menuFor(tt.panel)
@@ -312,8 +312,8 @@ func TestMenuKeyFollowsFocus(t *testing.T) {
 	next, _ := m.Update(key("M"))
 	m = next.(Model)
 
-	if len(m.menu) != 3 {
-		t.Fatalf("%d entries, want the Panes panel's 3", len(m.menu))
+	if len(m.menu) != 5 {
+		t.Fatalf("%d entries, want the Panes panel's 5", len(m.menu))
 	}
 	for i, e := range m.menu {
 		if e.op == menuZoom {

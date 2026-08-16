@@ -231,6 +231,169 @@ func TestActionErrStored(t *testing.T) {
 	}
 }
 
+func TestSwapWindowReorder(t *testing.T) {
+	var calls []string
+	r := funcRunner{fn: func(args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		return "", nil
+	}}
+	m := modelWithData(r)
+	m.windows = []tmux.WindowInfo{
+		{Index: 0, ID: "@1", Name: "code"},
+		{Index: 1, ID: "@2", Name: "server"},
+	}
+	m.focus = panelWindows
+	m.cur[panelWindows] = 0
+
+	// Swap down ('>')
+	m, cmd := update(m, key(">"))
+	if m.cur[panelWindows] != 1 {
+		t.Errorf("cur[panelWindows] = %d, want 1 after swapping down", m.cur[panelWindows])
+	}
+	msg := run(cmd)
+	if _, ok := msg.(windowsMsg); !ok {
+		t.Fatalf("swap produced %T, want windowsMsg", msg)
+	}
+	want := "swap-window -s @1 -t @2"
+	found := false
+	for _, c := range calls {
+		if c == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected %q, got %v", want, calls)
+	}
+}
+
+func TestMoveWindowToSession(t *testing.T) {
+	var calls []string
+	r := funcRunner{fn: func(args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		return "", nil
+	}}
+	m := modelWithData(r)
+	m.sessions = []sessions.Session{
+		{ID: "$1", Name: "webapp"},
+		{ID: "$2", Name: "infra"},
+	}
+	m.focus = panelWindows
+
+	// 'W' opens session picker
+	m, _ = update(m, key("W"))
+	if m.mode != modeMoveWindow {
+		t.Fatalf("mode = %d, want modeMoveWindow", m.mode)
+	}
+	if len(m.moveWindowSessions) != 1 || m.moveWindowSessions[0].ID != "$2" {
+		t.Fatalf("moveWindowSessions = %+v, want only $2", m.moveWindowSessions)
+	}
+
+	// Press Enter to move
+	m, cmd := update(m, key("enter"))
+	if m.mode != modeNormal {
+		t.Errorf("mode = %d, want modeNormal after enter", m.mode)
+	}
+	msg := run(cmd)
+	if _, ok := msg.(windowsMsg); !ok {
+		t.Fatalf("move produced %T, want windowsMsg", msg)
+	}
+	want := "move-window -s @1 -t $2:"
+	found := false
+	for _, c := range calls {
+		if c == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected %q, got %v", want, calls)
+	}
+}
+
+func TestSplitPaneVerticalFlow(t *testing.T) {
+	var calls []string
+	r := funcRunner{fn: func(args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		if args[0] == "split-window" {
+			return "%2\n", nil
+		}
+		return "", nil
+	}}
+	m := modelWithData(r)
+	m.focus = panelPanes
+
+	// 's' opens the command prompt
+	m, _ = update(m, key("s"))
+	if m.mode != modePrompt {
+		t.Fatalf("mode = %d, want modePrompt", m.mode)
+	}
+	if !strings.Contains(m.promptTitle, "Split vertically") {
+		t.Errorf("promptTitle = %q, want Split vertically", m.promptTitle)
+	}
+
+	// Submit text "htop"
+	m.textInput.SetValue("htop")
+	m, cmd := update(m, key("enter"))
+	if m.mode != modeNormal {
+		t.Errorf("mode = %d, want modeNormal after submitting", m.mode)
+	}
+	msg := run(cmd)
+	if _, ok := msg.(panesMsg); !ok {
+		t.Fatalf("split produced %T, want panesMsg", msg)
+	}
+	want := "split-window -P -F #{pane_id} -t %1 -v htop"
+	found := false
+	for _, c := range calls {
+		if c == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected call %q, got %v", want, calls)
+	}
+}
+
+func TestSplitPaneHorizontalFlow(t *testing.T) {
+	var calls []string
+	r := funcRunner{fn: func(args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		if args[0] == "split-window" {
+			return "%3\n", nil
+		}
+		return "", nil
+	}}
+	m := modelWithData(r)
+	m.focus = panelWindows
+
+	// 'S' opens horizontal split prompt
+	m, _ = update(m, key("S"))
+	if m.mode != modePrompt {
+		t.Fatalf("mode = %d, want modePrompt", m.mode)
+	}
+	if !strings.Contains(m.promptTitle, "Split horizontally") {
+		t.Errorf("promptTitle = %q, want Split horizontally", m.promptTitle)
+	}
+
+	// Submit empty text
+	m, cmd := update(m, key("enter"))
+	if m.mode != modeNormal {
+		t.Errorf("mode = %d, want modeNormal after submitting", m.mode)
+	}
+	msg := run(cmd)
+	if _, ok := msg.(panesMsg); !ok {
+		t.Fatalf("split produced %T, want panesMsg", msg)
+	}
+	want := "split-window -P -F #{pane_id} -t %1 -h"
+	found := false
+	for _, c := range calls {
+		if c == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected call %q, got %v", want, calls)
+	}
+}
+
 var errTest = &stringErr{"kaboom"}
 
 type stringErr struct{ s string }

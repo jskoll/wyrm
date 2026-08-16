@@ -142,3 +142,45 @@ func ZoomPane(r Runner, paneID string) error {
 	}
 	return nil
 }
+
+// SwapWindow swaps the positions of two windows by ID.
+func SwapWindow(r Runner, srcWindowID, dstWindowID string) error {
+	if out, err := r.Run("swap-window", "-s", srcWindowID, "-t", dstWindowID); err != nil {
+		return fmt.Errorf("swapping windows %q and %q: %w", srcWindowID, dstWindowID, CmdErr(err, out))
+	}
+	return nil
+}
+
+// MoveWindow transfers a window by ID to the target session.
+func MoveWindow(r Runner, windowID, targetSessionID string) error {
+	if out, err := r.Run("move-window", "-s", windowID, "-t", targetSessionID+":"); err != nil {
+		return fmt.Errorf("moving window %q to session %q: %w", windowID, targetSessionID, CmdErr(err, out))
+	}
+	return nil
+}
+
+// SplitPane splits the target pane either horizontally (-h) or vertically (-v)
+// and returns the new pane ID. command and root are optional.
+func SplitPane(r Runner, target string, horizontal bool, command, root string) (string, error) {
+	args := []string{"split-window", "-P", "-F", "#{pane_id}", "-t", target}
+	if horizontal {
+		args = append(args, "-h")
+	} else {
+		args = append(args, "-v")
+	}
+	if root != "" {
+		args = append(args, "-c", root)
+	}
+	if command != "" {
+		args = append(args, command)
+	}
+	out, err := r.Run(args...)
+	if err != nil {
+		return "", fmt.Errorf("splitting pane %q: %w", target, CmdErr(err, out))
+	}
+	pane := strings.TrimSpace(out)
+	if err := CheckID(PaneSigil, "pane", pane); err != nil {
+		return "", fmt.Errorf("splitting pane %q: %w", target, err)
+	}
+	return pane, nil
+}
