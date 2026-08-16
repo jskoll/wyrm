@@ -48,6 +48,31 @@ func paneCommand(commands map[string]string, paneID string) string {
 	return cmd
 }
 
+// relPath returns path relative to baseDir if path is inside baseDir.
+// If path equals baseDir, it returns "".
+// If path is outside baseDir or cannot be resolved relatively, it returns path cleaned.
+func relPath(baseDir, path string) string {
+	if path == "" || baseDir == "" {
+		return ""
+	}
+	base := filepath.Clean(baseDir)
+	target := filepath.Clean(path)
+	if evalBase, err := filepath.EvalSymlinks(base); err == nil {
+		base = evalBase
+	}
+	if evalTarget, err := filepath.EvalSymlinks(target); err == nil {
+		target = evalTarget
+	}
+	if base == target {
+		return ""
+	}
+	rel, err := filepath.Rel(base, target)
+	if err == nil && !strings.HasPrefix(rel, "..") && rel != "." {
+		return filepath.ToSlash(rel)
+	}
+	return target
+}
+
 // Config builds a wyrm config.Config snapshotting the live layout of the
 // tmux session identified by sessionID (a tmux session ID, e.g. "$3").
 // name and root are written into the resulting [session] block as-is.
@@ -60,6 +85,18 @@ func Config(r tmux.Runner, sessionID, name, root string) (*config.Config, error)
 		return nil, fmt.Errorf("session %q has no windows", name)
 	}
 
+	sessionBase := root
+	if sessionBase == "" || sessionBase == "." || !filepath.IsAbs(sessionBase) {
+		if sessionPath, err := tmux.SessionPath(r, sessionID); err == nil && sessionPath != "" {
+			sessionBase = sessionPath
+		} else if cwd, err := os.Getwd(); err == nil {
+			sessionBase = cwd
+		}
+	}
+	if eval, err := filepath.EvalSymlinks(sessionBase); err == nil {
+		sessionBase = eval
+	}
+
 	cfg := &config.Config{
 		Session: config.Session{Name: name, Root: root},
 	}
@@ -70,10 +107,12 @@ func Config(r tmux.Runner, sessionID, name, root string) (*config.Config, error)
 			return nil, fmt.Errorf("window %q: %w", w.Name, err)
 		}
 		commands := make(map[string]string, len(panes))
+		paths := make(map[string]string, len(panes))
 		var activePane int
 		haveActivePane := false
 		for _, p := range panes {
 			commands[p.ID] = p.Command
+			paths[p.ID] = p.Path
 			if p.Active {
 				activePane, haveActivePane = p.Index, true
 			}
@@ -84,9 +123,32 @@ func Config(r tmux.Runner, sessionID, name, root string) (*config.Config, error)
 			return nil, fmt.Errorf("window %q: %w", w.Name, err)
 		}
 
+		var winRoot string
+		if len(panes) > 0 && paths[panes[0].ID] != "" {
+			firstRel := relPath(sessionBase, paths[panes[0].ID])
+			allSame := true
+			for _, p := range panes[1:] {
+				if p.Path == "" || relPath(sessionBase, p.Path) != firstRel {
+					allSame = false
+					break
+				}
+			}
+			if allSame {
+				winRoot = firstRel
+			}
+		}
+
+		effectiveWinBase := sessionBase
+		if winRoot != "" {
+			if wr, err := config.ResolveRoot(sessionBase, winRoot); err == nil {
+				effectiveWinBase = wr
+			}
+		}
+
 		cfg.Windows = append(cfg.Windows, config.Window{
 			Name:   w.Name,
-			Splits: splitsFromNode(layoutRoot, commands),
+			Root:   winRoot,
+			Splits: splitsFromNode(layoutRoot, commands, paths, effectiveWinBase),
 		})
 
 		if w.Active {

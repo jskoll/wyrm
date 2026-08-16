@@ -53,16 +53,32 @@ const (
 
 // Settings is wyrm's global preferences, shared across all projects.
 type Settings struct {
-	Storage   Storage    `toml:"storage"`
-	SharedDir string     `toml:"shared_dir"`
-	TUI       TUI        `toml:"tui"`
-	Tmux      Tmux       `toml:"tmux"`
-	Wildcard  []Wildcard `toml:"wildcard,omitempty"`
-	Zoxide    Zoxide     `toml:"zoxide"`
+	Storage   Storage           `toml:"storage"`
+	SharedDir string            `toml:"shared_dir"`
+	TUI       TUI               `toml:"tui"`
+	Tmux      Tmux              `toml:"tmux"`
+	Wildcard  []Wildcard        `toml:"wildcard,omitempty"`
+	Zoxide    Zoxide            `toml:"zoxide"`
+	Discovery DiscoverySettings `toml:"discovery"`
 
 	// warnings collects unknown top-level keys found while parsing this
 	// settings file (see LoadSettings), mirroring Config.warnings.
 	warnings []string
+}
+
+// DiscoverySettings configures config file discovery options.
+type DiscoverySettings struct {
+	// Upward enables traversing up parent directories to find .wyrm.toml.
+	// Defaults to true.
+	Upward *bool `toml:"upward"`
+}
+
+// UpwardDiscoveryEnabled returns true unless discovery.upward is explicitly false.
+func (s *Settings) UpwardDiscoveryEnabled() bool {
+	if s == nil || s.Discovery.Upward == nil {
+		return true
+	}
+	return *s.Discovery.Upward
 }
 
 // Zoxide configures the TUI's optional zoxide-backed directory discovery —
@@ -480,11 +496,11 @@ func EditTarget(settings *Settings) (path string, exists bool, err error) {
 // falling back to Discover's normal current-directory search if that file
 // doesn't exist.
 func DiscoverGlobal(settings *Settings) (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
 	if settings != nil && settings.Storage == StorageShared {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return "", err
-		}
 		shared, err := settings.SharedConfigPath(cwd)
 		if err != nil {
 			return "", err
@@ -493,5 +509,9 @@ func DiscoverGlobal(settings *Settings) (string, error) {
 			return shared, nil
 		}
 	}
-	return Discover()
+	upward := true
+	if settings != nil {
+		upward = settings.UpwardDiscoveryEnabled()
+	}
+	return DiscoverIn(cwd, upward)
 }

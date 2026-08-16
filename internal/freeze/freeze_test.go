@@ -44,12 +44,12 @@ func TestConfigTwoWindows(t *testing.T) {
 			}, "\n"),
 		},
 		panesByWindow: map[string]string{
-			"@1": "%0|0|1|nvim",
-			"@2": "%1|0|0|npm\n%2|1|1|htop",
+			"@1": "%0|0|1|nvim|/path/to/myproj",
+			"@2": "%1|0|0|npm|/path/to/myproj\n%2|1|1|htop|/path/to/myproj",
 		},
 	}
 
-	cfg, err := Config(r, "$3", "myproj", ".")
+	cfg, err := Config(r, "$3", "myproj", "/path/to/myproj")
 	if err != nil {
 		t.Fatalf("Config: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestConfigTwoWindows(t *testing.T) {
 	want := &config.Config{
 		Session: config.Session{
 			Name:          "myproj",
-			Root:          ".",
+			Root:          "/path/to/myproj",
 			StartupWindow: "server",
 			StartupPane:   intPtr(1),
 		},
@@ -67,6 +67,54 @@ func TestConfigTwoWindows(t *testing.T) {
 				{Command: "npm"},
 				{Type: "h", Size: 50, Command: "htop"},
 			}},
+		},
+	}
+	if !reflect.DeepEqual(cfg, want) {
+		t.Errorf("Config() =\n%+v\nwant\n%+v", cfg, want)
+	}
+}
+
+func TestConfigWindowAndSplitRoots(t *testing.T) {
+	r := &fakeRunner{
+		windowsBySession: map[string]string{
+			"$3": strings.Join([]string{
+				"0|@1|0|abcd,139x50,0,0,0|web",
+				"1|@2|1|efgh,139x50,0,0{69x50,0,0,1,69x50,70,0,2}|mixed",
+			}, "\n"),
+		},
+		panesByWindow: map[string]string{
+			"@1": "%0|0|1|npm run dev|/path/to/myproj/frontend",
+			"@2": "%1|0|0|cargo run|/path/to/myproj/backend\n%2|1|1|python run.py|/path/to/myproj/ai",
+		},
+	}
+
+	cfg, err := Config(r, "$3", "myproj", "/path/to/myproj")
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+
+	want := &config.Config{
+		Session: config.Session{
+			Name:          "myproj",
+			Root:          "/path/to/myproj",
+			StartupWindow: "mixed",
+			StartupPane:   intPtr(1),
+		},
+		Windows: []config.Window{
+			{
+				Name: "web",
+				Root: "frontend",
+				Splits: []config.Split{
+					{Command: "npm run dev"},
+				},
+			},
+			{
+				Name: "mixed",
+				Splits: []config.Split{
+					{Command: "cargo run", Root: "backend"},
+					{Type: "h", Size: 50, Command: "python run.py", Root: "ai"},
+				},
+			},
 		},
 	}
 	if !reflect.DeepEqual(cfg, want) {

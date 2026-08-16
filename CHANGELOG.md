@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Bulk session operations: `--all` (or `-a`) and `--yes` (or `-y`) flags for `wyrm kill` and `wyrm restart` to gracefully stop or rebuild all active tmux sessions.
+- Upward directory traversal to automatically discover `.wyrm.toml` at Git repository or project root from nested subdirectories, with configurable `[discovery].upward` setting (enabled by default).
+- Support for per-window (`[windows.env]`) and per-split (`[windows.splits.env]`) environment variables, cascaded with precedence: Split > Window > Session.
+- `--stdout` (or `-o -`) and `-n` / `--dry-run` flags in `wyrm save` to stream generated TOML directly to stdout or preview save results without touching disk.
+- Capture pane working directories (`pane_current_path`) during `wyrm save` and `freeze`, preserving relative and absolute directory paths across windows and splits.
+- `wyrm init` interactive configuration wizard and starter templates (`node`, `python`, `go`, `rust`, `monorepo`, `minimal`). Supports `--template` / `-t`, `--force` / `-f`, and `--config` flags.
 
 ## [1.0.0] - 2026-08-15
 

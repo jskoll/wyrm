@@ -64,14 +64,17 @@ type app struct {
 	httpClient *http.Client
 }
 
+func (a *app) in() io.Reader {
+	if a.stdin != nil {
+		return a.stdin
+	}
+	return os.Stdin
+}
+
 func (a *app) promptConfirm(msg string) bool {
 	_, _ = fmt.Fprint(a.stdout, msg)
-	in := a.stdin
-	if in == nil {
-		in = os.Stdin
-	}
 	var resp string
-	if _, err := fmt.Fscanln(in, &resp); err != nil {
+	if _, err := fmt.Fscanln(a.in(), &resp); err != nil {
 		return false
 	}
 	resp = strings.ToLower(strings.TrimSpace(resp))
@@ -179,6 +182,8 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 		return a.report(a.selfupdate(args[1:]))
 	case "status":
 		return a.report(a.status(args[1:]))
+	case "init":
+		return a.report(a.init(args[1:]))
 	default:
 		if strings.HasPrefix(cmd, "-") {
 			// A bare flag with no subcommand (e.g. `wyrm -config x`) drives the
@@ -245,7 +250,7 @@ Usage:
   wyrm kill [name]           destroy the session (runs on_project_exit first; -all, -n, -y)
   wyrm pick                  fuzzy-pick a running session and attach to it
   wyrm tui                   full-screen session manager (browse, preview, manage)
-  wyrm save [-config PATH]   save the running session's layout as this folder's config
+  wyrm save [-config PATH]   save the running session's layout as this folder's config (-stdout, -n)
   wyrm edit [-config PATH]   open the resolved config in $EDITOR, creating one if needed
   wyrm validate [-config P]  check the effective config parses and validates (-strict)
   wyrm status [-format FMT]  print agent status across sessions (FMT: text, json, tmux, waybar, sketchybar)
@@ -253,6 +258,7 @@ Usage:
   wyrm list-configs          list candidate config file paths (used by shell completion)
   wyrm migrate-config        move the local config into the shared config directory
   wyrm clone REPO [DEST]     git clone, then build (and attach to) a session for it
+  wyrm init [-template T]    scaffold a project config interactively or with -template (-force)
   wyrm selfupdate            download and install the latest release (-check, -version V)
   wyrm version               print version and exit
   wyrm help                  show this help
@@ -352,7 +358,7 @@ func (a *app) resolveConfig(settings *config.Settings, explicitPath string) (*co
 // power the "did you mean" hint in attachByName.
 var knownSubcommands = []string{
 	"up", "restart", "kill", "pick", "tui", "save", "edit", "validate", "status",
-	"list", "list-configs", "migrate-config", "clone", "selfupdate", "version", "help",
+	"list", "list-configs", "migrate-config", "clone", "selfupdate", "version", "help", "init",
 }
 
 // nearestSubcommand returns the known subcommand closest to name by edit
