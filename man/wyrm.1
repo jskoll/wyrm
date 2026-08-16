@@ -93,6 +93,13 @@ config in the shared config directory. Used by shell completion.
 .B wyrm migrate-config
 Move the local config file into the shared config directory.
 .TP
+.BI "wyrm init [\-config " PATH "] [\-template " TEMPLATE "] [\-force]"
+Scaffold a project configuration file. Runs an interactive CLI wizard by default, or non-interactively creates a starter template with
+.B \-template
+(\fBnode\fR, \fBpython\fR, \fBgo\fR, \fBrust\fR, \fBmonorepo\fR, \fBminimal\fR).
+.B \-force
+overwrites an existing config without confirmation.
+.TP
 .BI "wyrm clone " REPO " [" DEST ]
 Run
 .BR "git clone" ,
