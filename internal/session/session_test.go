@@ -418,6 +418,86 @@ func TestCreateOnProjectStartFailureStillCreates(t *testing.T) {
 	}
 }
 
+func TestCreateOnProjectAttachHook(t *testing.T) {
+	t.Run("fresh build runs attach hook", func(t *testing.T) {
+		cfg := &config.Config{
+			Session: config.Session{Name: "proj", Root: "/tmp/proj", OnProjectAttach: "echo attaching"},
+			Windows: []config.Window{{Name: "w"}},
+		}
+		r := &fakeRunner{}
+		var stderr bytes.Buffer
+		_, _, created, err := Create(r, cfg, io.Discard, &stderr)
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if !created {
+			t.Errorf("created = false, want true")
+		}
+		if !strings.Contains(stderr.String(), "running on_project_attach") {
+			t.Errorf("stderr = %q, want running on_project_attach", stderr.String())
+		}
+	})
+
+	t.Run("existing session runs attach hook", func(t *testing.T) {
+		cfg := &config.Config{
+			Session: config.Session{Name: "proj", Root: "/tmp/proj", OnProjectAttach: "echo attaching"},
+			Windows: []config.Window{{Name: "w"}},
+		}
+		r := &fakeRunner{listOutput: "$1|proj"}
+		var stderr bytes.Buffer
+		_, _, created, err := Create(r, cfg, io.Discard, &stderr)
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if created {
+			t.Errorf("created = true, want false for already running session")
+		}
+		if !strings.Contains(stderr.String(), "running on_project_attach") {
+			t.Errorf("stderr = %q, want running on_project_attach", stderr.String())
+		}
+	})
+}
+
+func TestCreateOnProjectDetachHook(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj", OnProjectDetach: "echo detaching"},
+		Windows: []config.Window{{Name: "w"}},
+	}
+	r := &fakeRunner{}
+	var stderr bytes.Buffer
+	_, _, created, err := Create(r, cfg, io.Discard, &stderr)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if !created {
+		t.Errorf("created = false, want true")
+	}
+	found := false
+	for _, call := range r.calls {
+		if len(call) >= 4 && call[0] == "set-hook" && call[3] == "client-detached" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected set-hook client-detached call, got %v", r.calls)
+	}
+}
+
+func TestRunAttachHookDryRun(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj", OnProjectAttach: "echo attach-dry"},
+		Windows: []config.Window{{Name: "w"}},
+	}
+	var transcript bytes.Buffer
+	err := RunAttachHook(cfg, io.Discard, DryRun(&transcript))
+	if err != nil {
+		t.Fatalf("RunAttachHook: %v", err)
+	}
+	if !strings.Contains(transcript.String(), "# would run on_project_attach") {
+		t.Errorf("transcript = %q, want # would run on_project_attach", transcript.String())
+	}
+}
+
 // fakeHistory is a minimal in-memory HookHistory, standing in for
 // *internal/state.Store without pulling in that package's file I/O.
 type fakeHistory struct {

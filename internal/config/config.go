@@ -54,10 +54,12 @@ func (c *Config) Warnings() []string { return c.warnings }
 
 // Session describes the tmux session and its lifecycle hooks.
 type Session struct {
-	Name           string `toml:"name,omitempty"`
-	Root           string `toml:"root,omitempty"`
-	OnProjectStart string `toml:"on_project_start,omitempty"`
-	OnProjectExit  string `toml:"on_project_exit,omitempty"`
+	Name            string `toml:"name,omitempty"`
+	Root            string `toml:"root,omitempty"`
+	OnProjectStart  string `toml:"on_project_start,omitempty"`
+	OnProjectExit   string `toml:"on_project_exit,omitempty"`
+	OnProjectAttach string `toml:"on_project_attach,omitempty"`
+	OnProjectDetach string `toml:"on_project_detach,omitempty"`
 	// OnProjectFirstStart and OnProjectRestart run alongside OnProjectStart —
 	// which always fires on a fresh build — distinguishing a project's
 	// genuine first-ever start from a later one. Which fires is decided by
@@ -560,6 +562,8 @@ func (c *Config) Interpolate(vars map[string]string) {
 	c.Session.Root = InterpolateString(c.Session.Root, vars)
 	c.Session.OnProjectStart = InterpolateString(c.Session.OnProjectStart, vars)
 	c.Session.OnProjectExit = InterpolateString(c.Session.OnProjectExit, vars)
+	c.Session.OnProjectAttach = InterpolateString(c.Session.OnProjectAttach, vars)
+	c.Session.OnProjectDetach = InterpolateString(c.Session.OnProjectDetach, vars)
 	c.Session.OnProjectFirstStart = InterpolateString(c.Session.OnProjectFirstStart, vars)
 	c.Session.OnProjectRestart = InterpolateString(c.Session.OnProjectRestart, vars)
 	c.Session.StartupWindow = InterpolateString(c.Session.StartupWindow, vars)
