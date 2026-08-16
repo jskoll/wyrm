@@ -63,8 +63,14 @@ Fuzzy-pick a running session and attach to it.
 Open the full-screen session manager: browse, preview, kill, rename, and
 start sessions.
 .TP
-.BI "wyrm save [\-config " PATH ]
+.BI "wyrm save [\-config " PATH "] [\-stdout] [\-n] [\-o " PATH ]
 Save the running session's current layout as this folder's config.
+.B \-stdout
+(or
+.BR "\-o -" )
+prints the generated TOML to standard output without touching the filesystem.
+.B \-n
+previews the destination and generated config without writing to disk.
 Refuses to overwrite an existing config file.
 .TP
 .BI "wyrm edit [\-config " PATH ]
@@ -92,6 +98,13 @@ config in the shared config directory. Used by shell completion.
 .TP
 .B wyrm migrate-config
 Move the local config file into the shared config directory.
+.TP
+.BI "wyrm init [\-config " PATH "] [\-template " TEMPLATE "] [\-force]"
+Scaffold a project configuration file. Runs an interactive CLI wizard by default, or non-interactively creates a starter template with
+.B \-template
+(\fBnode\fR, \fBpython\fR, \fBgo\fR, \fBrust\fR, \fBmonorepo\fR, \fBminimal\fR).
+.B \-force
+overwrites an existing config without confirmation.
 .TP
 .BI "wyrm clone " REPO " [" DEST ]
 Run

@@ -89,12 +89,41 @@ func TestSplitsFromNode(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseWindowLayout: %v", err)
 			}
-			got := splitsFromNode(root, tc.commands)
+			got := splitsFromNode(root, tc.commands, nil, "")
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("splitsFromNode() =\n%+v\nwant\n%+v", got, tc.want)
 			}
 		})
 	}
+
+	t.Run("with pane paths", func(t *testing.T) {
+		layout := "380d,200x50,0,0{139x50,0,0,0,60x50,140,0[60x24,140,0,1,60x25,140,25,2]}"
+		commands := map[string]string{
+			"%0": "nvim",
+			"%1": "npm run dev",
+			"%2": "cargo test",
+		}
+		paths := map[string]string{
+			"%0": "/my/project",
+			"%1": "/my/project/frontend",
+			"%2": "/my/project/backend",
+		}
+		root, err := parseWindowLayout(layout)
+		if err != nil {
+			t.Fatalf("parseWindowLayout: %v", err)
+		}
+		got := splitsFromNode(root, commands, paths, "/my/project")
+		want := []config.Split{
+			{Command: "nvim"},
+			{Type: "h", Size: 30, Children: []config.Split{
+				{Command: "npm run dev", Root: "frontend"},
+				{Type: "v", Size: 51, Command: "cargo test", Root: "backend"},
+			}},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("splitsFromNode with paths =\n%+v\nwant\n%+v", got, want)
+		}
+	})
 }
 
 func TestClampSize(t *testing.T) {

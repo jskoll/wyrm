@@ -29,9 +29,13 @@ _wyrm_complete() {
             COMPREPLY=($(compgen -W "table json toml names" -- "$cur"))
             return
             ;;
+        -template|-t)
+            COMPREPLY=($(compgen -W "node python go rust monorepo minimal" -- "$cur"))
+            return
+            ;;
     esac
 
-    local subcommands="up restart kill pick tui save edit validate status list list-configs migrate-config clone selfupdate version help"
+    local subcommands="up restart kill pick tui save edit validate status list list-configs migrate-config clone selfupdate version help init"
 
     # First token: a subcommand, or a running session name to attach to.
     if [[ "$COMP_CWORD" -eq 1 ]]; then
@@ -47,6 +51,8 @@ _wyrm_complete() {
     if [[ "$cur" == -* ]]; then
         case "$cmd" in
             up|restart|kill|edit|validate) COMPREPLY=($(compgen -W "-config" -- "$cur")) ;;
+            save) COMPREPLY=($(compgen -W "-config -stdout -n -dry-run -o" -- "$cur")) ;;
+            init) COMPREPLY=($(compgen -W "-config -template -t -force -f" -- "$cur")) ;;
             status) COMPREPLY=($(compgen -W "-format -session -v" -- "$cur")) ;;
             list) COMPREPLY=($(compgen -W "-format" -- "$cur")) ;;
             selfupdate) COMPREPLY=($(compgen -W "-check -version" -- "$cur")) ;;

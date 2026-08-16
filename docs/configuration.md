@@ -17,6 +17,21 @@ directory's basename) inside `shared_dir` first, falling back to the normal
 local search if it's missing. Run `wyrm migrate-config` to move an existing
 local config into the shared directory under the right name.
 
+## Creating a config (`wyrm init`)
+
+Run `wyrm init` to generate a new `.wyrm.toml` for the current project. By default it guides you through an interactive wizard (session name, root directory, window layout presets, and pane commands), or you can scaffold starter templates non-interactively:
+
+```sh
+wyrm init                       # interactive wizard
+wyrm init -template go          # Go template
+wyrm init -template node        # Node.js template
+wyrm init -template python      # Python template
+wyrm init -template rust        # Rust template
+wyrm init -template monorepo    # Monorepo template
+wyrm init -template minimal     # Minimal 2-pane template
+wyrm init -force                # overwrite an existing config without confirmation
+```
+
 ## `[[wildcard]]` — one config, many directories
 
 A `[[wildcard]]` entry applies one template config to every directory
@@ -312,6 +327,7 @@ with a bigger hook.
 |---|---|---|---|
 | `name` | string | — | Window name |
 | `root` | string | session root | This window's working directory. A relative path resolves against `session.root`, so `root = "api"` means the `api` folder inside the project |
+| `env` | table | — | Environment variables set for all panes of this window, overriding `session.env` |
 | `pre_window` | string | — | Command typed once into **every pane of the window**, before that pane's own command (e.g. `nvm use 18`) |
 | `post_window` | string | — | Shell command **run** (not typed) once all of the window's panes and their commands exist |
 | `splits` | list | — | Split tree (below) — the recommended layout format |
@@ -345,6 +361,7 @@ A failure warns and continues, same as every other per-window failure — see
 | `command` | string | — | **Typed** into the pane's shell; entries starting with `#` are comments and skipped |
 | `run` | string | — | **Run** as the pane's own process, with no shell under it (below). Mutually exclusive with `command` |
 | `root` | string | window root | This pane's working directory, relative to the window's root unless absolute |
+| `env` | table | — | Environment variables for this pane and its children, overriding window and session env |
 | `children` | list | — | Nested splits, applied inside this entry's pane |
 
 ### `command` vs `run`

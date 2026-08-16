@@ -30,6 +30,7 @@ _wyrm() {
         'list-configs:list candidate config file paths'
         'migrate-config:move the local config into the shared config directory'
         'clone:git clone, then build and attach a session'
+        'init:scaffold a project config interactively or from a template'
         'selfupdate:download and install the latest release'
         'version:print version and exit'
         'help:show help'
@@ -50,6 +51,20 @@ _wyrm() {
             case "$words[1]" in
                 up|restart|kill|edit|validate)
                     _arguments '-config[config file path]:config file:->configs'
+                    ;;
+                save)
+                    _arguments '-config[config file path]:config file:->configs' \
+                        '-o[config file path or - for stdout]:config file:->configs' \
+                        '-stdout[print config to stdout]' \
+                        '-n[dry run preview]' \
+                        '-dry-run[dry run preview]'
+                    ;;
+                init)
+                    _arguments '-config[config file path]:config file:->configs' \
+                        '-template[starter template]:template:(node python go rust monorepo minimal)' \
+                        '-t[starter template]:template:(node python go rust monorepo minimal)' \
+                        '-force[overwrite existing config without prompting]' \
+                        '-f[overwrite existing config without prompting]'
                     ;;
                 status)
                     _arguments '-format[output format]:format:(text json tmux waybar sketchybar)' \
