@@ -154,14 +154,72 @@ type Pane struct {
 }
 
 // Discover returns the config file to use when none was given: DefaultFileName
-// in the current directory, falling back to LegacyFileName.
+// in the current directory, falling back to LegacyFileName, or searching upward
+// through parent directories up to a git repository root or user home directory.
 func Discover() (string, error) {
-	for _, name := range []string{DefaultFileName, LegacyFileName} {
-		if _, err := os.Stat(name); err == nil {
-			return name, nil
+	return DiscoverIn(".", true)
+}
+
+// DiscoverIn searches for a config file starting at startDir. If upward is true,
+// it walks upward through parent directories until it finds a config, reaches
+// a git repository boundary (.git), reaches the user home directory, or hits the
+// filesystem root.
+func DiscoverIn(startDir string, upward bool) (string, error) {
+	dir := startDir
+	if dir == "" || dir == "." {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", err
 		}
+		dir = cwd
 	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+
+	homeDir, _ := os.UserHomeDir()
+	if homeDir != "" {
+		homeDir, _ = filepath.Abs(homeDir)
+	}
+
+	current := absDir
+	for {
+		for _, name := range []string{DefaultFileName, LegacyFileName} {
+			target := filepath.Join(current, name)
+			if _, err := os.Stat(target); err == nil {
+				if current == absDir {
+					return name, nil
+				}
+				return target, nil
+			}
+		}
+
+		if !upward {
+			break
+		}
+
+		if isGitRoot(current) {
+			break
+		}
+		if homeDir != "" && current == homeDir {
+			break
+		}
+
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
+	}
+
 	return "", fmt.Errorf("no %s or %s in the current directory (or pass -config)", DefaultFileName, LegacyFileName)
+}
+
+func isGitRoot(dir string) bool {
+	gitPath := filepath.Join(dir, ".git")
+	_, err := os.Stat(gitPath)
+	return err == nil
 }
 
 // Load reads, parses, and validates a config file.

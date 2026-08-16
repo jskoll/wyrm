@@ -173,6 +173,9 @@ config = "~/.config/wyrm/settings/_template.wyrm.toml"
 [zoxide]
 enabled = true
 track = true
+
+[discovery]
+upward = true
 `
 	if err := os.WriteFile(filepath.Join(dir, SettingsFileName), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -465,6 +468,38 @@ func TestDiscoverGlobalLocalMode(t *testing.T) {
 	if got, err := DiscoverGlobal(settings); err != nil || got != DefaultFileName {
 		t.Errorf("DiscoverGlobal = %q, %v, want %q, nil", got, err, DefaultFileName)
 	}
+}
+
+func TestDiscoverGlobalUpwardSetting(t *testing.T) {
+	repoRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(repoRoot, DefaultFileName)
+	if err := os.WriteFile(cfgPath, []byte("[session]\nname = 'up'\n[[windows]]\nname = 'w'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(repoRoot, "sub", "pkg")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, nested)
+
+	// Upward explicitly disabled:
+	disabled := &Settings{Discovery: DiscoverySettings{Upward: boolPtr(false)}}
+	if got, err := DiscoverGlobal(disabled); err == nil {
+		t.Errorf("DiscoverGlobal with upward=false: got %q, want error", got)
+	}
+
+	// Upward enabled (default or explicit):
+	enabled := &Settings{Discovery: DiscoverySettings{Upward: boolPtr(true)}}
+	if got, err := DiscoverGlobal(enabled); err != nil || filepath.Clean(got) != filepath.Clean(cfgPath) {
+		t.Errorf("DiscoverGlobal with upward=true: got %q, %v, want %q, nil", got, err, cfgPath)
+	}
+}
+
+func boolPtr(b bool) *bool {
+	return &b
 }
 
 // The [tui] section is optional in every direction: an absent file, an absent

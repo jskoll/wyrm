@@ -204,6 +204,22 @@ with its own config or a `~`-marked wildcard match. This is a `wyrm
 tui`-only feature — `wyrm <name>` and `wyrm pick` don't resolve zoxide
 directories by name.
 
+## `[discovery]` — upward config traversal
+
+When `wyrm` is run inside a subdirectory of a repository or project, it
+automatically traverses parent directories to find the repository's `.wyrm.toml`.
+Traversal stops at git repository boundaries (`.git`), the user's home
+directory, or the filesystem root.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `discovery.upward` | bool | `true` | Walk upward from the current working directory to find `.wyrm.toml` |
+
+```toml
+[discovery]
+upward = true
+```
+
 ## Custom default config
 
 When no project config is found at all, wyrm falls back to
