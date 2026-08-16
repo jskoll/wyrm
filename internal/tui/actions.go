@@ -21,6 +21,8 @@ const (
 	opRenameWindow
 	opNewWindow
 	opKillProject
+	opSplitPaneVertical
+	opSplitPaneHorizontal
 )
 
 // pendingAction captures what a modal will do once confirmed/submitted, along
@@ -124,6 +126,16 @@ func moveWindowCmd(r tmux.Runner, srcSessionID, windowID, dstSessionID string) t
 	}
 }
 
+func splitPaneCmd(r tmux.Runner, windowID, paneID string, horizontal bool, command string) tea.Cmd {
+	return func() tea.Msg {
+		if _, err := tmux.SplitPane(r, paneID, horizontal, command, ""); err != nil {
+			return actionErrMsg{err}
+		}
+		p, err := tmux.ListPanes(r, windowID)
+		return panesMsg{windowID: windowID, panes: p, err: err}
+	}
+}
+
 func selectLayoutCmd(r tmux.Runner, windowID, layout string) tea.Cmd {
 	return func() tea.Msg {
 		if err := tmux.SelectLayout(r, windowID, layout); err != nil {
@@ -179,6 +191,10 @@ func (m Model) executePendingWithValue(value string) tea.Cmd {
 		return renameWindowCmd(m.runner, m.pending.sessionID, m.pending.windowID, value)
 	case opNewWindow:
 		return newWindowCmd(m.runner, m.pending.sessionID, value)
+	case opSplitPaneVertical:
+		return splitPaneCmd(m.runner, m.pending.windowID, m.pending.paneID, false, value)
+	case opSplitPaneHorizontal:
+		return splitPaneCmd(m.runner, m.pending.windowID, m.pending.paneID, true, value)
 	}
 	return nil
 }
