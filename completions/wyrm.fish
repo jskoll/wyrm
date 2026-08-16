@@ -42,7 +42,12 @@ complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a help -d 's
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a '(wyrm list -format names 2>/dev/null)' -d 'running session'
 
 # Subcommand flags.
-complete -c wyrm -n '__fish_seen_subcommand_from up restart kill edit validate save' -o config -d 'config file path' -r -a '(wyrm list-configs 2>/dev/null)'
+complete -c wyrm -n '__fish_seen_subcommand_from up restart kill edit validate' -o config -d 'config file path' -r -a '(wyrm list-configs 2>/dev/null)'
+complete -c wyrm -n '__fish_seen_subcommand_from save' -o config -d 'config file path' -r -a '(wyrm list-configs 2>/dev/null)'
+complete -c wyrm -n '__fish_seen_subcommand_from save' -o o -d 'config file path or - for stdout' -r
+complete -c wyrm -n '__fish_seen_subcommand_from save' -o stdout -d 'print config to stdout'
+complete -c wyrm -n '__fish_seen_subcommand_from save' -o n -d 'dry run preview'
+complete -c wyrm -n '__fish_seen_subcommand_from save' -o dry-run -d 'dry run preview'
 complete -c wyrm -n '__fish_seen_subcommand_from init' -o config -d 'config file path' -r -a '(wyrm list-configs 2>/dev/null)'
 complete -c wyrm -n '__fish_seen_subcommand_from init' -o template -d 'starter template' -x -a 'node python go rust monorepo minimal'
 complete -c wyrm -n '__fish_seen_subcommand_from init' -o t -d 'starter template' -x -a 'node python go rust monorepo minimal'

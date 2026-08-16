@@ -629,6 +629,94 @@ func TestRunSaveCurrentSessionError(t *testing.T) {
 	}
 }
 
+func TestRunSaveStdout(t *testing.T) {
+	chdir(t, t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		displayMessageOutput: "$3|myproj",
+		listWindowsOutput:    "0|@1|1|abcd,80x24,0,0,0|main",
+		listPanesOutput:      map[string]string{"@1": "%0|0|1|nvim"},
+	}
+	code := run([]string{"save", "-stdout"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, `name = 'myproj'`) || !strings.Contains(out, `command = 'nvim'`) {
+		t.Errorf("stdout = %q, want TOML containing session name and command", out)
+	}
+	if _, err := os.Stat(config.DefaultFileName); err == nil {
+		t.Errorf("expected %s not to be created when -stdout is used", config.DefaultFileName)
+	}
+}
+
+func TestRunSaveOutputDash(t *testing.T) {
+	chdir(t, t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		displayMessageOutput: "$3|myproj",
+		listWindowsOutput:    "0|@1|1|abcd,80x24,0,0,0|main",
+		listPanesOutput:      map[string]string{"@1": "%0|0|1|nvim"},
+	}
+	code := run([]string{"save", "-o", "-"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, `name = 'myproj'`) || !strings.Contains(out, `command = 'nvim'`) {
+		t.Errorf("stdout = %q, want TOML containing session name and command", out)
+	}
+}
+
+func TestRunSaveDryRun(t *testing.T) {
+	chdir(t, t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		displayMessageOutput: "$3|myproj",
+		listWindowsOutput:    "0|@1|1|abcd,80x24,0,0,0|main",
+		listPanesOutput:      map[string]string{"@1": "%0|0|1|nvim"},
+	}
+	code := run([]string{"save", "-n"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "# Dry run: would save session myproj to") {
+		t.Errorf("stdout = %q, want dry-run header", out)
+	}
+	if !strings.Contains(out, `name = 'myproj'`) {
+		t.Errorf("stdout = %q, want generated TOML in dry run preview", out)
+	}
+	if _, err := os.Stat(config.DefaultFileName); err == nil {
+		t.Errorf("expected %s not to be created under -n", config.DefaultFileName)
+	}
+}
+
+func TestRunSaveIncompatibleFlags(t *testing.T) {
+	chdir(t, t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	r := &fakeRunner{
+		displayMessageOutput: "$3|myproj",
+	}
+
+	// -stdout with -config
+	code := run([]string{"save", "-stdout", "-config", "custom.toml"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2 for incompatible flags", code)
+	}
+
+	// -o mismatch with -config
+	stderr.Reset()
+	code = run([]string{"save", "-config", "a.toml", "-o", "b.toml"}, &stdout, &stderr, r, func() bool { return true }, nil)
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2 for conflicting config and -o", code)
+	}
+}
+
 func TestRunListTable(t *testing.T) {
 	r := &fakeRunner{listOutput: strings.Join([]string{
 		"$1|3|1|2000|alpha",
