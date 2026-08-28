@@ -59,10 +59,10 @@ func TestSendExecution(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("code = %d, stderr = %q", code, stderr.String())
 		}
-		// Expects send-keys -t @2 -l npm test and send-keys -t @2 Enter
+		// Expects send-keys -t @2 -l -- npm test and send-keys -t @2 Enter
 		var foundLiteral, foundEnter bool
 		for _, c := range r.calls {
-			if c == "send-keys -t @2 -l npm test" {
+			if c == "send-keys -t @2 -l -- npm test" {
 				foundLiteral = true
 			}
 			if c == "send-keys -t @2 Enter" {
@@ -83,7 +83,7 @@ func TestSendExecution(t *testing.T) {
 		}
 		var foundLiteral, foundEnter bool
 		for _, c := range r.calls {
-			if c == "send-keys -t %11 -l foo" {
+			if c == "send-keys -t %11 -l -- foo" {
 				foundLiteral = true
 			}
 			if strings.Contains(c, "Enter") {

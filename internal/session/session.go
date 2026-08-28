@@ -104,7 +104,6 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 	if id, ok, ferr := tmux.FindSessionID(r, name); ferr != nil {
 		return "", "", false, ferr
 	} else if ok {
-		_ = RunAttachHook(cfg, stderr, opts...)
 		return name, id, false, nil
 	}
 
@@ -206,15 +205,48 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 		}
 	}
 	if cfg.Session.OnProjectDetach != "" {
-		if _, err := r.Run("set-hook", "-t", id, "client-detached", fmt.Sprintf("run-shell %q", cfg.Session.OnProjectDetach)); err != nil {
+		if _, err := r.Run("set-hook", "-t", id, "client-detached", detachHookCommand(cfg.Session.OnProjectDetach)); err != nil {
 			warnf(stderr, "failed to configure on_project_detach hook: %v", err)
 		}
 	}
-	_ = RunAttachHook(cfg, stderr, opts...)
 	return name, id, true, nil
 }
 
+// detachHookCommand renders on_project_detach as the tmux command stored
+// against the session's client-detached hook.
+//
+// Two layers of tmux syntax sit between the config and the shell, and Go's %q
+// satisfies neither:
+//
+//   - tmux's command lexer re-parses the stored string when the hook fires, so
+//     the body is wrapped in single quotes, which tmux takes literally.
+//   - run-shell then expands its argument as a FORMAT. That happens whatever
+//     the quoting, so a hook merely *mentioning* "#{session_name}" was rewritten
+//     before the shell saw it, and "#(...)" was executed by tmux at expansion
+//     time. "##" is the documented way to write a literal "#" in a format, so
+//     every "#" is doubled first.
+//
+// Verified against tmux 3.7: without the doubling, `#{session_name}` reaches
+// the shell as the session's name and `#(id -un)` runs as a tmux job.
+func detachHookCommand(hook string) string {
+	return "run-shell " + tmuxQuote(strings.ReplaceAll(hook, "#", "##"))
+}
+
+// tmuxQuote wraps s so tmux's command lexer reads it back verbatim. tmux
+// single quotes are literal with no escape mechanism, exactly like sh, so an
+// embedded quote has to leave and re-enter the quoted run.
+func tmuxQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // RunAttachHook executes cfg.Session.OnProjectAttach if non-empty.
+//
+// Create deliberately does not call this. The hook is documented as running
+// when you attach, and Create has no idea whether its caller is about to:
+// `wyrm up -d`, `wyrm restart -d` and `wyrm restart -all` all build a session
+// and hand it to nobody. Firing it from Create meant on_project_attach ran for
+// every one of them. Callers run it immediately before handing the terminal
+// over — see app.attachSession.
 func RunAttachHook(cfg *config.Config, stderr io.Writer, opts ...Option) error {
 	if cfg == nil || cfg.Session.OnProjectAttach == "" {
 		return nil

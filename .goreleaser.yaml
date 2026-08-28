@@ -23,6 +23,28 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# Sign checksums.txt so `wyrm selfupdate` can tell "this download wasn't
+# corrupted" from "this release came from us". The public half is committed at
+# internal/selfupdate/signing.pub and compiled into the binary; only the secret
+# key is a release secret, supplied as MINISIGN_KEY_FILE (a path) with its
+# password in MINISIGN_PASSWORD.
+#
+# A release fails outright if these are unset. That is deliberate: the previous
+# arrangement had verification code with no key and no signing step, so it
+# silently verified nothing in every shipped build.
+signs:
+  - cmd: minisign
+    args:
+      - "-Sm"
+      - "${artifact}"
+      - "-s"
+      - "{{ .Env.MINISIGN_KEY_FILE }}"
+      - "-x"
+      - "${signature}"
+    signature: "${artifact}.minisig"
+    artifacts: checksum
+    stdin: "{{ .Env.MINISIGN_PASSWORD }}"
+
 nfpms:
   - id: wyrm
     package_name: wyrm

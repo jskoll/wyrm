@@ -194,6 +194,8 @@ func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux
 		return a.report(a.init(args[1:]))
 	case "setup-tmux":
 		return a.report(a.setupTmux(args[1:]))
+	case "doctor":
+		return a.report(a.doctor(args[1:]))
 	default:
 		if strings.HasPrefix(cmd, "-") {
 			// A bare flag with no subcommand (e.g. `wyrm -config x`) drives the
@@ -268,10 +270,11 @@ Usage:
   wyrm list [-format FMT]    list running sessions (FMT: table, json, toml, names)
   wyrm list-configs          list candidate config file paths (used by shell completion)
   wyrm migrate-config        move the local config into the shared config directory
-  wyrm clone REPO [DEST]     git clone, then build (and attach to) a session for it
+  wyrm clone REPO [DEST]     git clone, then confirm and build a session for it (-y, -no-start)
   wyrm init [-template T]    scaffold a project config interactively or with -template (-force)
   wyrm selfupdate            download and install the latest release (-check, -version V)
   wyrm setup-tmux            generate or append recommended tmux popup configuration (-a)
+  wyrm doctor                check tmux, settings, configs, and optional tools (-strict)
   wyrm version               print version and exit
   wyrm help                  show this help
 
@@ -370,7 +373,7 @@ func (a *app) resolveConfig(settings *config.Settings, explicitPath string) (*co
 // power the "did you mean" hint in attachByName.
 var knownSubcommands = []string{
 	"up", "restart", "kill", "pick", "tui", "save", "edit", "validate", "status", "send", "setup-tmux",
-	"list", "list-configs", "migrate-config", "clone", "init", "selfupdate", "version", "help",
+	"list", "list-configs", "migrate-config", "clone", "init", "selfupdate", "doctor", "version", "help",
 }
 
 // nearestSubcommand returns the known subcommand closest to name by edit

@@ -182,3 +182,19 @@ usually touches:
 Commits follow conventional commits: `feat:`, `fix:`, `docs:`, `test:`, `chore:`.
 Releases are tag-driven (`git tag v0.x.y && git push --tags`) via goreleaser,
 which also updates the Homebrew tap.
+
+**Tag every release annotated, with a detailed description of what changed** —
+`git tag -a v0.x.y` with a real message, not a bare `git tag v0.x.y`. Write the
+same material as that version's `CHANGELOG.md` section, in prose: what changed,
+why, and anything an upgrading user has to do differently.
+
+The tag message does **not** reach the GitHub release. `.goreleaser.yaml` sets
+`changelog: use: github`, so the published notes are a filtered list of commit
+subjects between tags and nothing else — v1.1.1 shipped with a two-line body
+for that reason. Set the release body explicitly after goreleaser finishes:
+
+```sh
+gh release edit v0.x.y --notes-file <file>   # or --notes "..."
+```
+
+Applies going forward; released tags stay as they are.

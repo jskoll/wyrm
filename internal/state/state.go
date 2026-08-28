@@ -62,6 +62,23 @@ func Load() (*Store, error) {
 	return s, nil
 }
 
+// Path returns the file this store persists to, so callers can name it in a
+// diagnostic without recomputing the XDG lookup.
+func (s *Store) Path() string {
+	if s == nil {
+		return ""
+	}
+	return s.path
+}
+
+// Len returns how many project directories are on record as having started.
+func (s *Store) Len() int {
+	if s == nil {
+		return 0
+	}
+	return len(s.started)
+}
+
 // Started reports whether dir has started a session before. Nil-safe and
 // false for an empty dir, so a Config with no on-disk identity (the
 // built-in default, or one built in memory) never matches.

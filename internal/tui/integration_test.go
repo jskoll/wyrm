@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jskoll/wyrm/internal/config"
 	"github.com/jskoll/wyrm/internal/sessions"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
@@ -110,7 +111,7 @@ func TestIntegrationProject(t *testing.T) {
 		t.Fatalf("session 'itproj' not running after start; have %+v", running)
 	}
 
-	msg, ok := run(killProjectCmd(r, nil, path)).(projectsMsg)
+	msg, ok := run(killProjectCmd(r, nil, config.Project{Path: path})).(projectsMsg)
 	if !ok || msg.err != nil {
 		t.Fatalf("killProjectCmd -> %+v", msg)
 	}

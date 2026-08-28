@@ -144,6 +144,11 @@ func startProjectCmd(r tmux.Runner, settings *config.Settings, p Project) tea.Cm
 			return projectStartedMsg{err: err}
 		}
 		_, id, _, err := session.Create(r, cfg, io.Discard, io.Discard, session.WithHistory(hist))
+		if err == nil {
+			// projectStartedMsg always quits into an attach (see Update), so
+			// this is an attach — session.Create no longer runs the hook.
+			_ = session.RunAttachHook(cfg, io.Discard)
+		}
 		if err == nil && p.Root != "" && settings.ZoxideTrack() && zoxide.Available() {
 			// Best-effort: teaching zoxide about a directory wyrm just
 			// built a session for is a nice-to-have, never worth failing
@@ -154,44 +159,38 @@ func startProjectCmd(r tmux.Runner, settings *config.Settings, p Project) tea.Cm
 	}
 }
 
-// projectConfig loads the config a project should build from: the template
-// (Root-overridden) for a wildcard match, the user's default (or wyrm's
-// built-in one) rooted at Root for a zoxide-only directory, or the config at
-// Path for anything else.
+// configProject is the discovery-layer view of this project — the identity
+// config.Project.LoadConfig needs to turn it into a buildable config. A zoxide
+// directory has no config file of its own, which LoadConfig recognises by the
+// empty Path.
+func (p Project) configProject() config.Project {
+	return config.Project{
+		Name:     p.Name,
+		Path:     p.Path,
+		Shared:   p.Shared,
+		Root:     p.Root,
+		Wildcard: p.Wildcard,
+	}
+}
+
+// projectConfig loads the config a project should build from. The rules live
+// in config.Project.LoadConfig so that starting a project here and killing it
+// from the CLI cannot disagree about which config a project means.
 func projectConfig(p Project) (*config.Config, error) {
-	if p.Zoxide {
-		cfg, err := config.LoadUserDefault()
-		if err != nil {
-			return nil, err
-		}
-		if cfg == nil {
-			cfg, err = config.LoadDefault()
-			if err != nil {
-				return nil, err
-			}
-		}
-		cfg.Session.Root = p.Root
-		return cfg, nil
-	}
-	cfg, err := config.Load(p.Path)
-	if err != nil {
-		return nil, err
-	}
-	if p.Wildcard {
-		// The template's own session.root (normally unset) doesn't say
-		// which directory this Project stands for — only the match
-		// does. See config.DiscoverWildcardProjects.
-		cfg.Session.Root = p.Root
-	}
-	return cfg, nil
+	return p.configProject().LoadConfig()
 }
 
 // killProjectCmd stops a project's session, running its on_project_exit hook
 // (unlike the hook-less session kills), then re-lists projects to refresh the
 // running annotation.
-func killProjectCmd(r tmux.Runner, settings *config.Settings, path string) tea.Cmd {
+//
+// It takes the project rather than its config path because a path alone does
+// not identify a project: a wildcard project's path is the shared template,
+// and a zoxide directory has no path at all. Loading by path killed the wrong
+// session for the first and failed outright for the second.
+func killProjectCmd(r tmux.Runner, settings *config.Settings, p config.Project) tea.Cmd {
 	return func() tea.Msg {
-		cfg, err := config.Load(path)
+		cfg, err := p.LoadConfig()
 		if err != nil {
 			return actionErrMsg{err}
 		}

@@ -14,6 +14,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -614,8 +615,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							SessionName: sessName,
 							WindowName:  winName,
 						}
+						// nil, not os.Stdout: Dispatch writes the bell and
+						// the OSC 9/777 sequences straight to the writer it is
+						// given, and this runs in a tea.Cmd goroutine while
+						// Bubble Tea's renderer is writing frames to the same
+						// fd. Those channels are skipped here; the desktop
+						// notification and the custom command are subprocesses
+						// and stay. Bubble Tea v1 offers no safe way to write
+						// raw escapes under the alt screen (tea.Printf is
+						// dropped there), so this is a deliberate omission
+						// rather than an oversight.
 						notifyCmds = append(notifyCmds, func() tea.Msg {
-							_ = agent.Dispatch(n, cfg, os.Stdout)
+							_ = agent.Dispatch(n, cfg, nil)
 							return nil
 						})
 					}
@@ -1082,28 +1093,48 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch m.focus {
 		case panelSessions:
 			if s, ok := m.currentSession(); ok {
-				_ = clipboard.Write(s.Name)
-				m.info = fmt.Sprintf("copied session %q to clipboard", s.Name)
+				m.copy(s.Name, fmt.Sprintf("session %q", s.Name))
 			}
 		case panelProjects:
 			if p, ok := m.currentProject(); ok {
-				_ = clipboard.Write(p.Path)
-				m.info = fmt.Sprintf("copied project path %q to clipboard", p.Path)
+				m.copy(p.Path, fmt.Sprintf("project path %q", p.Path))
 			}
 		case panelWindows:
 			if w, ok := m.currentWindow(); ok {
-				_ = clipboard.Write(w.Name)
-				m.info = fmt.Sprintf("copied window %q to clipboard", w.Name)
+				m.copy(w.Name, fmt.Sprintf("window %q", w.Name))
 			}
 		case panelPanes:
 			if p, ok := m.currentPane(); ok {
-				_ = clipboard.Write(m.preview)
-				m.info = fmt.Sprintf("copied pane %s preview to clipboard", p.ID)
+				m.copy(m.preview, fmt.Sprintf("pane %s preview", p.ID))
 			}
 		}
 		return m, nil
 	}
 	return m, nil
+}
+
+// copy puts text on the system clipboard and reports what actually happened.
+//
+// Every call site used to discard the error and announce success regardless,
+// which on a host with no clipboard tool meant "y" printed "copied ..." and did
+// nothing at all. There is no OSC 52 fallback here on purpose: it would have to
+// be written to the terminal, which Bubble Tea owns while the TUI is up — see
+// clipboard.OSC52.
+// clipboardWrite is clipboard.Write behind a variable so a test can exercise
+// the copy keys on a machine that has no clipboard tool at all — CI runners
+// have none, and Model must stay comparable, so this cannot be a func field.
+var clipboardWrite = clipboard.Write
+
+func (m *Model) copy(text, what string) {
+	if err := clipboardWrite(text); err != nil {
+		if errors.Is(err, clipboard.ErrNoBackend) {
+			m.info = "cannot copy: no clipboard tool found (install " + clipboard.Backends() + ")"
+			return
+		}
+		m.info = "cannot copy " + what + ": " + err.Error()
+		return
+	}
+	m.info = "copied " + what + " to clipboard"
 }
 
 // handlePagerKey drives modePager: scrolling the full scrollback buffer, searching
@@ -1182,8 +1213,7 @@ func (m Model) handlePagerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "y":
 		text := strings.Join(m.pagerLines, "\n")
-		_ = clipboard.Write(text)
-		m.info = fmt.Sprintf("copied %d lines to clipboard", len(m.pagerLines))
+		m.copy(text, fmt.Sprintf("%d lines", len(m.pagerLines)))
 		return m, nil
 	}
 

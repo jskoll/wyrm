@@ -92,7 +92,20 @@ func (f *fakeRunner) Run(args ...string) (string, error) {
 			}
 			return strings.Join(lines, "\n"), nil
 		}
-		return f.listOutput, nil
+		// The fuller sessions.List format. A fixture written as the short
+		// "id|name" pair is padded out to it, so one listOutput can serve both
+		// consumers — several tests exercise a verb that calls each in turn.
+		var lines []string
+		for _, line := range strings.Split(f.listOutput, "\n") {
+			if line == "" {
+				continue
+			}
+			if parts := strings.Split(line, "|"); len(parts) == 2 {
+				line = parts[0] + "|1|0|0|" + parts[1]
+			}
+			lines = append(lines, line)
+		}
+		return strings.Join(lines, "\n"), nil
 	case "display-message":
 		return f.displayMessageOutput, nil
 	case "list-windows":
@@ -1686,5 +1699,144 @@ func TestRunRestartAllDryRun(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "Restarting session alpha") {
 		t.Errorf("stdout = %q, want Restarting session alpha header", stdout.String())
+	}
+}
+
+// setupWildcardProject writes a [[wildcard]] template covering base/<name> and
+// returns the matched directory. The template's own root = "." is a
+// placeholder — the matched directory is the project's real root.
+func setupWildcardProject(t *testing.T, name string) string {
+	t.Helper()
+	settingsPath, err := config.SettingsPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(settingsPath) })
+
+	base := t.TempDir()
+	matched := filepath.Join(base, name)
+	if err := os.MkdirAll(matched, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The template deliberately lives in a directory with a different
+	// basename: loading it by path names the session after *this* directory,
+	// which is the bug being guarded against.
+	tmplDir := filepath.Join(t.TempDir(), "templates")
+	if err := os.MkdirAll(tmplDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	template := filepath.Join(tmplDir, "tmpl.wyrm.toml")
+	if err := os.WriteFile(template, []byte("[session]\nroot = \".\"\n\n[[windows]]\nname = \"w\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := "[[wildcard]]\npattern = \"" + filepath.Join(base, "*") + "\"\nconfig = \"" + template + "\"\n"
+	if err := os.WriteFile(settingsPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return matched
+}
+
+// Every teardown path has to resolve a wildcard project the same way the start
+// path does. Three of them loaded the template by path and lost the matched
+// directory, so the session name came from the template's own folder:
+// `wyrm kill widget` reported `session "templates" is not running`, and
+// `wyrm restart -all` built a spurious session called "templates" rooted in the
+// config directory while leaving the real one untouched.
+func TestWildcardProjectTeardownUsesTheMatchedDirectory(t *testing.T) {
+	t.Run("kill by name", func(t *testing.T) {
+		setupWildcardProject(t, "widget")
+		chdir(t, t.TempDir())
+
+		r := &fakeRunner{listOutput: "$1|widget"}
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"kill", "widget"}, &stdout, &stderr, r, func() bool { return false }, nil)
+		if code != 0 {
+			t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "killed session widget") {
+			t.Errorf("stdout = %q, want the matched project's session killed", stdout.String())
+		}
+		if strings.Contains(stderr.String(), "templates") {
+			t.Errorf("stderr = %q, resolved the template's directory instead of the project", stderr.String())
+		}
+		killed := false
+		for _, c := range r.calls {
+			if len(c) >= 3 && c[0] == "kill-session" && c[2] == "$1" {
+				killed = true
+			}
+		}
+		if !killed {
+			t.Errorf("no kill-session for $1; calls = %v", r.calls)
+		}
+	})
+
+	t.Run("restart -all", func(t *testing.T) {
+		setupWildcardProject(t, "widget")
+		chdir(t, t.TempDir())
+
+		r := &fakeRunner{listOutput: "$1|widget"}
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"restart", "-all", "-y"}, &stdout, &stderr, r, func() bool { return false }, nil)
+		if code != 0 {
+			t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+		}
+		if strings.Contains(stdout.String(), "created session templates") {
+			t.Fatalf("restart -all built a session named after the template directory: %q", stdout.String())
+		}
+		if !strings.Contains(stdout.String(), "killed session widget") {
+			t.Errorf("stdout = %q, want the real session killed", stdout.String())
+		}
+		if !strings.Contains(stdout.String(), "created session widget") {
+			t.Errorf("stdout = %q, want the real session rebuilt", stdout.String())
+		}
+	})
+}
+
+// -interval 0 reached time.NewTicker and panicked, so a typo was a stack
+// trace. It is a bad flag value like any other: exit 2.
+func TestStatusRejectsNonPositiveInterval(t *testing.T) {
+	for _, arg := range []string{"0", "-1s"} {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"status", "-w", "-interval", arg}, &stdout, &stderr, &fakeRunner{},
+			func() bool { return false }, nil)
+		if code != 2 {
+			t.Errorf("-interval %s: exit code = %d, want 2", arg, code)
+		}
+		if !strings.Contains(stderr.String(), "-interval must be positive") {
+			t.Errorf("-interval %s: stderr = %q, want an explanation", arg, stderr.String())
+		}
+	}
+}
+
+// There was no spelling of `wyrm send` that could type text starting with "-":
+// tmux read it as more send-keys flags.
+func TestSendLeadingDashText(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		args, want []string
+	}{
+		{"bare", []string{"send", "sess", "-n hello"}, []string{"send-keys", "-t", "$1", "-l", "--", "-n hello"}},
+		{"explicit terminator", []string{"send", "sess", "--", "-n", "hello"}, []string{"send-keys", "-t", "$1", "-l", "--", "-n hello"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &fakeRunner{listOutput: "$1|sess"}
+			var stdout, stderr bytes.Buffer
+			code := run(tc.args, &stdout, &stderr, r, func() bool { return false }, nil)
+			if code != 0 {
+				t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+			}
+			found := false
+			for _, c := range r.calls {
+				if strings.Join(c, " ") == strings.Join(tc.want, " ") {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("want call %v, got %v", tc.want, r.calls)
+			}
+		})
 	}
 }

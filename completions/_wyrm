@@ -34,6 +34,7 @@ _wyrm() {
         'init:scaffold a project config interactively or from a template'
         'selfupdate:download and install the latest release'
         'setup-tmux:generate or append recommended tmux popup configuration'
+        'doctor:check tmux, settings, configs, and optional tools'
         'version:print version and exit'
         'help:show help'
     )
@@ -70,6 +71,15 @@ _wyrm() {
                         '-yes[skip confirmation prompt]' \
                         '-y[skip confirmation prompt]' \
                         '-n[dry run]'
+                    ;;
+                doctor)
+                    _arguments '-strict[exit non-zero for warnings as well as errors]'
+                    ;;
+                clone)
+                    _arguments '-no-start[clone without starting a session]' \
+                        '-n[clone without starting a session]' \
+                        '-yes[start without confirming the config'"'"'s shell commands]' \
+                        '-y[start without confirming the config'"'"'s shell commands]'
                     ;;
                 save)
                     _arguments '-config[config file path]:config file:->configs' \

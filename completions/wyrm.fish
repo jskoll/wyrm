@@ -15,7 +15,7 @@
 # not "--config"), hence "-o" (old-style option) below rather than fish's
 # usual "-l" (GNU-style long option).
 
-set -l subcommands up restart kill pick tui save edit validate status send setup-tmux list list-configs migrate-config clone init selfupdate version help
+set -l subcommands up restart kill pick tui save edit validate status send setup-tmux list list-configs migrate-config clone init selfupdate doctor version help
 
 # Don't fall back to filename completion.
 complete -c wyrm -f
@@ -38,6 +38,7 @@ complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a clone -d '
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a init -d 'scaffold a new config interactively or from a template'
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a selfupdate -d 'download and install the latest release'
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a setup-tmux -d 'generate or append recommended tmux popup configuration'
+complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a doctor -d 'check tmux, settings, configs, and optional tools'
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a version -d 'print version and exit'
 complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a help -d 'show help'
 # ...and running session names (bare `wyrm <name>` attaches by name).
@@ -68,6 +69,11 @@ complete -c wyrm -n '__fish_seen_subcommand_from status' -o interval -d 'polling
 complete -c wyrm -n '__fish_seen_subcommand_from list' -o format -d 'output format' -x -a 'table json toml names'
 complete -c wyrm -n '__fish_seen_subcommand_from selfupdate' -o check -d 'report an available update without installing it'
 complete -c wyrm -n '__fish_seen_subcommand_from selfupdate' -o version -d 'install this version instead of the latest' -x
+complete -c wyrm -n '__fish_seen_subcommand_from doctor' -o strict -d 'exit non-zero for warnings as well as errors'
+complete -c wyrm -n '__fish_seen_subcommand_from clone' -o no-start -d 'clone without starting a session'
+complete -c wyrm -n '__fish_seen_subcommand_from clone' -o n -d 'clone without starting a session'
+complete -c wyrm -n '__fish_seen_subcommand_from clone' -o yes -d 'start without confirming the config\'s shell commands'
+complete -c wyrm -n '__fish_seen_subcommand_from clone' -o y -d 'start without confirming the config\'s shell commands'
 complete -c wyrm -n '__fish_seen_subcommand_from send' -o l -d 'send keystrokes literally without translation'
 complete -c wyrm -n '__fish_seen_subcommand_from send' -o literal -d 'send keystrokes literally without translation'
 complete -c wyrm -n '__fish_seen_subcommand_from send' -o n -d 'do not append Enter/newline to the command'

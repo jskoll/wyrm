@@ -95,9 +95,10 @@ wyrm list                   # list running tmux sessions non-interactively
 wyrm list-configs           # list candidate config file paths (used by shell completion)
 wyrm migrate-config         # move the local config into the shared config directory
 wyrm init                   # scaffold a project config interactively or with -template (-force)
-wyrm clone REPO [DEST]      # git clone, then build (and attach to) a session for it
+wyrm clone REPO [DEST]      # git clone, then confirm and build a session for it (-y, -no-start)
 wyrm selfupdate             # download and install the latest release (-check, -version V)
 wyrm setup-tmux             # generate or append recommended tmux popup configuration (-a)
+wyrm doctor                 # check tmux, settings, configs, and optional tools (-strict)
 wyrm version                # print version
 wyrm help                   # usage overview
 ```
@@ -211,6 +212,23 @@ in it" in one command instead of `git clone` + `cd` + `wyrm`:
 wyrm clone git@github.com:jskoll/wyrm.git       # clones into ./wyrm, same as git's own default
 wyrm clone git@github.com:jskoll/wyrm.git work  # clones into ./work instead
 ```
+
+A cloned repository is the one input you have not read yet, so before starting
+the session wyrm lists every hook and pane command the config would run and
+asks whether to go ahead:
+
+```console
+$ wyrm clone https://example.com/someone-elses-repo.git
+wyrm: this config runs shell commands:
+  on_project_start = curl https://example.com/install.sh | sh
+  window dev command = npm run dev
+Start the session and run them? (y/N):
+```
+
+Declining leaves the clone on disk and starts nothing. `-y` skips the prompt,
+and `-no-start` (`-n`) clones without resolving a config at all. A
+non-interactive run (no terminal on stdin) declines rather than running
+unattended.
 
 It needs `git` on `PATH` — the only other place wyrm depends on a binary
 besides tmux, and only for this one explicit subcommand, never by default.
@@ -588,6 +606,43 @@ comments — those are yours to add by hand afterward, e.g. with `wyrm edit`.
 Like `migrate-config`, `save` refuses to overwrite an existing config
 rather than silently discarding hooks or comments you've already written —
 remove or rename the file first if you want to re-save over it.
+
+## Diagnosing a setup
+
+`wyrm doctor` checks everything wyrm depends on and reports anything that is
+broken — or, more usefully, anything that is quietly doing nothing:
+
+```console
+$ wyrm doctor
+ok    tmux             3.5a at /opt/homebrew/bin/tmux
+ok    tmux server      default server, 4 sessions running
+warn  settings         ~/.config/wyrm/config.toml (1 ignored key)
+                       → unknown key "tui.mosue" — it is ignored (a typo?)
+ok    storage          shared → ~/.config/wyrm/settings (7 configs)
+ok    discovery        upward (searches parent directories up to a git root)
+ok    wildcard[0]      "~/code/*" → 12 directories
+warn  wildcard[1]      "~/work/**" matches no directories
+                       → check the pattern; "*" matches one path segment, "/**" recurses
+ok    config           .wyrm.toml → session "api" in ~/code/api
+err   agent            tui.agent.profiles[0]: busy_pattern "(": error parsing regexp
+                       → agent markers stay off until this compiles
+ok    editor           nvim
+warn  clipboard        no backend found
+                       → install one of wl-copy, xclip, xsel; until then "y" in the TUI cannot copy
+
+1 error, 3 warnings
+```
+
+Most of what wyrm gets wrong, it gets wrong silently: a `[[wildcard]]` pattern
+that matches nothing, a misspelled settings key that is therefore ignored, an
+agent `busy_pattern` that fails to compile and disables the markers, a theme
+file that stops the TUI starting, a tmux too old for the `size` values in your
+config, or no clipboard tool for `y` to use. Each looks identical to "the
+feature just isn't working".
+
+It only reads — nothing is repaired or written. It exits non-zero if anything
+is an error; `-strict` also fails on warnings, which makes it usable as a CI
+check alongside `wyrm validate -strict`.
 
 ## Shell completion
 

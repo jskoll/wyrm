@@ -29,3 +29,44 @@ supported way to inspect an unfamiliar config.
 Before 0.6.0, `-n` printed the hooks' tmux commands but ran `on_project_start`
 for real, which defeated the point. If you are on an older build, read the
 config itself rather than relying on `-n`.
+
+## Release signing
+
+Release archives are verified by `wyrm selfupdate` in two steps: the SHA-256 in
+`checksums.txt` proves the download was not corrupted, and a minisign signature
+over `checksums.txt` proves the release came from the maintainers. The second
+step is the one that matters if the release channel is ever compromised.
+
+The public key lives in the repository at `internal/selfupdate/signing.pub` and
+is compiled into every binary; only the secret key is a repository secret.
+
+**Until a key is generated, `internal/selfupdate/signing.pub` is a placeholder
+and no release can be tagged.** To set it up:
+
+```sh
+minisign -G -p signing.pub -s minisign.key
+cp signing.pub internal/selfupdate/signing.pub   # commit this
+```
+
+Then add two repository secrets:
+
+| Secret | Value |
+| --- | --- |
+| `MINISIGN_SECRET_KEY` | the full contents of `minisign.key` |
+| `MINISIGN_PASSWORD` | the password chosen at generation (empty if `-W` was used) |
+
+The release workflow verifies that the committed public key matches the signing
+key before goreleaser runs, so a mismatched pair fails the tag rather than
+publishing a release whose own `selfupdate` would reject it. CI signs every pull
+request with a throwaway key and asserts `checksums.txt.minisig` is produced, so
+the signing path cannot silently stop working between releases.
+
+A binary built before a key was configured still updates, but prints a warning
+saying the release was not signature-verified.
+
+### Verifying a release by hand
+
+```sh
+minisign -Vm checksums.txt -p internal/selfupdate/signing.pub
+sha256sum -c --ignore-missing checksums.txt
+```

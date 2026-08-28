@@ -133,16 +133,47 @@ If
 falls under a configured
 .BR [[wildcard]] ,
 that template is used instead.
+.IP
+Because a freshly cloned config has not been read yet, wyrm lists every
+lifecycle hook and pane command it would run and asks before starting the
+session. Declining leaves the clone on disk and starts nothing; a
+non-interactive run declines. Use
+.B \-y
+to skip the prompt, or
+.B \-no\-start
+.RB ( \-n )
+to clone without resolving a config at all.
 .TP
 .BI "wyrm selfupdate [\-check] [\-version " VERSION ]
-Download the latest wyrm release from GitHub, verify it against the
-release's published checksums, and replace the running binary in place.
+Download the latest wyrm release from GitHub, verify it, and replace the
+running binary in place. Verification is in two parts: the SHA\-256 in
+.B checksums.txt
+proves the download was not corrupted, and a minisign signature over
+.B checksums.txt
+proves the release came from the maintainers. A build with a signing key
+compiled in refuses a release that is not signed; a build without one warns
+that the release was not signature\-verified.
 .B \-check
 reports whether an update is available without installing it.
 .BI \-version " VERSION"
 installs that version instead of the latest.
 Refuses if the running binary looks package-managed (Homebrew, dpkg, rpm,
 or pacman/AUR); use that package manager's own upgrade command instead.
+.TP
+.B "wyrm doctor [\-strict]"
+Check wyrm's environment and configuration and report anything broken or
+silently doing nothing: the tmux binary and its version, the global settings
+file and any keys in it that were ignored, where project configs are looked
+for, each
+.BR [[wildcard]]
+pattern and how many directories it matches, the config this directory
+resolves to, whether the agent profiles and the TUI theme compile, and which
+optional tools ($EDITOR, a clipboard backend, zoxide) are available.
+.IP
+Exits non-zero if anything is an error;
+.B \-strict
+also fails on warnings, for use in CI. It only reads state — nothing is
+repaired or written.
 .TP
 .B wyrm version
 Print the version and exit.

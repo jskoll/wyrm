@@ -60,34 +60,22 @@ func (a *app) status(args []string) error {
 	}
 
 	watch := *watchLong || *watchShort
+	// time.NewTicker panics on a non-positive duration, so a plain typo
+	// (`-interval 0`) used to reach the user as a stack trace. Exit 2, like
+	// every other bad flag value.
+	if watch && *interval <= 0 {
+		return usageErrf("-interval must be positive, got %s", *interval)
+	}
 
-	settings, _ := config.LoadSettings()
-	var profiles []agent.Profile
-	if settings != nil {
-		configured := settings.AgentProfiles()
-		if len(configured) == 0 {
-			def := agent.DefaultProfile()
-			if extra := settings.AgentCommands(); len(extra) > 0 {
-				def.Commands = extra
-			}
-			profiles = []agent.Profile{def}
-		} else {
-			for i, p := range configured {
-				compiled, err := agent.Profile{
-					Commands:    p.Commands,
-					Busy:        p.Busy,
-					Blocked:     p.Blocked,
-					Idle:        p.Idle,
-					BusyPattern: p.BusyPattern,
-				}.Compile()
-				if err != nil {
-					return fmt.Errorf("agent profile %d: %w", i, err)
-				}
-				profiles = append(profiles, compiled)
-			}
-		}
-	} else {
-		profiles = []agent.Profile{agent.DefaultProfile()}
+	// The error was previously discarded here, so a malformed settings file
+	// silently produced "no active agents" with no explanation.
+	settings, err := config.LoadSettings()
+	if err != nil {
+		return err
+	}
+	profiles, err := agent.ProfilesFrom(settings)
+	if err != nil {
+		return err
 	}
 
 	if !watch {
