@@ -679,11 +679,13 @@ func (k *keyBatch) flush(r tmux.Runner, stderr io.Writer) {
 	// them tmux first looks the argument up as a key name, so a command that
 	// happens to be one ("up", "space", "tab", "c-c") is sent as that key
 	// instead of typed, and a command starting with "-" is taken for a flag.
-	// Enter is then sent separately, as an actual key.
+	// tmux.LiteralText covers the one thing "-l --" does not: a trailing ";",
+	// which tmux's argument parser strips as a command separator. Enter is then
+	// sent separately, as an actual key.
 	cmds := make([][]string, 0, len(k.sends)*2)
 	for _, s := range k.sends {
 		cmds = append(cmds,
-			[]string{"send-keys", "-t", s.target, "-l", "--", s.command},
+			[]string{"send-keys", "-t", s.target, "-l", "--", tmux.LiteralText(s.command)},
 			[]string{"send-keys", "-t", s.target, "Enter"})
 	}
 
