@@ -72,7 +72,9 @@ func WriteWithOSC(text string, w io.Writer) error {
 func backend() (name string, args []string, err error) {
 	switch runtime.GOOS {
 	case "darwin":
-		return "pbcopy", nil, nil
+		if _, err := exec.LookPath("pbcopy"); err == nil {
+			return "pbcopy", nil, nil
+		}
 	case "linux", "freebsd", "openbsd", "netbsd":
 		if os.Getenv("WAYLAND_DISPLAY") != "" {
 			if _, err := exec.LookPath("wl-copy"); err == nil {
@@ -86,7 +88,9 @@ func backend() (name string, args []string, err error) {
 			return "xsel", []string{"--clipboard", "--input"}, nil
 		}
 	case "windows":
-		return "powershell", []string{"-NoProfile", "-Command", "Set-Clipboard -Value $input"}, nil
+		if _, err := exec.LookPath("powershell"); err == nil {
+			return "powershell", []string{"-NoProfile", "-Command", "Set-Clipboard -Value $input"}, nil
+		}
 	}
 	return "", nil, ErrNoBackend
 }

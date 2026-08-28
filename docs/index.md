@@ -145,6 +145,7 @@ warn  settings         ~/.config/wyrm/config.toml (1 ignored key)
                        → unknown key "tui.mosue" — it is ignored (a typo?)
 ok    storage          shared → ~/.config/wyrm/settings (7 configs)
 ok    discovery        upward (searches parent directories up to a git root)
+ok    wildcard[0]      "~/code/*" → 12 directories
 warn  wildcard[1]      "~/work/**" matches no directories
                        → check the pattern; "*" matches one path segment, "/**" recurses
 ok    config           .wyrm.toml → session "api" in ~/code/api

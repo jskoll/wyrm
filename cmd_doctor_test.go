@@ -59,6 +59,11 @@ func (r *tmuxVersionRunner) Run(args ...string) (string, error) {
 	return r.fakeRunner.Run(args...)
 }
 
+// Nothing misconfigured means nothing to fix. This deliberately does not
+// assert the "no problems found" summary: whether a clipboard backend or an
+// $EDITOR exists is a property of the machine, and CI runners have neither, so
+// a clean checkout legitimately reports warnings there. What has to hold
+// everywhere is that no *error* is invented and every check is accounted for.
 func TestDoctorCleanEnvironment(t *testing.T) {
 	doctorEnv(t)
 	chdir(t, t.TempDir())
@@ -67,8 +72,11 @@ func TestDoctorCleanEnvironment(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0\n%s", code, out)
 	}
-	if !strings.Contains(out, "no problems found") {
-		t.Errorf("want a clean summary, got:\n%s", out)
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "err ") {
+			t.Errorf("nothing is misconfigured, so nothing should be an error:\n%s", out)
+			break
+		}
 	}
 	// The report is the point: it has to say what it looked at even when
 	// everything is fine.
@@ -76,6 +84,21 @@ func TestDoctorCleanEnvironment(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("report is missing the %q line:\n%s", want, out)
 		}
+	}
+}
+
+// `tmux -V` answering with nothing rendered as " at /path (unrecognized
+// version)", leading space and all.
+func TestDoctorTmuxSilentVersion(t *testing.T) {
+	doctorEnv(t)
+	chdir(t, t.TempDir())
+
+	out, _ := runDoctor(t, &fakeRunner{})
+	if !strings.Contains(out, "reported no version") {
+		t.Errorf("want the empty version named as such, got:\n%s", out)
+	}
+	if strings.Contains(out, "unrecognized version") {
+		t.Errorf("an empty version is not an unrecognized one:\n%s", out)
 	}
 }
 

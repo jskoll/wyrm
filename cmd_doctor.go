@@ -97,7 +97,9 @@ func (d *doctorReport) error(name, detail string, fixes ...string) {
 	d.add(levelError, name, detail, fixes...)
 }
 
-// count returns how many findings are at least this severe.
+// count returns how many findings are at exactly this level. Levels are
+// counted separately rather than cumulatively so the summary can say
+// "1 error, 3 warnings" without the warning count swallowing the error.
 func (d *doctorReport) count(level checkLevel) int {
 	n := 0
 	for _, f := range d.findings {
@@ -236,6 +238,8 @@ func (a *app) checkTmux(d *doctorReport, settings *config.Settings) {
 	version := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out), "tmux "))
 	major, minor, ok := parseTmuxVersion(version)
 	switch {
+	case !ok && version == "":
+		d.note("tmux", fmt.Sprintf("%s (reported no version)", tildePath(path)))
 	case !ok:
 		d.note("tmux", fmt.Sprintf("%s at %s (unrecognized version)", version, tildePath(path)))
 	case major < minTmuxMajor || (major == minTmuxMajor && minor < minTmuxMinor):
@@ -328,7 +332,8 @@ func (a *app) checkSettings(d *doctorReport, settings *config.Settings) {
 		return
 	}
 	// An unknown key is not a parse error, so it takes effect as "nothing at
-	// all" — the [[widcard]] typo that parses clean and never matches.
+	// all" — e.g. a "[[widcard]]" section (note the missing "l"), which parses
+	// clean and then never matches anything.
 	d.warn("settings", fmt.Sprintf("%s (%s)", tildePath(path), plural(len(warnings), "ignored key")),
 		warnings...)
 }
@@ -467,6 +472,9 @@ func (a *app) checkAgentNotify(d *doctorReport, settings *config.Settings) {
 		d.note("agent notify", "disabled")
 		return
 	}
+	// Deliberately exclusive, mirroring agent.Dispatch: a configured command
+	// returns before the desktop notification, so listing both here would
+	// promise a desktop popup that never arrives.
 	var channels []string
 	if settings.AgentNotifyCommand() != "" {
 		channels = append(channels, "command")
