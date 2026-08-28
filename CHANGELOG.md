@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-28
+
 ### Added
 - Documentation for three shipped commands that had none beyond their one-line usage entry: `wyrm status` (agent status across sessions, its five output formats, `--watch`, and status-bar wiring), `wyrm send` (targets, `-r`/`-l`, sending text that starts with `-`), and `wyrm setup-tmux` (where `-a` writes, and what it validates).
 - `wyrm doctor` checks wyrm's environment and configuration in one place and reports anything broken or silently doing nothing: the tmux binary and whether its version is new enough for the `size` values in a config, the settings file and any keys in it that were ignored, where project configs are looked for, each `[[wildcard]]` pattern and how many directories it matches, the config the current directory resolves to, whether the agent profiles and TUI theme compile, and which optional tools ($EDITOR, a clipboard backend, zoxide) are present. Exits non-zero on errors; `-strict` also fails on warnings. It only reads — nothing is repaired.
@@ -20,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Security
 - `wyrm clone` now shows the shell a freshly cloned repository's config would run and asks before running it, instead of printing a warning that named the flag you needed *before* you ran the command and then executing the hooks anyway. The listing covers every hook and pane command, not just `on_project_start`; a non-interactive run declines rather than proceeding unattended; `-y` skips the prompt.
+- `wyrm selfupdate` now **refuses** a release whose `checksums.txt` is unsigned, or signed by a key other than the one compiled in, instead of warning and continuing. A release signing key exists as of this version, so the enforcement branch is reachable for the first time — every build from 1.2.0 onward verifies before it replaces anything.
 - Release archives are signed. Verification was previously unreachable: no public key was ever assigned, `.goreleaser.yaml` published no signature, and the checksum-only path could detect a corrupted download but not a tampered release. `checksums.txt` is now signed with minisign, the public key is committed at `internal/selfupdate/signing.pub` and compiled into the binary, and CI signs every pull request with a throwaway key and asserts the signature asset exists. See [SECURITY.md](SECURITY.md) for the one-time key setup.
 - Signature verification now handles minisign's prehashed `ED` algorithm, which is what minisign produces by default — a genuine signature would have failed to verify even once a key was embedded. Key IDs are checked, unknown algorithms are rejected, and the parser is tested against artifacts from the real `minisign` binary. A build with a key refuses an unsigned release; a build without one says so rather than implying it verified something.
 - `on_project_detach` is no longer subject to tmux's format expansion. `run-shell` expands its argument whatever the quoting, so a hook containing `#{...}` was silently rewritten and `#(...)` was executed by tmux at expansion time. Hooks now reach the shell verbatim.
@@ -767,7 +770,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/jskoll/wyrm/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/jskoll/wyrm/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/jskoll/wyrm/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/jskoll/wyrm/compare/v0.8.0...v1.0.0
