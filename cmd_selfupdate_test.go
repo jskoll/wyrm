@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -65,9 +66,44 @@ func writeRelease(w http.ResponseWriter, srvURL, tag, asset string) {
 		"tag_name": %q,
 		"assets": [
 			{"name": "checksums.txt", "browser_download_url": %q},
+			{"name": "checksums.txt.minisig", "browser_download_url": %q},
+			{"name": %q, "browser_download_url": %q}
+		]
+	}`, tag, srvURL+"/assets/checksums.txt", srvURL+"/assets/checksums.sig",
+		asset, srvURL+"/assets/archive")
+}
+
+// writeUnsignedRelease is writeRelease without the signature asset, for the
+// case a build with a key embedded must refuse.
+func writeUnsignedRelease(w http.ResponseWriter, srvURL, tag, asset string) {
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{
+		"tag_name": %q,
+		"assets": [
+			{"name": "checksums.txt", "browser_download_url": %q},
 			{"name": %q, "browser_download_url": %q}
 		]
 	}`, tag, srvURL+"/assets/checksums.txt", asset, srvURL+"/assets/archive")
+}
+
+// useTestSigningKey points DefaultSigningKey at a throwaway keypair for one
+// test and returns the private half, so a test can serve a release signed by
+// the key the binary will check against.
+//
+// Real releases are signed with the key whose public half is committed at
+// internal/selfupdate/signing.pub; a test cannot have that secret, so it
+// substitutes its own pair rather than shipping a fixture signed by a key
+// nobody can reproduce.
+func useTestSigningKey(t *testing.T) ed25519.PrivateKey {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := selfupdate.DefaultSigningKey
+	selfupdate.DefaultSigningKey = selfupdate.SigningKeyFromEd25519(pub)
+	t.Cleanup(func() { selfupdate.DefaultSigningKey = prev })
+	return priv
 }
 
 // selfupdateServer serves a fake GitHub release for tag, plus an archive
@@ -76,25 +112,48 @@ func writeRelease(w http.ResponseWriter, srvURL, tag, asset string) {
 // end to end.
 func selfupdateServer(t *testing.T, tag, binaryContents string) *httptest.Server {
 	t.Helper()
+	return selfupdateServerSigned(t, tag, binaryContents, useTestSigningKey(t))
+}
+
+// selfupdateServerSigned serves a release whose checksums.txt carries a
+// signature made by priv. Pass a nil key to serve the release unsigned.
+func selfupdateServerSigned(t *testing.T, tag, binaryContents string, priv ed25519.PrivateKey) *httptest.Server {
+	t.Helper()
 	ver := strings.TrimPrefix(tag, "v")
 	asset := assetName(ver)
 	archive := buildTestArchive(t, binaryContents)
 	sum := sha256.Sum256(archive)
 	checksums := fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), asset)
 
+	// A bare base64 Ed25519 signature over checksums.txt — one of the forms
+	// ParseSignature accepts, and the one a test can produce without
+	// reimplementing minisign's envelope. The minisign envelope itself is
+	// covered in internal/selfupdate against artifacts from the real binary.
+	var signature string
+	if priv != nil {
+		signature = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(checksums)))
+	}
+
 	mux := http.NewServeMux()
 	var srv *httptest.Server
+	release := writeRelease
+	if priv == nil {
+		release = writeUnsignedRelease
+	}
 	mux.HandleFunc("/repos/jskoll/wyrm/releases/latest", func(w http.ResponseWriter, _ *http.Request) {
-		writeRelease(w, srv.URL, tag, asset)
+		release(w, srv.URL, tag, asset)
 	})
 	mux.HandleFunc("/repos/jskoll/wyrm/releases/tags/"+tag, func(w http.ResponseWriter, _ *http.Request) {
-		writeRelease(w, srv.URL, tag, asset)
+		release(w, srv.URL, tag, asset)
 	})
 	mux.HandleFunc("/assets/archive", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(archive)
 	})
 	mux.HandleFunc("/assets/checksums.txt", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(checksums))
+	})
+	mux.HandleFunc("/assets/checksums.sig", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(signature))
 	})
 	srv = httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -530,5 +589,65 @@ func TestInstallReleaseWarnsWhenUnverifiable(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "not signed") {
 		t.Errorf("stderr = %q, want a warning that the release is unsigned", stderr.String())
+	}
+}
+
+// A build with a signing key compiled in must refuse a release that carries no
+// signature. Before a key was generated this could not be exercised at all —
+// the embedded key was a placeholder, so every release took the "unsigned,
+// warn and continue" path and the enforcement branch was dead code.
+func TestInstallReleaseRefusesUnsignedWhenKeyEmbedded(t *testing.T) {
+	useTestSigningKey(t) // a valid key is embedded...
+	srv := selfupdateServerSigned(t, "v2.0.0", "new binary contents", nil)
+	a, _, _ := testApp(srv)
+	rel, err := fetchRelease(a.httpClient, "")
+	if err != nil {
+		t.Fatalf("fetchRelease: %v", err)
+	}
+
+	path, mode := writeFakeBinary(t, "old binary contents")
+	err = a.installRelease(a.httpClient, rel, path, mode, "1.0.0")
+	if err == nil {
+		t.Fatal("want a refusal for an unsigned release when a key is embedded")
+	}
+	if !strings.Contains(err.Error(), "no signature") {
+		t.Errorf("error = %v, want it to name the missing signature", err)
+	}
+
+	// The binary on disk must be untouched: refusing has to mean refusing.
+	data, rerr := os.ReadFile(path)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if string(data) != "old binary contents" {
+		t.Errorf("binary was replaced despite the refusal: %q", data)
+	}
+}
+
+// A signature made by the wrong key is a tampered release, not a missing one,
+// and must fail loudly rather than fall back to checksums.
+func TestInstallReleaseRejectsSignatureFromAnotherKey(t *testing.T) {
+	useTestSigningKey(t)
+	_, wrongKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := selfupdateServerSigned(t, "v2.0.0", "new binary contents", wrongKey)
+	a, _, _ := testApp(srv)
+	rel, ferr := fetchRelease(a.httpClient, "")
+	if ferr != nil {
+		t.Fatalf("fetchRelease: %v", ferr)
+	}
+
+	path, mode := writeFakeBinary(t, "old binary contents")
+	if err := a.installRelease(a.httpClient, rel, path, mode, "1.0.0"); err == nil {
+		t.Fatal("want a refusal for a signature made by an unknown key")
+	}
+	data, rerr := os.ReadFile(path)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if string(data) != "old binary contents" {
+		t.Errorf("binary was replaced despite a bad signature: %q", data)
 	}
 }

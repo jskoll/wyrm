@@ -200,22 +200,27 @@ func TestVerifyChecksumsSignatureValid(t *testing.T) {
 	})
 }
 
-// The committed signing.pub is a placeholder until a real release key is
-// generated. This asserts the two states stay distinguishable — a key that
-// parses is used and enforced, one that does not disables verification loudly
-// (see app.verifyChecksumsSignature) rather than silently.
-func TestEmbeddedSigningKeyStateIsExplicit(t *testing.T) {
-	if DefaultSigningKey.Valid() {
-		if len(DefaultSigningKey.key) != ed25519.PublicKeySize {
-			t.Errorf("embedded key is marked valid but is %d bytes", len(DefaultSigningKey.key))
-		}
-		if !DefaultSigningKey.hasID {
-			t.Error("embedded key should carry a minisign key id")
-		}
-		return
+// A real release signing key is committed at signing.pub, and this insists it
+// stays that way.
+//
+// It used to tolerate either state, because the file shipped as a placeholder
+// and verification was disabled-but-loud. Now that releases are signed,
+// reverting to a placeholder would silently turn `wyrm selfupdate` back into
+// "checksums only" for every user on that build — a downgrade with no error
+// anywhere. That is worth a failing test rather than a tolerated branch.
+func TestEmbeddedSigningKeyIsReal(t *testing.T) {
+	if !DefaultSigningKey.Valid() {
+		t.Fatal("no usable key embedded: internal/selfupdate/signing.pub is missing or a placeholder, " +
+			"which silently reduces selfupdate to checksum-only verification")
 	}
-	if _, err := ParseMinisignPublicKey(signingPubFile); err == nil {
-		t.Error("signing.pub parses but DefaultSigningKey is invalid")
+	if len(DefaultSigningKey.key) != ed25519.PublicKeySize {
+		t.Errorf("embedded key is marked valid but is %d bytes", len(DefaultSigningKey.key))
+	}
+	if !DefaultSigningKey.hasID {
+		t.Error("embedded key should carry a minisign key id, so a signature naming another key is rejected")
+	}
+	if _, err := ParseMinisignPublicKey(signingPubFile); err != nil {
+		t.Errorf("signing.pub does not parse: %v", err)
 	}
 }
 
