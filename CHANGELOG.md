@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-08-28
+
 ### Added
 - `a` toggle in the TUI's Sessions panel: lists known-but-stopped projects alongside the running sessions, with `Enter` starting a stopped one. Gives `wyrm pick`, which has no Projects panel, a way to start a session rather than only attach to one.
 
@@ -730,7 +732,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/jskoll/wyrm/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/jskoll/wyrm/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/jskoll/wyrm/compare/v0.8.0...v1.0.0
 [0.8.0]: https://github.com/jskoll/wyrm/compare/v0.7.0...v0.8.0
 [0.6.2]: https://github.com/jskoll/wyrm/compare/v0.6.1...v0.6.2
