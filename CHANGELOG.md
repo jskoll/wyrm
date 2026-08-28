@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Minimum Go is now 1.25. `golang.org/x/crypto` 0.52.0 and its transitive `x/sys` and `x/text` updates all declare `go 1.25.0`, so building wyrm from source needs 1.25 or newer. A `toolchain` directive pins the patch release CI and the release build actually use: `go-version-file: go.mod` installs exactly the version named there, so without it both were built against an unpatched standard library — `govulncheck` only passed on `main` because the old `go` directive was too low to run the scanner, which quietly downloaded a current toolchain instead.
+
 ### Added
 - `wyrm doctor` checks wyrm's environment and configuration in one place and reports anything broken or silently doing nothing: the tmux binary and whether its version is new enough for the `size` values in a config, the settings file and any keys in it that were ignored, where project configs are looked for, each `[[wildcard]]` pattern and how many directories it matches, the config the current directory resolves to, whether the agent profiles and TUI theme compile, and which optional tools ($EDITOR, a clipboard backend, zoxide) are present. Exits non-zero on errors; `-strict` also fails on warnings. It only reads — nothing is repaired.
 
