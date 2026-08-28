@@ -5,7 +5,7 @@ are welcome.
 
 ## Development setup
 
-Requirements: the Go version in `go.mod` (currently 1.24) or newer, tmux 3.1+
+Requirements: the Go version in `go.mod` (currently 1.25) or newer, tmux 3.1+
 (for integration tests; 3.1 is the floor for `split-window -l N%`), and
 optionally [golangci-lint](https://golangci-lint.run/).
 
