@@ -1,6 +1,8 @@
 module github.com/jskoll/wyrm
 
-go 1.24.2
+go 1.25.0
+
+toolchain go1.25.14
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
@@ -9,7 +11,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/muesli/termenv v0.16.0
 	github.com/pelletier/go-toml/v2 v2.4.3
-	golang.org/x/crypto v0.36.0
+	golang.org/x/crypto v0.52.0
 )
 
 require (
@@ -29,6 +31,6 @@ require (
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	golang.org/x/sys v0.38.0 // indirect
-	golang.org/x/text v0.23.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 )
