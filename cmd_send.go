@@ -69,7 +69,7 @@ func (a *app) send(args []string) error {
 	// as more send-keys flags, and there was no spelling of `wyrm send` that
 	// could type "-n hello" into a pane. See session.keyBatch.flush, which has
 	// always got this right.
-	out, err := a.runner.Run("send-keys", "-t", targetID, "-l", "--", text)
+	out, err := a.runner.Run("send-keys", "-t", targetID, "-l", "--", tmux.LiteralText(text))
 	if err != nil {
 		return fmt.Errorf("sending keys to %q (%s): %w", target, targetID, tmux.CmdErr(err, out))
 	}

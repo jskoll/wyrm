@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -277,7 +276,7 @@ func GetTemplate(templateName, sessionName, sessionRoot string) (string, error) 
 	if sessionRoot == "" {
 		sessionRoot = "."
 	}
-	return fmt.Sprintf(tmpl.Template, strconv.Quote(sessionName), strconv.Quote(sessionRoot)), nil
+	return fmt.Sprintf(tmpl.Template, tomlQuote(sessionName), tomlQuote(sessionRoot)), nil
 }
 
 // GenerateCustomConfig formats a custom wyrm configuration from window specifications.
@@ -302,8 +301,8 @@ func GenerateCustomConfig(sessionName, sessionRoot string, windows []WindowSpec)
 	sb.WriteString("# Wyrm session configuration\n")
 	sb.WriteString("# Run 'wyrm' to start this session.\n\n")
 	sb.WriteString("[session]\n")
-	_, _ = fmt.Fprintf(&sb, "name = %s\n", strconv.Quote(sessionName))
-	_, _ = fmt.Fprintf(&sb, "root = %s\n\n", strconv.Quote(sessionRoot))
+	_, _ = fmt.Fprintf(&sb, "name = %s\n", tomlQuote(sessionName))
+	_, _ = fmt.Fprintf(&sb, "root = %s\n\n", tomlQuote(sessionRoot))
 	sb.WriteString("# Lifecycle hooks (optional):\n")
 	sb.WriteString("# on_project_start = \"echo 'Starting up...'\"\n")
 	sb.WriteString("# on_project_exit = \"echo 'Cleaning up...'\"\n\n")
@@ -319,7 +318,7 @@ func GenerateCustomConfig(sessionName, sessionRoot string, windows []WindowSpec)
 		}
 
 		sb.WriteString("[[windows]]\n")
-		_, _ = fmt.Fprintf(&sb, "name = %s\n\n", strconv.Quote(winName))
+		_, _ = fmt.Fprintf(&sb, "name = %s\n\n", tomlQuote(winName))
 
 		cmdAt := func(idx int) string {
 			if idx < len(win.Commands) {
@@ -333,7 +332,7 @@ func GenerateCustomConfig(sessionName, sessionRoot string, windows []WindowSpec)
 			c1 := cmdAt(0)
 			sb.WriteString("  [[windows.splits]]\n")
 			if c1 != "" {
-				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", strconv.Quote(c1))
+				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", tomlQuote(c1))
 			} else {
 				sb.WriteString("  # command = \"\"\n\n")
 			}
@@ -342,7 +341,7 @@ func GenerateCustomConfig(sessionName, sessionRoot string, windows []WindowSpec)
 			c1, c2 := cmdAt(0), cmdAt(1)
 			sb.WriteString("  [[windows.splits]]\n")
 			if c1 != "" {
-				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", strconv.Quote(c1))
+				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", tomlQuote(c1))
 			} else {
 				sb.WriteString("  # command = \"\"\n\n")
 			}
@@ -350,7 +349,7 @@ func GenerateCustomConfig(sessionName, sessionRoot string, windows []WindowSpec)
 			sb.WriteString("  type = \"h\"          # split right: 50% width\n")
 			sb.WriteString("  size = 50\n")
 			if c2 != "" {
-				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", strconv.Quote(c2))
+				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", tomlQuote(c2))
 			} else {
 				sb.WriteString("\n")
 			}
@@ -359,7 +358,7 @@ func GenerateCustomConfig(sessionName, sessionRoot string, windows []WindowSpec)
 			c1, c2 := cmdAt(0), cmdAt(1)
 			sb.WriteString("  [[windows.splits]]\n")
 			if c1 != "" {
-				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", strconv.Quote(c1))
+				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", tomlQuote(c1))
 			} else {
 				sb.WriteString("  # command = \"\"\n\n")
 			}
@@ -367,7 +366,7 @@ func GenerateCustomConfig(sessionName, sessionRoot string, windows []WindowSpec)
 			sb.WriteString("  type = \"v\"          # split below: 50% height\n")
 			sb.WriteString("  size = 50\n")
 			if c2 != "" {
-				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", strconv.Quote(c2))
+				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", tomlQuote(c2))
 			} else {
 				sb.WriteString("\n")
 			}
@@ -376,7 +375,7 @@ func GenerateCustomConfig(sessionName, sessionRoot string, windows []WindowSpec)
 			c1, c2, c3 := cmdAt(0), cmdAt(1), cmdAt(2)
 			sb.WriteString("  [[windows.splits]]\n")
 			if c1 != "" {
-				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", strconv.Quote(c1))
+				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", tomlQuote(c1))
 			} else {
 				sb.WriteString("  # command = \"\"\n\n")
 			}
@@ -384,7 +383,7 @@ func GenerateCustomConfig(sessionName, sessionRoot string, windows []WindowSpec)
 			sb.WriteString("  type = \"h\"          # split right: 35% width\n")
 			sb.WriteString("  size = 35\n")
 			if c2 != "" {
-				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", strconv.Quote(c2))
+				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", tomlQuote(c2))
 			} else {
 				sb.WriteString("\n")
 			}
@@ -392,7 +391,7 @@ func GenerateCustomConfig(sessionName, sessionRoot string, windows []WindowSpec)
 			sb.WriteString("    type = \"v\"        # split below: 50% height\n")
 			sb.WriteString("    size = 50\n")
 			if c3 != "" {
-				_, _ = fmt.Fprintf(&sb, "    command = %s\n\n", strconv.Quote(c3))
+				_, _ = fmt.Fprintf(&sb, "    command = %s\n\n", tomlQuote(c3))
 			} else {
 				sb.WriteString("\n")
 			}
@@ -401,7 +400,7 @@ func GenerateCustomConfig(sessionName, sessionRoot string, windows []WindowSpec)
 			c1, c2, c3 := cmdAt(0), cmdAt(1), cmdAt(2)
 			sb.WriteString("  [[windows.splits]]\n")
 			if c1 != "" {
-				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", strconv.Quote(c1))
+				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", tomlQuote(c1))
 			} else {
 				sb.WriteString("  # command = \"\"\n\n")
 			}
@@ -409,7 +408,7 @@ func GenerateCustomConfig(sessionName, sessionRoot string, windows []WindowSpec)
 			sb.WriteString("  type = \"v\"          # split below: 40% height\n")
 			sb.WriteString("  size = 40\n")
 			if c2 != "" {
-				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", strconv.Quote(c2))
+				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", tomlQuote(c2))
 			} else {
 				sb.WriteString("\n")
 			}
@@ -417,7 +416,7 @@ func GenerateCustomConfig(sessionName, sessionRoot string, windows []WindowSpec)
 			sb.WriteString("    type = \"h\"        # split right: 50% width\n")
 			sb.WriteString("    size = 50\n")
 			if c3 != "" {
-				_, _ = fmt.Fprintf(&sb, "    command = %s\n\n", strconv.Quote(c3))
+				_, _ = fmt.Fprintf(&sb, "    command = %s\n\n", tomlQuote(c3))
 			} else {
 				sb.WriteString("\n")
 			}
@@ -427,7 +426,7 @@ func GenerateCustomConfig(sessionName, sessionRoot string, windows []WindowSpec)
 			c1 := cmdAt(0)
 			sb.WriteString("  [[windows.splits]]\n")
 			if c1 != "" {
-				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", strconv.Quote(c1))
+				_, _ = fmt.Fprintf(&sb, "  command = %s\n\n", tomlQuote(c1))
 			} else {
 				sb.WriteString("  # command = \"\"\n\n")
 			}
@@ -435,4 +434,52 @@ func GenerateCustomConfig(sessionName, sessionRoot string, windows []WindowSpec)
 	}
 
 	return strings.TrimRight(sb.String(), "\n") + "\n"
+}
+
+// tomlQuote renders s as a TOML basic string.
+//
+// strconv.Quote was used here, and Go's string escaping is not TOML's. TOML
+// accepts \b \t \n \f \r \" \\ and \uXXXX/\UXXXXXXXX — and nothing else. Go
+// additionally emits \a, \v and \xNN, none of which are legal, so a session
+// name or pane command carrying a bell, a vertical tab, or an invalid UTF-8
+// byte produced a config the loader then rejected. `wyrm init` validates its
+// own output before writing, so this failed closed rather than writing a
+// corrupt file — but the user only found out after answering every prompt,
+// with a parse error that named none of it.
+//
+// Bytes that are not valid UTF-8 become U+FFFD: a TOML string has to be valid
+// UTF-8, so there is nothing faithful to emit, and substituting is better than
+// failing the wizard on a stray byte nobody meant to type.
+func tomlQuote(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 2)
+	b.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '"':
+			b.WriteString(`\"`)
+		case '\\':
+			b.WriteString(`\\`)
+		case '\b':
+			b.WriteString(`\b`)
+		case '\t':
+			b.WriteString(`\t`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\f':
+			b.WriteString(`\f`)
+		case '\r':
+			b.WriteString(`\r`)
+		default:
+			// The remaining controls have no TOML shorthand, and DEL is not
+			// printable either; \u is the only legal spelling for both.
+			if r < 0x20 || r == 0x7f {
+				fmt.Fprintf(&b, `\u%04X`, r)
+				continue
+			}
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
 }

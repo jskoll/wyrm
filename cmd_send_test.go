@@ -125,3 +125,29 @@ func TestSendExecution(t *testing.T) {
 		}
 	})
 }
+
+// tmux strips a trailing ";" from an argument as its command separator, so
+// `wyrm send db "SELECT 1;"` typed the query and never terminated it. The
+// statement then sat unexecuted in the REPL — the failure is invisible in a
+// shell, where a trailing ";" is a no-op, and total in psql or sqlite3.
+func TestSendPreservesTrailingSemicolon(t *testing.T) {
+	r := &sendTestRunner{}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"send", "myproj", "SELECT 1;"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	var sent string
+	for _, c := range r.calls {
+		if strings.HasPrefix(c, "send-keys ") && strings.Contains(c, " -l -- ") {
+			sent = c[strings.Index(c, " -l -- ")+len(" -l -- "):]
+		}
+	}
+	if sent == "" {
+		t.Fatalf("no literal send-keys issued; calls = %v", r.calls)
+	}
+	if !strings.HasPrefix(sent, "SELECT 1;") {
+		t.Errorf("sent %q, want the semicolon preserved", sent)
+	}
+}
