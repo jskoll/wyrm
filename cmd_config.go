@@ -94,7 +94,7 @@ func (a *app) migrateConfig(args []string) error {
 		// Name the project that owns it. "already exists, remove it first"
 		// gave no hint that a different directory had claimed the file, which
 		// is the common case in a monorepo full of same-named leaf folders.
-		if owner, known := config.SharedConfigOwner(dst); known && owner != cwd {
+		if owner, known := config.SharedConfigOwner(dst); known && !config.SamePath(owner, cwd) {
 			return fmt.Errorf("%s already exists and belongs to %s — set a distinct [session].name in %s, or migrate from there",
 				dst, owner, dst)
 		}

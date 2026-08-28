@@ -205,7 +205,10 @@ func formatStatus(w io.Writer, format string, verbose bool, report agentStatusRe
 		if report.Summary.Idle > 0 {
 			parts = append(parts, fmt.Sprintf("#[fg=cyan]✓ %d idle#[default]", report.Summary.Idle))
 		}
-		if report.Summary.Skipped > 0 && len(parts) > 0 {
+		// Not gated on parts being non-empty. Every scanned agent being busy
+		// produces no parts at all, and that is exactly when an unscanned pane
+		// matters most — one of the ones we did not read could be blocked.
+		if report.Summary.Skipped > 0 {
 			parts = append(parts, fmt.Sprintf("#[fg=red]+%d unscanned#[default]", report.Summary.Skipped))
 		}
 		if len(parts) > 0 {
@@ -286,7 +289,10 @@ func formatStatus(w io.Writer, format string, verbose bool, report agentStatusRe
 		if report.Summary.Idle > 0 {
 			parts = append(parts, fmt.Sprintf("✓ %d idle", report.Summary.Idle))
 		}
-		if report.Summary.Skipped > 0 && len(parts) > 0 {
+		// See the tmux case: reported even when nothing else is, since an
+		// all-busy screen is precisely when a truncated scan could be hiding
+		// the one pane that is waiting on you.
+		if report.Summary.Skipped > 0 {
 			parts = append(parts, fmt.Sprintf("+%d unscanned", report.Summary.Skipped))
 		}
 		if len(parts) > 0 {

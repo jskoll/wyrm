@@ -143,3 +143,45 @@ func TestDiscoverGlobalDoesNotReturnAnotherProjectsConfig(t *testing.T) {
 		t.Errorf("owner got %q, want its own shared config", got)
 	}
 }
+
+// SamePath is what keeps ownership checks honest across symlinks. os.Getwd
+// returns a resolved path while a config's session.root is whatever the user
+// typed, so on macOS (/var -> /private/var) or a symlinked $HOME a plain ==
+// reports two spellings of one directory as two different projects.
+func TestSamePathResolvesSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if !SamePath(real, link) {
+		t.Errorf("SamePath(%q, %q) = false; they are the same directory", real, link)
+	}
+	if !SamePath(real, real) {
+		t.Error("a path is not the same as itself")
+	}
+
+	other := filepath.Join(dir, "other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if SamePath(real, other) {
+		t.Error("two genuinely different directories compared equal")
+	}
+
+	// Paths that do not exist cannot be resolved, and must still compare by
+	// spelling rather than blowing up or collapsing to equal.
+	a := filepath.Join(dir, "missing-a")
+	b := filepath.Join(dir, "missing-b")
+	if !SamePath(a, a) {
+		t.Error("a nonexistent path is not the same as itself")
+	}
+	if SamePath(a, b) {
+		t.Error("two different nonexistent paths compared equal")
+	}
+}

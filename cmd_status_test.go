@@ -151,3 +151,53 @@ func TestStatusReportsNothingSkippedWhenUnderTheBound(t *testing.T) {
 		t.Errorf("an unbounded scan should not mention skipping:\n%s", stdout.String())
 	}
 }
+
+// A truncated scan has to say so even when nothing else is worth printing.
+// Every scanned agent being busy produces no blocked/idle parts at all, and
+// that is exactly when the unscanned panes matter most: one of the ones that
+// went unread could be the one waiting on an answer.
+func TestStatusReportsTruncationWhenEveryScannedAgentIsBusy(t *testing.T) {
+	const panes = agentMaxCapturesForTest + 4
+
+	var b strings.Builder
+	capture := map[string]string{}
+	for i := 1; i <= panes; i++ {
+		id := fmt.Sprintf("%%%d", i)
+		fmt.Fprintf(&b, "$1\x01myproj\x01@1\x011\x01win1\x01%s\x01%d\x01claude\n", id, i)
+		capture[id] = "working on it\nesc to interrupt"
+	}
+	r := &statusFakeRunner{panes: b.String(), capture: capture}
+
+	for _, format := range []string{"text", "tmux"} {
+		t.Run(format, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := run([]string{"status", "-format", format}, &stdout, &stderr, r,
+				func() bool { return false }, nil); code != 0 {
+				t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+			}
+			out := stdout.String()
+			if !strings.Contains(out, "unscanned") {
+				t.Errorf("%s: truncation went unreported with every agent busy, got %q", format, out)
+			}
+			if !strings.Contains(out, fmt.Sprintf("%d", panes-agentMaxCapturesForTest)) {
+				t.Errorf("%s: want the skipped count, got %q", format, out)
+			}
+		})
+	}
+}
+
+// Nothing running at all still prints nothing — the indicator must not turn a
+// quiet status bar into a noisy one.
+func TestStatusStaysQuietWithNoAgents(t *testing.T) {
+	r := &statusFakeRunner{panes: "$1\x01myproj\x01@1\x011\x01win1\x01%1\x011\x01bash", capture: map[string]string{}}
+	for _, format := range []string{"text", "tmux"} {
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"status", "-format", format}, &stdout, &stderr, r,
+			func() bool { return false }, nil); code != 0 {
+			t.Fatalf("exit code = %d", code)
+		}
+		if out := stdout.String(); strings.TrimSpace(out) != "" {
+			t.Errorf("%s: want no output with no agents, got %q", format, out)
+		}
+	}
+}

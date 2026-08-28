@@ -498,20 +498,24 @@ func (s *Settings) SharedConfigPath(dir string) (string, error) {
 		return "", err
 	}
 	plain := filepath.Join(sharedDir, filepath.Base(abs)+DefaultFileName)
-	if owner, known := SharedConfigOwner(plain); known && !samePath(owner, abs) {
+	if owner, known := SharedConfigOwner(plain); known && !SamePath(owner, abs) {
 		return filepath.Join(sharedDir, filepath.Base(abs)+"-"+shortPathHash(canonicalPath(abs))+DefaultFileName), nil
 	}
 	return plain, nil
 }
 
-// samePath reports whether two paths name the same directory, comparing what
+// SamePath reports whether two paths name the same directory, comparing what
 // they resolve to rather than how they are spelled.
 //
 // A plain string comparison is not enough: os.Getwd returns a symlink-resolved
 // path while a config's session.root is whatever the user typed, so on macOS
 // (/var -> /private/var) or any setup with a symlinked home, a project failed
 // to recognise its own shared config and fell through to discovery.
-func samePath(a, b string) bool {
+//
+// Exported because every comparison against SharedConfigOwner needs it —
+// `wyrm migrate-config` used == and could therefore tell you a file belonged
+// to another project when it was your own, spelled differently.
+func SamePath(a, b string) bool {
 	return a == b || canonicalPath(a) == canonicalPath(b)
 }
 
