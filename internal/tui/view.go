@@ -230,18 +230,26 @@ func projectRows(m Model) [][]span {
 }
 
 func sessionRows(m Model) [][]span {
-	sessions := m.visibleSessions()
-	rows := make([][]span, len(sessions))
-	for i, s := range sessions {
+	entries := m.visibleSessions()
+	rows := make([][]span, len(entries))
+	for i, e := range entries {
+		if !e.Running {
+			// A stopped row (allSessions only) has no windows to count and no
+			// agents to mark. "stopped" is spelled out rather than left as a
+			// missing dot: the difference between this row and the one above
+			// it is that Enter starts it, and that is worth a word.
+			rows[i] = []span{plain("  " + e.Name + " "), {hintStyle, "stopped"}}
+			continue
+		}
 		mark := plain(" ")
-		if s.Attached {
+		if e.Session.Attached {
 			mark = span{activeMark, "●"}
 		}
 		rows[i] = appendAgentMark([]span{
 			mark,
-			plain(" " + s.Name + " "),
-			{hintStyle, fmt.Sprintf("(%dw)", s.Windows)},
-		}, m.agents.session(s.ID))
+			plain(" " + e.Name + " "),
+			{hintStyle, fmt.Sprintf("(%dw)", e.Session.Windows)},
+		}, m.agents.session(e.Session.ID))
 	}
 	return rows
 }
@@ -480,7 +488,8 @@ var helpSections = []helpSection{
 		{"y", "copy project path to clipboard"},
 	}},
 	{"Sessions panel", [][2]string{
-		{"Enter", "attach (or switch-client inside tmux)"},
+		{"Enter", "attach, or start a stopped session"},
+		{"a", "also list stopped projects"},
 		{"x", "kill the session"},
 		{"r", "rename the session"},
 		{"n", "new window in this session"},

@@ -80,7 +80,7 @@ var panelSpecs = [numPanels]panelSpec{
 		empty:  "no running sessions",
 		length: func(m Model) int { return len(m.visibleSessions()) },
 		rows:   sessionRows,
-		keys:   "↵: attach  x: kill  r: rename  n: new-win  " + navKeys,
+		keys:   "↵: attach/start  x: kill  r: rename  n: new-win  a: all  " + navKeys,
 		menu:   sessionMenu,
 		kill:   killSession,
 		child:  panelWindows,
