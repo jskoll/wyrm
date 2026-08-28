@@ -22,8 +22,8 @@ const MaxCaptures = 16
 //
 // skipped reports how many further agent panes were left unscanned, so a
 // caller can say the picture is partial instead of quietly under-reporting.
-// A max of zero or less means no bound.
-func Candidates(refs []tmux.PaneRef, profiles []Profile, skipPane string, max int) (selected []tmux.PaneRef, skipped int) {
+// A limit of zero or less means no bound.
+func Candidates(refs []tmux.PaneRef, profiles []Profile, skipPane string, limit int) (selected []tmux.PaneRef, skipped int) {
 	for _, ref := range refs {
 		if !IsAgentPane(ref.Command, profiles) {
 			continue
@@ -31,7 +31,7 @@ func Candidates(refs []tmux.PaneRef, profiles []Profile, skipPane string, max in
 		if skipPane != "" && ref.PaneID == skipPane {
 			continue
 		}
-		if max > 0 && len(selected) >= max {
+		if limit > 0 && len(selected) >= limit {
 			skipped++
 			continue
 		}

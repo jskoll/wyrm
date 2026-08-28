@@ -127,14 +127,14 @@ func TestDiscoverGlobalDoesNotReturnAnotherProjectsConfig(t *testing.T) {
 	}
 	writeSharedConfig(t, filepath.Join(shared, "api"+DefaultFileName), work)
 
-	chdirTest(t, personal)
+	t.Chdir(personal)
 	got, err := DiscoverGlobal(settings)
 	if err == nil && got == filepath.Join(shared, "api"+DefaultFileName) {
 		t.Fatalf("standing in %s, DiscoverGlobal returned %s — which belongs to %s", personal, got, work)
 	}
 
 	// The owner still finds its own config.
-	chdirTest(t, work)
+	t.Chdir(work)
 	got, err = DiscoverGlobal(settings)
 	if err != nil {
 		t.Fatalf("owner cannot find its own shared config: %v", err)
@@ -142,16 +142,4 @@ func TestDiscoverGlobalDoesNotReturnAnotherProjectsConfig(t *testing.T) {
 	if got != filepath.Join(shared, "api"+DefaultFileName) {
 		t.Errorf("owner got %q, want its own shared config", got)
 	}
-}
-
-func chdirTest(t *testing.T, dir string) {
-	t.Helper()
-	prev, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(prev) })
 }

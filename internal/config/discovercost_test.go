@@ -68,7 +68,7 @@ func TestProjectIndexMatchesFindProject(t *testing.T) {
 	write("web", "[session]\nname = \"web\"\n\n[[windows]]\nname = \"w\"\n")
 
 	settings := &Settings{Storage: StorageShared, SharedDir: shared}
-	chdirTest(t, t.TempDir())
+	t.Chdir(t.TempDir())
 
 	index := NewProjectIndex(settings)
 	for _, name := range []string{"api", "web", "nope"} {
