@@ -18,6 +18,32 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
+      # Releases are signed (see .goreleaser.yaml's `signs:` block). The
+      # public half is committed at internal/selfupdate/signing.pub and
+      # compiled into the binary; MINISIGN_SECRET_KEY holds the other half.
+      #
+      # Both halves have to be present and agree, and the release fails loudly
+      # if either is missing — the failure mode this replaces was a release
+      # that shipped with verification code and nothing to verify.
+      - name: Set up release signing
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MINISIGN_SECRET_KEY}" ]; then
+            echo "MINISIGN_SECRET_KEY is not set: releases must be signed." >&2
+            echo "Generate a key with 'minisign -G', add the secret key here," >&2
+            echo "and commit the public key to internal/selfupdate/signing.pub." >&2
+            exit 1
+          fi
+          sudo apt-get update && sudo apt-get install -y minisign
+          umask 077
+          printf '%s' "${MINISIGN_SECRET_KEY}" > /tmp/minisign.key
+          # The embedded public key must match the signing key, or every
+          # `wyrm selfupdate` on this release would reject its own signature.
+          printf 'signing key check\n' > /tmp/keycheck.txt
+          minisign -Sm /tmp/keycheck.txt -s /tmp/minisign.key <<< "${{ secrets.MINISIGN_PASSWORD }}"
+          minisign -Vm /tmp/keycheck.txt -p internal/selfupdate/signing.pub
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
           distribution: goreleaser
@@ -26,6 +52,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          MINISIGN_KEY_FILE: /tmp/minisign.key
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
 
   aur:
     name: Publish AUR package

@@ -88,9 +88,10 @@ wyrm list                 # list running tmux sessions non-interactively
 wyrm list-configs         # list candidate config file paths (used by shell completion)
 wyrm migrate-config       # move the local config into the shared config directory
 wyrm init                 # scaffold a project config interactively or with -template (-force)
-wyrm clone REPO [DEST]    # git clone, then build (and attach to) a session for it (-no-start to skip)
+wyrm clone REPO [DEST]    # git clone, then confirm and build a session for it (-y, -no-start)
 wyrm selfupdate           # download and install the latest release
-wyrm setup-tmux           # generate or append recommended tmux popup configuration (-a)
+wyrm setup-tmux           # generate or append recommended tmux popup configuration
+wyrm doctor               # check tmux, settings, configs, and optional tools (-strict)
 wyrm version
 ```
 
@@ -124,11 +125,48 @@ the [configuration reference](configuration.md) for each in full:
 - **`session.aliases`** gives a project a short, fixed name (`wyrm dot` for
   `dotfiles`) that resolves exactly, alongside its real session name.
 - **`wyrm clone <repo> [dest]`** runs `git clone`, then builds a session for
-  the result in one step.
+  the result in one step — listing the shell the repo's config would run and
+  asking first, since a freshly cloned config is one you have not read yet.
 - **`[zoxide]`** (opt-in) lists directories from your `cd` history in `wyrm
   tui`'s Projects panel, not just ones with a wyrm config.
 - **`[tmux]`** targets a non-default tmux server or binary
   (`socket`/`command`), for every tmux call wyrm makes.
+
+## Diagnosing a setup
+
+`wyrm doctor` checks everything wyrm depends on and reports anything that is
+broken — or, more usefully, anything that is quietly doing nothing:
+
+```console
+$ wyrm doctor
+ok    tmux             3.5a at /opt/homebrew/bin/tmux
+ok    tmux server      default server, 4 sessions running
+warn  settings         ~/.config/wyrm/config.toml (1 ignored key)
+                       → unknown key "tui.mosue" — it is ignored (a typo?)
+ok    storage          shared → ~/.config/wyrm/settings (7 configs)
+ok    discovery        upward (searches parent directories up to a git root)
+warn  wildcard[1]      "~/work/**" matches no directories
+                       → check the pattern; "*" matches one path segment, "/**" recurses
+ok    config           .wyrm.toml → session "api" in ~/code/api
+err   agent            tui.agent.profiles[0]: busy_pattern "(": error parsing regexp
+                       → agent markers stay off until this compiles
+ok    editor           nvim
+warn  clipboard        no backend found
+                       → install one of wl-copy, xclip, xsel; until then "y" in the TUI cannot copy
+
+1 error, 3 warnings
+```
+
+Most of what wyrm gets wrong, it gets wrong silently: a `[[wildcard]]` pattern
+that matches nothing, a misspelled settings key that is therefore ignored, an
+agent `busy_pattern` that fails to compile and disables the markers, a theme
+file that stops the TUI starting, a tmux too old for the `size` values in your
+config, or no clipboard tool for `y` to use. Each looks identical to "the
+feature just isn't working".
+
+It only reads — nothing is repaired or written. It exits non-zero if anything
+is an error; `-strict` also fails on warnings, which makes it usable as a CI
+check alongside `wyrm validate -strict`.
 
 ## Editing, validating, and listing
 

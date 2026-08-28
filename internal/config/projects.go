@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -183,6 +184,18 @@ func DiscoverWildcardProjects(settings *Settings) []Project {
 	return out
 }
 
+// WildcardMatches reports the directories a configured [[wildcard]] currently
+// matches. DiscoverWildcardProjects flattens every pattern into one project
+// list, which is the right shape for building sessions but loses which pattern
+// produced what — and "this pattern matches nothing" is exactly the kind of
+// silent no-op `wyrm doctor` exists to surface.
+func WildcardMatches(w Wildcard) ([]string, error) {
+	if w.Pattern == "" {
+		return nil, errors.New("pattern is empty")
+	}
+	return matchWildcardDirs(w.Pattern)
+}
+
 // matchWildcardDirs resolves a wildcard pattern to the absolute directories
 // it matches. A trailing "/**" matches every directory nested at any depth
 // under the base path (not the base itself); anything else is a plain
@@ -266,6 +279,56 @@ func FindProject(settings *Settings, name string) (Project, bool) {
 		}
 	}
 	return Project{}, false
+}
+
+// LoadConfig returns the config this project builds from, with the project's
+// own identity applied on top of what the file says.
+//
+// It exists because a Project's config is not always just Load(p.Path). Two
+// kinds of project carry identity the file cannot:
+//
+//   - A Wildcard project shares one template with every other directory the
+//     pattern matched, so only p.Root says which directory this one stands for.
+//     The template's session.root ("." by convention) would otherwise resolve
+//     against the template's own directory.
+//   - A project with no config file of its own (Path == "" — the TUI's
+//     zoxide-known directories) builds from the user's default config, or
+//     wyrm's built-in one, rooted at p.Root. Its session.name is cleared for
+//     the same reason: the directory is the project's identity, and a named
+//     default config would otherwise give every such directory the same
+//     session name — which is also the name every caller looks the running
+//     session up by.
+//
+// Every caller that turns a Project into a session — building it, attaching to
+// it, or killing it — must go through here. Three of them used to call
+// Load(p.Path) directly, which for a wildcard project resolved the session name
+// from the template's directory: `wyrm kill <project>` reported the wrong
+// session as not running, and `wyrm restart -all` built a spurious session
+// rooted in the shared config directory.
+func (p Project) LoadConfig() (*Config, error) {
+	if p.Path == "" {
+		cfg, err := LoadUserDefault()
+		if err != nil {
+			return nil, err
+		}
+		if cfg == nil {
+			cfg, err = LoadDefault()
+			if err != nil {
+				return nil, err
+			}
+		}
+		cfg.Session.Name = ""
+		cfg.Session.Root = p.Root
+		return cfg, nil
+	}
+	cfg, err := Load(p.Path)
+	if err != nil {
+		return nil, err
+	}
+	if p.Wildcard {
+		cfg.Session.Root = p.Root
+	}
+	return cfg, nil
 }
 
 // ProjectName is the session name a config produces: its explicit

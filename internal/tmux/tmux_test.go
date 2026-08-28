@@ -403,7 +403,7 @@ func TestSplitPane(t *testing.T) {
 		if pane != "%2" {
 			t.Errorf("SplitPane = %q, want %%2", pane)
 		}
-		want := []string{"split-window", "-P", "-F", "#{pane_id}", "-t", "%1", "-v", "-c", "/tmp", "top"}
+		want := []string{"split-window", "-P", "-F", "#{pane_id}", "-t", "%1", "-v", "-c", "/tmp", "--", "top"}
 		if strings.Join(r.args, " ") != strings.Join(want, " ") {
 			t.Errorf("args = %v, want %v", r.args, want)
 		}
@@ -423,4 +423,51 @@ func TestSplitPane(t *testing.T) {
 			t.Errorf("args = %v, want %v", r.args, want)
 		}
 	})
+}
+
+// A dry run has to answer list-windows/list-panes from the layout the
+// transcript just built, because session.selectStartup resolves
+// startup_window/startup_pane through them. Answering with the raw format
+// string made `wyrm up -n` warn "unexpected window index" and silently omit
+// the select-window/select-pane commands it would have run — from the
+// transcript whose whole job is to say what a config does.
+func TestDryRunAnswersListingsFromWhatItBuilt(t *testing.T) {
+	var out strings.Builder
+	d := NewDryRun(&out)
+
+	if _, err := d.Run("new-session", "-d", "-P", "-F", "#{session_id}|#{session_name}|#{window_id}|#{pane_id}",
+		"-s", "proj", "-n", "one", "-c", "/tmp/proj"); err != nil {
+		t.Fatalf("new-session: %v", err)
+	}
+	if _, err := d.Run("new-window", "-d", "-P", "-F", "#{window_id}|#{pane_id}", "-t", "$1", "-n", "two", "-c", "/tmp/proj"); err != nil {
+		t.Fatalf("new-window: %v", err)
+	}
+	if _, err := d.Run("split-window", "-d", "-t", "%2", "-v", "-P", "-F", "#{pane_id}"); err != nil {
+		t.Fatalf("split-window: %v", err)
+	}
+
+	windows, err := ListWindows(d, "$1")
+	if err != nil {
+		t.Fatalf("ListWindows: %v", err)
+	}
+	if len(windows) != 2 {
+		t.Fatalf("got %d windows, want 2: %+v", len(windows), windows)
+	}
+	if windows[0].Name != "one" || windows[1].Name != "two" {
+		t.Errorf("window names = %q, %q; want one, two", windows[0].Name, windows[1].Name)
+	}
+	if !windows[0].Active {
+		t.Error("the first window should be active: every window is created with -d")
+	}
+
+	panes, err := ListPanes(d, windows[1].ID)
+	if err != nil {
+		t.Fatalf("ListPanes: %v", err)
+	}
+	if len(panes) != 2 {
+		t.Fatalf("window two has %d panes, want 2 (its own plus the split): %+v", len(panes), panes)
+	}
+	if !panes[0].Active {
+		t.Error("the window's first pane should be active: splits are created with -d")
+	}
 }

@@ -158,30 +158,114 @@ func TestCloneNoStart(t *testing.T) {
 	}
 }
 
-func TestCloneWarnsOnHooks(t *testing.T) {
-	installFakeGit(t)
-	base := t.TempDir()
-	chdir(t, base)
+// A freshly cloned repository is the one input the user has not read yet, so
+// clone lists the shell its config would run and asks before running it. The
+// old behavior printed a warning naming the flag you needed *before* you ran
+// the command, and then ran the hooks anyway.
+func TestCloneConfirmsBeforeRunningHooks(t *testing.T) {
+	writeHookedClone := func(t *testing.T) string {
+		t.Helper()
+		base := t.TempDir()
+		chdir(t, base)
+		dest := filepath.Join(base, "withhooks")
+		if err := os.MkdirAll(dest, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		content := "[session]\nname = \"hooked\"\nroot = \".\"\n" +
+			"on_project_start = \"echo pwned\"\n\n[[windows]]\nname = \"w\"\n" +
+			"  [[windows.splits]]\n  command = \"also-this\"\n"
+		if err := os.WriteFile(filepath.Join(dest, config.DefaultFileName), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return dest
+	}
 
-	dest := filepath.Join(base, "withhooks")
-	if err := os.MkdirAll(dest, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	content := "[session]\nname = \"hooked\"\nroot = \".\"\non_project_start = \"echo pwned\"\n\n[[windows]]\nname = \"w\"\n"
-	if err := os.WriteFile(filepath.Join(dest, config.DefaultFileName), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	t.Run("declining does not build the session", func(t *testing.T) {
+		installFakeGit(t)
+		writeHookedClone(t)
+		withStdin(t, "n\n")
 
-	r := &fakeRunner{}
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"clone", "https://example.com/x.git", "withhooks"}, &stdout, &stderr, r,
-		func() bool { return false }, func(string) error { return nil })
-	if code != 0 {
-		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "defines lifecycle hooks") {
-		t.Errorf("stderr = %q, want warning about lifecycle hooks", stderr.String())
-	}
+		r := &fakeRunner{}
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"clone", "https://example.com/x.git", "withhooks"}, &stdout, &stderr, r,
+			func() bool { return false }, func(string) error { return nil })
+		if code != 0 {
+			t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+		}
+		// Every executable line is listed, not just on_project_start.
+		for _, want := range []string{"on_project_start = echo pwned", "command = also-this"} {
+			if !strings.Contains(stderr.String(), want) {
+				t.Errorf("stderr = %q, want it to list %q", stderr.String(), want)
+			}
+		}
+		if strings.Contains(stdout.String(), "created session") {
+			t.Errorf("stdout = %q, declining must not build the session", stdout.String())
+		}
+		for _, c := range r.calls {
+			if len(c) > 0 && c[0] == "new-session" {
+				t.Errorf("declining still ran %v", c)
+			}
+		}
+	})
+
+	t.Run("accepting builds the session", func(t *testing.T) {
+		installFakeGit(t)
+		writeHookedClone(t)
+		withStdin(t, "y\n")
+
+		r := &fakeRunner{}
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"clone", "https://example.com/x.git", "withhooks"}, &stdout, &stderr, r,
+			func() bool { return false }, func(string) error { return nil })
+		if code != 0 {
+			t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "created session") {
+			t.Errorf("stdout = %q, want the session to be built after confirming", stdout.String())
+		}
+	})
+
+	t.Run("non-interactive declines rather than running unattended", func(t *testing.T) {
+		installFakeGit(t)
+		writeHookedClone(t)
+		withStdin(t, "")
+
+		r := &fakeRunner{}
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"clone", "https://example.com/x.git", "withhooks"}, &stdout, &stderr, r,
+			func() bool { return false }, func(string) error { return nil })
+		if code != 0 {
+			t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+		}
+		if strings.Contains(stdout.String(), "created session") {
+			t.Errorf("stdout = %q, an unreadable stdin must decline", stdout.String())
+		}
+	})
+
+	t.Run("-y skips the prompt", func(t *testing.T) {
+		installFakeGit(t)
+		writeHookedClone(t)
+		withStdin(t, "")
+
+		r := &fakeRunner{}
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"clone", "-y", "https://example.com/x.git", "withhooks"}, &stdout, &stderr, r,
+			func() bool { return false }, func(string) error { return nil })
+		if code != 0 {
+			t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "created session") {
+			t.Errorf("stdout = %q, want -y to build without prompting", stdout.String())
+		}
+	})
+}
+
+// withStdin points the CLI's prompt reader at fixed input for one test.
+func withStdin(t *testing.T, in string) {
+	t.Helper()
+	prev := appStdin
+	appStdin = strings.NewReader(in)
+	t.Cleanup(func() { appStdin = prev })
 }
 
 func TestCloneWrongArgCount(t *testing.T) {

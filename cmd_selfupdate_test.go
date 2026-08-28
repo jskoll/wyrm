@@ -350,10 +350,7 @@ func TestInstallReleaseSignatureVerification(t *testing.T) {
 	srv = httptest.NewServer(mux)
 	defer srv.Close()
 
-	// Set public key
-	oldKey := selfupdate.DefaultSigningPublicKey
-	selfupdate.DefaultSigningPublicKey = pub
-	defer func() { selfupdate.DefaultSigningPublicKey = oldKey }()
+	withSigningKey(t, pub)
 
 	a, stdout, _ := testApp(srv)
 	rel, err := fetchRelease(a.httpClient, "")
@@ -418,9 +415,7 @@ func TestInstallReleaseInvalidSignatureFails(t *testing.T) {
 	srv = httptest.NewServer(mux)
 	defer srv.Close()
 
-	oldKey := selfupdate.DefaultSigningPublicKey
-	selfupdate.DefaultSigningPublicKey = pub
-	defer func() { selfupdate.DefaultSigningPublicKey = oldKey }()
+	withSigningKey(t, pub)
 
 	a, _, _ := testApp(srv)
 	rel, err := fetchRelease(a.httpClient, "")
@@ -431,5 +426,109 @@ func TestInstallReleaseInvalidSignatureFails(t *testing.T) {
 
 	if err := a.installRelease(a.httpClient, rel, path, mode, "1.0.0"); err == nil {
 		t.Fatal("installRelease with invalid signature: want error, got nil")
+	}
+}
+
+// withSigningKey compiles a signing key into selfupdate for one test.
+func withSigningKey(t *testing.T, pub ed25519.PublicKey) {
+	t.Helper()
+	prev := selfupdate.DefaultSigningKey
+	selfupdate.DefaultSigningKey = selfupdate.SigningKeyFromEd25519(pub)
+	t.Cleanup(func() { selfupdate.DefaultSigningKey = prev })
+}
+
+// A release that publishes no signature must be refused by a build that has a
+// signing key: that combination means either a downgrade to an unsigned
+// release or a stripped signature, and it is exactly what the key is for.
+func TestInstallReleaseRequiresSignatureWhenKeyEmbedded(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tag, ver := "v2.0.0", "2.0.0"
+	asset := assetName(ver)
+	archive := buildTestArchive(t, "unsigned binary")
+	sum := sha256.Sum256(archive)
+	checksums := []byte(fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), asset))
+
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+	mux.HandleFunc("/repos/jskoll/wyrm/releases/latest", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{
+			"tag_name": %q,
+			"assets": [
+				{"name": "checksums.txt", "browser_download_url": %q},
+				{"name": %q, "browser_download_url": %q}
+			]
+		}`, tag, srv.URL+"/assets/checksums.txt", asset, srv.URL+"/assets/archive")
+	})
+	mux.HandleFunc("/assets/archive", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(archive) })
+	mux.HandleFunc("/assets/checksums.txt", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(checksums) })
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	withSigningKey(t, pub)
+
+	a, _, _ := testApp(srv)
+	rel, err := fetchRelease(a.httpClient, "")
+	if err != nil {
+		t.Fatalf("fetchRelease: %v", err)
+	}
+	path, mode := writeFakeBinary(t, "old binary contents")
+	err = a.installRelease(a.httpClient, rel, path, mode, "1.0.0")
+	if err == nil {
+		t.Fatal("want an error installing an unsigned release with a key embedded")
+	}
+	if !strings.Contains(err.Error(), "no signature") {
+		t.Errorf("error = %v, want it to name the missing signature", err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "old binary contents" {
+		t.Errorf("binary was replaced despite the failure: %q", data)
+	}
+}
+
+// Without a key embedded — the state every build shipped in until now — an
+// unsigned release still installs, but the user is told the release was not
+// signature-verified instead of being left to assume it was.
+func TestInstallReleaseWarnsWhenUnverifiable(t *testing.T) {
+	tag, ver := "v2.0.0", "2.0.0"
+	asset := assetName(ver)
+	archive := buildTestArchive(t, "unsigned binary")
+	sum := sha256.Sum256(archive)
+	checksums := []byte(fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), asset))
+
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+	mux.HandleFunc("/repos/jskoll/wyrm/releases/latest", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{
+			"tag_name": %q,
+			"assets": [
+				{"name": "checksums.txt", "browser_download_url": %q},
+				{"name": %q, "browser_download_url": %q}
+			]
+		}`, tag, srv.URL+"/assets/checksums.txt", asset, srv.URL+"/assets/archive")
+	})
+	mux.HandleFunc("/assets/archive", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(archive) })
+	mux.HandleFunc("/assets/checksums.txt", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(checksums) })
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	prev := selfupdate.DefaultSigningKey
+	selfupdate.DefaultSigningKey = selfupdate.SigningKey{}
+	t.Cleanup(func() { selfupdate.DefaultSigningKey = prev })
+
+	a, _, stderr := testApp(srv)
+	rel, err := fetchRelease(a.httpClient, "")
+	if err != nil {
+		t.Fatalf("fetchRelease: %v", err)
+	}
+	path, mode := writeFakeBinary(t, "old binary contents")
+	if err := a.installRelease(a.httpClient, rel, path, mode, "1.0.0"); err != nil {
+		t.Fatalf("installRelease: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "not signed") {
+		t.Errorf("stderr = %q, want a warning that the release is unsigned", stderr.String())
 	}
 }

@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"fmt"
-
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jskoll/wyrm/internal/agent"
@@ -117,38 +115,11 @@ func (m Model) agentCmd() tea.Cmd {
 	return loadAgentStatus(m.runner, m.agentProfiles, m.selfPane)
 }
 
-// agentProfiles builds the detector's profiles from settings, and reports what
-// is wrong with them rather than quietly falling back — a mistyped pattern that
-// silently disabled the markers would look exactly like an agent that never
-// waits for you.
-//
-// Layering: explicit profiles replace the built-in one outright. A bare
-// `commands` list instead widens the built-in profile, which is what a user
-// running Claude Code under a wrapper name wants.
+// agentProfiles builds the detector's profiles from settings. The rules live
+// in agent.ProfilesFrom so the TUI, `wyrm status`, and `wyrm doctor` cannot
+// disagree about which panes are agents or what marks them busy.
 func agentProfiles(settings *config.Settings) ([]agent.Profile, error) {
-	configured := settings.AgentProfiles()
-	if len(configured) == 0 {
-		def := agent.DefaultProfile()
-		if extra := settings.AgentCommands(); len(extra) > 0 {
-			def.Commands = extra
-		}
-		return []agent.Profile{def}, nil
-	}
-	out := make([]agent.Profile, 0, len(configured))
-	for i, p := range configured {
-		compiled, err := agent.Profile{
-			Commands:    p.Commands,
-			Busy:        p.Busy,
-			Blocked:     p.Blocked,
-			Idle:        p.Idle,
-			BusyPattern: p.BusyPattern,
-		}.Compile()
-		if err != nil {
-			return nil, fmt.Errorf("tui.agent.profiles[%d]: %w", i, err)
-		}
-		out = append(out, compiled)
-	}
-	return out, nil
+	return agent.ProfilesFrom(settings)
 }
 
 // agentMark returns the trailing status span for a row, and whether there is

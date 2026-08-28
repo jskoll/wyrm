@@ -3,6 +3,7 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jskoll/wyrm/internal/config"
 	"github.com/jskoll/wyrm/internal/sessions"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
@@ -27,12 +28,26 @@ const (
 
 // pendingAction captures what a modal will do once confirmed/submitted, along
 // with the tmux IDs it needs. The relevant subset of IDs is filled per op.
+//
+// The opKillProject fields spell a project's identity out as scalars rather
+// than holding a config.Project, whose Aliases slice would make Model
+// non-comparable. Path alone is not enough: a wildcard project's path is the
+// shared template and a zoxide directory has none, so root/wildcard have to
+// travel with it — see config.Project.LoadConfig.
 type pendingAction struct {
 	op        actionOp
 	sessionID string
 	windowID  string
 	paneID    string
-	path      string // config path, for opKillProject
+
+	path     string // config path, for opKillProject ("" for a fileless project)
+	root     string // the project's directory, for opKillProject
+	wildcard bool   // whether path is a shared wildcard template
+}
+
+// project rebuilds the identity opKillProject was stored with.
+func (p pendingAction) project() config.Project {
+	return config.Project{Path: p.path, Root: p.root, Wildcard: p.wildcard}
 }
 
 // actionErrMsg reports that a management action failed; Update stores it in
@@ -177,7 +192,7 @@ func (m Model) executePending() tea.Cmd {
 	case opKillPane:
 		return killPaneCmd(m.runner, m.pending.windowID, m.pending.paneID)
 	case opKillProject:
-		return killProjectCmd(m.runner, m.settings, m.pending.path)
+		return killProjectCmd(m.runner, m.settings, m.pending.project())
 	}
 	return nil
 }

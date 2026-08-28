@@ -340,7 +340,7 @@ func TestSplitPaneVerticalFlow(t *testing.T) {
 	if _, ok := msg.(panesMsg); !ok {
 		t.Fatalf("split produced %T, want panesMsg", msg)
 	}
-	want := "split-window -P -F #{pane_id} -t %1 -v htop"
+	want := "split-window -P -F #{pane_id} -t %1 -v -- htop"
 	found := false
 	for _, c := range calls {
 		if c == want {

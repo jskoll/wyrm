@@ -86,6 +86,17 @@ func (a *app) up(args []string) error {
 		_, _ = fmt.Fprintf(a.stdout, "run `wyrm %s` to attach\n", name)
 		return nil
 	}
+	return a.attachSession(cfg, sessionID)
+}
+
+// attachSession runs on_project_attach and then hands the terminal over.
+//
+// The hook lives here rather than in session.Create so that it fires exactly
+// when wyrm attaches and never when it doesn't: `up -d`, `restart -d` and
+// `restart -all` all build a session and return without attaching, and Create
+// fired the hook for all three.
+func (a *app) attachSession(cfg *config.Config, sessionID string) error {
+	_ = session.RunAttachHook(cfg, a.stderr)
 	return a.attachOrSwitch(sessionID)
 }
 
@@ -215,7 +226,7 @@ func (a *app) restart(args []string) error {
 		_, _ = fmt.Fprintf(a.stdout, "run `wyrm %s` to attach\n", name)
 		return nil
 	}
-	return a.attachOrSwitch(sessionID)
+	return a.attachSession(cfg, sessionID)
 }
 
 func (a *app) restartAll(settings *config.Settings, dryRun, yes bool, vars map[string]string) error {
@@ -251,7 +262,7 @@ func (a *app) restartAll(settings *config.Settings, dryRun, yes bool, vars map[s
 			_, _ = fmt.Fprintf(a.stderr, "wyrm: skipping session %q: no project config found\n", s.Name)
 			continue
 		}
-		cfg, err := config.Load(project.Path)
+		cfg, err := project.LoadConfig()
 		if err != nil {
 			_, _ = fmt.Fprintf(a.stderr, "wyrm: warning: skipping session %q: %v\n", s.Name, err)
 			continue
@@ -380,7 +391,7 @@ func (a *app) killAll(settings *config.Settings, dryRun, yes bool) error {
 
 	for _, s := range active {
 		if project, found := config.FindProject(settings, s.Name); found {
-			if cfg, err := config.Load(project.Path); err == nil {
+			if cfg, err := project.LoadConfig(); err == nil {
 				name, kerr := session.Kill(a.runner, cfg, a.stderr, opts...)
 				if kerr != nil {
 					_, _ = fmt.Fprintf(a.stderr, "wyrm: warning: failed to kill session %s: %v\n", s.Name, kerr)
@@ -411,7 +422,7 @@ func (a *app) killByName(settings *config.Settings, target string, dryRun bool) 
 	}
 
 	if project, found := config.FindProject(settings, target); found {
-		if cfg, err := config.Load(project.Path); err == nil {
+		if cfg, err := project.LoadConfig(); err == nil {
 			name, kerr := session.Kill(a.runner, cfg, a.stderr, opts...)
 			if kerr != nil {
 				return kerr
@@ -474,14 +485,11 @@ func (a *app) attachByName(name string, extraArgs []string) error {
 	}
 	if ok {
 		if project, found := config.FindProject(settings, name); found {
-			if cfg, err := config.Load(project.Path); err == nil {
-				if project.Wildcard {
-					cfg.Session.Root = project.Root
-				}
+			if cfg, err := project.LoadConfig(); err == nil {
 				if len(vars) > 0 {
 					cfg.Interpolate(vars)
 				}
-				_ = session.RunAttachHook(cfg, a.stderr)
+				return a.attachSession(cfg, id)
 			}
 		}
 		return a.attachOrSwitch(id)
@@ -505,15 +513,9 @@ func (a *app) attachByName(name string, extraArgs []string) error {
 // startProject builds (or reattaches) the session for a discovered config and
 // hands the terminal over.
 func (a *app) startProject(project config.Project, vars map[string]string) error {
-	cfg, err := config.Load(project.Path)
+	cfg, err := project.LoadConfig()
 	if err != nil {
 		return err
-	}
-	if project.Wildcard {
-		// The template's own session.root (normally unset) doesn't say which
-		// directory this Project stands for — only the match does. See
-		// config.DiscoverWildcardProjects.
-		cfg.Session.Root = project.Root
 	}
 	if len(vars) > 0 {
 		cfg.Interpolate(vars)
@@ -534,5 +536,5 @@ func (a *app) startProject(project config.Project, vars map[string]string) error
 		return err
 	}
 	a.reportCreated(name, created)
-	return a.attachOrSwitch(sessionID)
+	return a.attachSession(cfg, sessionID)
 }

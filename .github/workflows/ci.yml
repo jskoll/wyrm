@@ -53,11 +53,32 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
+      # Sign with a throwaway key generated for this run, so the whole signing
+      # path is exercised on every PR without any secret. The real release job
+      # uses the committed public key's counterpart from repo secrets.
+      - name: Generate an ephemeral signing key
+        run: |
+          set -euo pipefail
+          sudo apt-get update && sudo apt-get install -y minisign
+          minisign -G -p /tmp/ci-signing.pub -s /tmp/ci-signing.key -W
+          cp /tmp/ci-signing.pub internal/selfupdate/signing.pub
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
           distribution: goreleaser
           version: "~> 2"
           args: release --snapshot --clean --skip=publish
+        env:
+          MINISIGN_KEY_FILE: /tmp/ci-signing.key
+          MINISIGN_PASSWORD: ""
+      # The signature asset is the thing selfupdate looks for by name. It was
+      # absent for the entire life of the verification code, so assert it
+      # exists rather than trusting the config to stay correct.
+      - name: The release must carry a checksums signature
+        run: |
+          set -euo pipefail
+          test -f dist/checksums.txt.minisig \
+            || { echo "dist/checksums.txt.minisig missing: releases would be unverifiable"; ls -1 dist; exit 1; }
+          minisign -Vm dist/checksums.txt -p /tmp/ci-signing.pub
       # test-rpm-install and test-arch-install install from these artifacts, so a
       # packaging mistake (missing file in `contents:`, a bad `depends`) is caught
       # here rather than at tag time on a real release.

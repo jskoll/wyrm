@@ -26,6 +26,8 @@ func (a *app) clone(args []string) error {
 	fs := a.newFlagSet("clone")
 	noStart := fs.Bool("no-start", false, "clone the repository without starting a session")
 	fs.BoolVar(noStart, "n", false, "alias for -no-start")
+	yes := fs.Bool("y", false, "start the session without confirming the config's shell commands")
+	fs.BoolVar(yes, "yes", false, "alias for -y")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -68,16 +70,6 @@ func (a *app) clone(args []string) error {
 		return nil
 	}
 
-	for _, name := range []string{config.DefaultFileName, config.LegacyFileName} {
-		cfgPath := filepath.Join(absDest, name)
-		if cfg, err := config.Load(cfgPath); err == nil {
-			if cfg.Session.OnProjectStart != "" || cfg.Session.OnProjectFirstStart != "" {
-				_, _ = fmt.Fprintf(a.stderr, "wyrm: warning: %s defines lifecycle hooks (run with -no-start to clone without executing hooks)\n", name)
-			}
-			break
-		}
-	}
-
 	settings, err := config.LoadSettings()
 	if err != nil {
 		return err
@@ -85,14 +77,113 @@ func (a *app) clone(args []string) error {
 	// A wildcard pattern covering the destination takes priority over
 	// whatever discovery would find inside it — matching how any other
 	// directory under that pattern behaves, clone included or not.
-	if project, found := config.FindProject(settings, filepath.Base(absDest)); found && project.Wildcard && project.Root == absDest {
-		return a.startProject(project, nil)
+	project, found := config.FindProject(settings, filepath.Base(absDest))
+	useWildcard := found && project.Wildcard && project.Root == absDest
+
+	if !useWildcard {
+		if err := os.Chdir(absDest); err != nil {
+			return fmt.Errorf("entering %s: %w", absDest, err)
+		}
 	}
 
-	if err := os.Chdir(absDest); err != nil {
-		return fmt.Errorf("entering %s: %w", absDest, err)
+	if !*yes {
+		ok, err := a.confirmClonedConfig(settings, project, useWildcard)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			_, _ = fmt.Fprintf(a.stdout,
+				"cloned %s to %s; not started\nreview the config, then run `wyrm` in that directory\n", repo, absDest)
+			return nil
+		}
+	}
+
+	if useWildcard {
+		return a.startProject(project, nil)
 	}
 	return a.up(nil)
+}
+
+// confirmClonedConfig shows the shell a freshly cloned repository's config
+// would run and asks whether to go ahead.
+//
+// wyrm configs execute shell by design, and that is the documented trust
+// model — but `wyrm clone` is the one verb whose input is a repository the
+// user has not read yet. It used to print "run with -no-start to clone
+// without executing hooks" and then execute them anyway, naming the flag you
+// needed *before* you ran the command. Now the choice is offered while it can
+// still be made.
+//
+// promptConfirm returns false when stdin cannot be read, so a non-interactive
+// run declines rather than proceeding unattended.
+func (a *app) confirmClonedConfig(settings *config.Settings, project config.Project, useWildcard bool) (bool, error) {
+	var cfg *config.Config
+	var err error
+	if useWildcard {
+		cfg, err = project.LoadConfig()
+	} else {
+		// The config `up` will actually use, which is not necessarily one in
+		// the clone: discovery also reaches the shared directory and parent
+		// directories.
+		cfg, _, err = config.ResolveEffective(settings, "")
+	}
+	if err != nil {
+		// Nothing loadable to inspect; `up` will report the same failure
+		// properly, with its own message.
+		return true, nil //nolint:nilerr
+	}
+	commands := configCommands(cfg)
+	if len(commands) == 0 {
+		return true, nil
+	}
+	_, _ = fmt.Fprintf(a.stderr, "wyrm: this config runs shell commands:\n")
+	for _, c := range commands {
+		_, _ = fmt.Fprintf(a.stderr, "  %s\n", c)
+	}
+	return a.promptConfirm("Start the session and run them? (y/N): "), nil
+}
+
+// configCommands lists every piece of shell a config would execute, labelled
+// by where it comes from. Hooks run as real subprocesses; pane commands are
+// typed into a shell. Both execute, so both are shown — the old check looked
+// only at on_project_start and on_project_first_start.
+func configCommands(cfg *config.Config) []string {
+	var out []string
+	add := func(label, cmd string) {
+		if cmd != "" {
+			out = append(out, label+" = "+cmd)
+		}
+	}
+	add("on_project_start", cfg.Session.OnProjectStart)
+	add("on_project_first_start", cfg.Session.OnProjectFirstStart)
+	add("on_project_restart", cfg.Session.OnProjectRestart)
+	add("on_project_attach", cfg.Session.OnProjectAttach)
+	add("on_project_exit", cfg.Session.OnProjectExit)
+	add("on_project_detach", cfg.Session.OnProjectDetach)
+	for _, w := range cfg.Windows {
+		where := "window " + w.Name
+		add(where+" pre_window", w.PreWindow)
+		add(where+" post_window", w.PostWindow)
+		out = append(out, splitCommands(where, w.Splits)...)
+		for _, p := range w.Panes {
+			add(where+" pane", p.Command)
+		}
+	}
+	return out
+}
+
+func splitCommands(where string, splits []config.Split) []string {
+	var out []string
+	for _, s := range splits {
+		if s.Command != "" {
+			out = append(out, where+" command = "+s.Command)
+		}
+		if s.Run != "" {
+			out = append(out, where+" run = "+s.Run)
+		}
+		out = append(out, splitCommands(where, s.Children)...)
+	}
+	return out
 }
 
 // deriveCloneDir mirrors git's own destination-directory derivation when no

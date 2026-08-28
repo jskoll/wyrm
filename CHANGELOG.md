@@ -6,6 +6,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `wyrm doctor` checks wyrm's environment and configuration in one place and reports anything broken or silently doing nothing: the tmux binary and whether its version is new enough for the `size` values in a config, the settings file and any keys in it that were ignored, where project configs are looked for, each `[[wildcard]]` pattern and how many directories it matches, the config the current directory resolves to, whether the agent profiles and TUI theme compile, and which optional tools ($EDITOR, a clipboard backend, zoxide) are present. Exits non-zero on errors; `-strict` also fails on warnings. It only reads — nothing is repaired.
+
+### Changed
+- Agent profile construction lives in one place (`agent.ProfilesFrom`) instead of being duplicated between the TUI and `wyrm status`, which had already begun to drift.
+
+### Security
+- `wyrm clone` now shows the shell a freshly cloned repository's config would run and asks before running it, instead of printing a warning that named the flag you needed *before* you ran the command and then executing the hooks anyway. The listing covers every hook and pane command, not just `on_project_start`; a non-interactive run declines rather than proceeding unattended; `-y` skips the prompt.
+- Release archives are signed. Verification was previously unreachable: no public key was ever assigned, `.goreleaser.yaml` published no signature, and the checksum-only path could detect a corrupted download but not a tampered release. `checksums.txt` is now signed with minisign, the public key is committed at `internal/selfupdate/signing.pub` and compiled into the binary, and CI signs every pull request with a throwaway key and asserts the signature asset exists. See [SECURITY.md](SECURITY.md) for the one-time key setup.
+- Signature verification now handles minisign's prehashed `ED` algorithm, which is what minisign produces by default — a genuine signature would have failed to verify even once a key was embedded. Key IDs are checked, unknown algorithms are rejected, and the parser is tested against artifacts from the real `minisign` binary. A build with a key refuses an unsigned release; a build without one says so rather than implying it verified something.
+- `on_project_detach` is no longer subject to tmux's format expansion. `run-shell` expands its argument whatever the quoting, so a hook containing `#{...}` was silently rewritten and `#(...)` was executed by tmux at expansion time. Hooks now reach the shell verbatim.
+
+### Fixed
+- `[[wildcard]]` and zoxide projects resolve to the right config everywhere, not just when starting. `wyrm kill <name>`, `wyrm kill -all`, `wyrm restart -all`, and the TUI's `x` on the Projects panel all loaded the config by path and lost the matched directory, so the session name came from the template's own folder: `wyrm kill widget` reported `session "templates" is not running`, and `wyrm restart -all` built a spurious session named after the template directory while leaving the real session untouched. A zoxide project, which has no config file at all, could be started but never stopped. All paths now go through one resolver, `config.Project.LoadConfig`.
+- `wyrm status -w -interval 0` panicked with `non-positive interval for NewTicker`. A non-positive interval is now a usage error (exit 2).
+- `on_project_attach` no longer runs when wyrm does not attach. `wyrm up -d`, `wyrm restart -d`, and `wyrm restart -all` all build a session and hand it to nobody, and the hook fired for all three.
+- `wyrm send` can send text starting with `-`. The missing `--` terminator meant tmux read `wyrm send sess "-n hello"` as send-keys flags, and no spelling of the command worked. A leading `--` between the target and the text is also accepted and stripped.
+- The TUI's split-pane prompt accepts a command starting with `-`, for the same reason.
+- `wyrm up -n` on a config with `startup_window` no longer warns `unexpected window index` and no longer omits the `select-window`/`select-pane` commands it would run. The dry-run runner now answers `list-windows`/`list-panes` from the layout the transcript just built.
+- The TUI no longer writes terminal bell and OSC 9/777 notification escapes to stdout from a background goroutine while Bubble Tea owns the screen, which could corrupt the display. Desktop and custom-command notifications are unaffected.
+- Copying in the TUI reports what actually happened. `clipboard.Write` returned `nil` when no clipboard tool was installed, and every call site announced "copied ..." regardless — so on a headless host `y` silently did nothing. It now names the tools to install.
+
 ## [1.1.1] - 2026-08-28
 
 ### Added

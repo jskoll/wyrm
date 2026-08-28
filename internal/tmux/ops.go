@@ -172,7 +172,10 @@ func SplitPane(r Runner, target string, horizontal bool, command, root string) (
 		args = append(args, "-c", root)
 	}
 	if command != "" {
-		args = append(args, command)
+		// "--" so a command starting with "-" isn't read as more tmux flags.
+		// This is arbitrary text typed into the TUI's split prompt, the same
+		// hazard RenameSession's terminator exists for.
+		args = append(args, "--", command)
 	}
 	out, err := r.Run(args...)
 	if err != nil {

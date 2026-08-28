@@ -47,8 +47,20 @@ func (a *app) send(args []string) error {
 		return nil
 	}
 
-	text := strings.Join(fs.Args()[1:], " ")
-	out, err := a.runner.Run("send-keys", "-t", targetID, "-l", text)
+	// A lone "--" between the target and the text is the conventional
+	// end-of-flags marker, but Go's flag package stops parsing at the target
+	// (the first positional), so it arrives here as data. Drop one leading
+	// occurrence so `wyrm send t -- -n hi` means what it looks like.
+	rest := fs.Args()[1:]
+	if len(rest) > 1 && rest[0] == "--" {
+		rest = rest[1:]
+	}
+	text := strings.Join(rest, " ")
+	// "--" ends tmux's flag list. Without it tmux reads text starting with "-"
+	// as more send-keys flags, and there was no spelling of `wyrm send` that
+	// could type "-n hello" into a pane. See session.keyBatch.flush, which has
+	// always got this right.
+	out, err := a.runner.Run("send-keys", "-t", targetID, "-l", "--", text)
 	if err != nil {
 		return fmt.Errorf("sending keys to %q (%s): %w", target, targetID, tmux.CmdErr(err, out))
 	}

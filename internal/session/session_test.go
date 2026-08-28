@@ -418,39 +418,52 @@ func TestCreateOnProjectStartFailureStillCreates(t *testing.T) {
 	}
 }
 
-func TestCreateOnProjectAttachHook(t *testing.T) {
-	t.Run("fresh build runs attach hook", func(t *testing.T) {
-		cfg := &config.Config{
+// Create must never run on_project_attach: it cannot tell whether its caller
+// is about to attach, and `up -d`, `restart -d` and `restart -all` do not.
+// Callers run it immediately before handing the terminal over — see
+// app.attachSession.
+func TestCreateDoesNotRunAttachHook(t *testing.T) {
+	cfg := func() *config.Config {
+		return &config.Config{
 			Session: config.Session{Name: "proj", Root: "/tmp/proj", OnProjectAttach: "echo attaching"},
 			Windows: []config.Window{{Name: "w"}},
 		}
+	}
+
+	t.Run("fresh build", func(t *testing.T) {
 		r := &fakeRunner{}
 		var stderr bytes.Buffer
-		_, _, created, err := Create(r, cfg, io.Discard, &stderr)
+		_, _, created, err := Create(r, cfg(), io.Discard, &stderr)
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 		if !created {
 			t.Errorf("created = false, want true")
 		}
-		if !strings.Contains(stderr.String(), "running on_project_attach") {
-			t.Errorf("stderr = %q, want running on_project_attach", stderr.String())
+		if strings.Contains(stderr.String(), "on_project_attach") {
+			t.Errorf("Create ran on_project_attach; stderr = %q", stderr.String())
 		}
 	})
 
-	t.Run("existing session runs attach hook", func(t *testing.T) {
-		cfg := &config.Config{
-			Session: config.Session{Name: "proj", Root: "/tmp/proj", OnProjectAttach: "echo attaching"},
-			Windows: []config.Window{{Name: "w"}},
-		}
+	t.Run("existing session", func(t *testing.T) {
 		r := &fakeRunner{listOutput: "$1|proj"}
 		var stderr bytes.Buffer
-		_, _, created, err := Create(r, cfg, io.Discard, &stderr)
+		_, _, created, err := Create(r, cfg(), io.Discard, &stderr)
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 		if created {
 			t.Errorf("created = true, want false for already running session")
+		}
+		if strings.Contains(stderr.String(), "on_project_attach") {
+			t.Errorf("Create ran on_project_attach; stderr = %q", stderr.String())
+		}
+	})
+
+	t.Run("RunAttachHook still runs it", func(t *testing.T) {
+		var stderr bytes.Buffer
+		if err := RunAttachHook(cfg(), &stderr); err != nil {
+			t.Fatalf("RunAttachHook: %v", err)
 		}
 		if !strings.Contains(stderr.String(), "running on_project_attach") {
 			t.Errorf("stderr = %q, want running on_project_attach", stderr.String())
@@ -1347,4 +1360,50 @@ func TestCreateSynchronizeRemainOnExitZoomed(t *testing.T) {
 	if !foundZoom {
 		t.Errorf("expected resize-pane -Z for %%2, calls: %v", joined)
 	}
+}
+
+// tmux's run-shell expands its argument as a FORMAT whatever the quoting, so
+// an on_project_detach body containing "#{...}" was rewritten before the shell
+// saw it and "#(...)" was executed by tmux at expansion time. "##" is the
+// documented literal "#", and the surrounding single quotes keep tmux's
+// command lexer out of the body. Verified against tmux 3.7.
+func TestDetachHookCommandEscapesTmuxSyntax(t *testing.T) {
+	for _, tc := range []struct {
+		name, hook, want string
+	}{
+		{"plain", "echo bye", `run-shell 'echo bye'`},
+		{"format specifier", "echo #{session_name}", `run-shell 'echo ##{session_name}'`},
+		{"command substitution", "echo #(id -un)", `run-shell 'echo ##(id -un)'`},
+		{"literal hash", "echo '# comment'", `run-shell 'echo '\''## comment'\'''`},
+		{"single quote", "echo it's", `run-shell 'echo it'\''s'`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := detachHookCommand(tc.hook); got != tc.want {
+				t.Errorf("detachHookCommand(%q)\n got %s\nwant %s", tc.hook, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCreateDetachHookIsEscaped(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{
+			Name: "proj", Root: "/tmp/proj",
+			OnProjectDetach: "echo #{session_name}",
+		},
+		Windows: []config.Window{{Name: "w"}},
+	}
+	r := &fakeRunner{}
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for _, call := range r.calls {
+		if len(call) >= 5 && call[0] == "set-hook" && call[3] == "client-detached" {
+			if !strings.Contains(call[4], "##{session_name}") {
+				t.Errorf("hook argument = %q, want the # doubled so tmux does not expand it", call[4])
+			}
+			return
+		}
+	}
+	t.Error("no set-hook client-detached call")
 }

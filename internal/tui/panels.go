@@ -133,7 +133,7 @@ func killProject(m Model) (pendingAction, string, bool) {
 	if !ok || !p.Running {
 		return pendingAction{}, "", false
 	}
-	return pendingAction{op: opKillProject, path: p.Path},
+	return pendingAction{op: opKillProject, path: p.Path, root: p.Root, wildcard: p.Wildcard},
 		"Stop project '" + p.Name + "' (runs on_project_exit)?  (y/n)", true
 }
 

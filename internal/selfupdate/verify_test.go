@@ -10,8 +10,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/blake2b"
 )
 
 func buildArchive(t *testing.T, files map[string]string) []byte {
@@ -121,6 +125,16 @@ func TestExtractFileExceedsLimit(t *testing.T) {
 	}
 }
 
+// minisignFile assembles a minisign .pub or .minisig payload: a comment line
+// then base64 of algo | key ID | body.
+func minisignFile(algo string, keyID [8]byte, body []byte) []byte {
+	blob := append([]byte(algo), keyID[:]...)
+	blob = append(blob, body...)
+	return fmt.Appendf(nil, "untrusted comment: test\n%s\ntrusted comment: test\n%s\n",
+		base64.StdEncoding.EncodeToString(blob),
+		base64.StdEncoding.EncodeToString(body))
+}
+
 func TestVerifyChecksumsSignatureValid(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -128,30 +142,80 @@ func TestVerifyChecksumsSignatureValid(t *testing.T) {
 	}
 	data := []byte("sha256sum  wyrm_1.0.0_linux_amd64.tar.gz\n")
 	sig := ed25519.Sign(priv, data)
+	bare := SigningKeyFromEd25519(pub)
 
-	// Test raw binary signature
-	if err := VerifyChecksumsSignature(data, sig, pub); err != nil {
-		t.Fatalf("VerifyChecksumsSignature raw: %v", err)
+	t.Run("raw", func(t *testing.T) {
+		if err := VerifyChecksumsSignature(data, sig, bare); err != nil {
+			t.Fatalf("raw: %v", err)
+		}
+	})
+	t.Run("hex", func(t *testing.T) {
+		if err := VerifyChecksumsSignature(data, []byte(hex.EncodeToString(sig)), bare); err != nil {
+			t.Fatalf("hex: %v", err)
+		}
+	})
+	t.Run("base64", func(t *testing.T) {
+		if err := VerifyChecksumsSignature(data, []byte(base64.StdEncoding.EncodeToString(sig)), bare); err != nil {
+			t.Fatalf("base64: %v", err)
+		}
+	})
+
+	keyID := [8]byte{1, 2, 3, 4, 5, 6, 7, 8}
+	key, err := ParseMinisignPublicKey(minisignFile(algoLegacy, keyID, pub))
+	if err != nil {
+		t.Fatalf("ParseMinisignPublicKey: %v", err)
 	}
 
-	// Test hex encoded signature
-	hexSig := []byte(hex.EncodeToString(sig))
-	if err := VerifyChecksumsSignature(data, hexSig, pub); err != nil {
-		t.Fatalf("VerifyChecksumsSignature hex: %v", err)
-	}
+	t.Run("minisign legacy Ed", func(t *testing.T) {
+		if err := VerifyChecksumsSignature(data, minisignFile(algoLegacy, keyID, sig), key); err != nil {
+			t.Fatalf("minisign Ed: %v", err)
+		}
+	})
 
-	// Test base64 encoded signature
-	b64Sig := []byte(base64.StdEncoding.EncodeToString(sig))
-	if err := VerifyChecksumsSignature(data, b64Sig, pub); err != nil {
-		t.Fatalf("VerifyChecksumsSignature base64: %v", err)
-	}
+	// What minisign 0.12 actually emits: the signature covers BLAKE2b-512 of
+	// the file, not the file. Verifying it as though it were legacy "Ed" fails,
+	// which is why a genuine minisign signature never validated here.
+	t.Run("minisign prehashed ED", func(t *testing.T) {
+		sum := blake2b.Sum512(data)
+		preSig := ed25519.Sign(priv, sum[:])
+		if err := VerifyChecksumsSignature(data, minisignFile(algoPrehash, keyID, preSig), key); err != nil {
+			t.Fatalf("minisign ED: %v", err)
+		}
+		if err := VerifyChecksumsSignature(data, minisignFile(algoLegacy, keyID, preSig), key); err == nil {
+			t.Fatal("a prehashed signature must not verify as legacy Ed")
+		}
+	})
 
-	// Test Minisign format signature
-	minisignContent := fmt.Sprintf("untrusted comment: signature from minisign secret key\n%s\ntrusted comment: timestamp:12345\n%s\n",
-		base64.StdEncoding.EncodeToString(append([]byte{0x45, 0x64, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}, sig...)),
-		base64.StdEncoding.EncodeToString(sig))
-	if err := VerifyChecksumsSignature(data, []byte(minisignContent), pub); err != nil {
-		t.Fatalf("VerifyChecksumsSignature minisign: %v", err)
+	t.Run("key id mismatch is rejected", func(t *testing.T) {
+		other := [8]byte{9, 9, 9, 9, 9, 9, 9, 9}
+		if err := VerifyChecksumsSignature(data, minisignFile(algoLegacy, other, sig), key); err == nil {
+			t.Fatal("want error for a signature made by a different key id")
+		}
+	})
+
+	t.Run("unknown algorithm is rejected", func(t *testing.T) {
+		if err := VerifyChecksumsSignature(data, minisignFile("Xx", keyID, sig), key); err == nil {
+			t.Fatal("want error for an unknown minisign algorithm")
+		}
+	})
+}
+
+// The committed signing.pub is a placeholder until a real release key is
+// generated. This asserts the two states stay distinguishable — a key that
+// parses is used and enforced, one that does not disables verification loudly
+// (see app.verifyChecksumsSignature) rather than silently.
+func TestEmbeddedSigningKeyStateIsExplicit(t *testing.T) {
+	if DefaultSigningKey.Valid() {
+		if len(DefaultSigningKey.key) != ed25519.PublicKeySize {
+			t.Errorf("embedded key is marked valid but is %d bytes", len(DefaultSigningKey.key))
+		}
+		if !DefaultSigningKey.hasID {
+			t.Error("embedded key should carry a minisign key id")
+		}
+		return
+	}
+	if _, err := ParseMinisignPublicKey(signingPubFile); err == nil {
+		t.Error("signing.pub parses but DefaultSigningKey is invalid")
 	}
 }
 
@@ -164,18 +228,58 @@ func TestVerifyChecksumsSignatureInvalid(t *testing.T) {
 	sig := ed25519.Sign(priv, data)
 
 	tamperedData := []byte("tampered  wyrm_1.0.0_linux_amd64.tar.gz\n")
-	if err := VerifyChecksumsSignature(tamperedData, sig, pub); err == nil {
+	if err := VerifyChecksumsSignature(tamperedData, sig, SigningKeyFromEd25519(pub)); err == nil {
 		t.Fatal("VerifyChecksumsSignature: want error for tampered data, got nil")
 	}
 
 	// Wrong public key
 	wrongPub, _, _ := ed25519.GenerateKey(rand.Reader)
-	if err := VerifyChecksumsSignature(data, sig, wrongPub); err == nil {
+	if err := VerifyChecksumsSignature(data, sig, SigningKeyFromEd25519(wrongPub)); err == nil {
 		t.Fatal("VerifyChecksumsSignature: want error for wrong public key, got nil")
 	}
 
 	// Nil or empty public key
-	if err := VerifyChecksumsSignature(data, sig, nil); err == nil {
+	if err := VerifyChecksumsSignature(data, sig, SigningKey{}); err == nil {
 		t.Fatal("VerifyChecksumsSignature: want error for nil public key, got nil")
+	}
+}
+
+// TestVerifyRealMinisignArtifacts checks the parser against files produced by
+// the actual minisign binary (0.12), not by this test's own encoder.
+//
+// It exists because the hand-rolled fixture the old tests used was not a valid
+// minisign file, and hid the fact that real minisign defaults to the prehashed
+// "ED" algorithm — so a genuine signature would have failed verification even
+// once a key was embedded. testdata/ holds a throwaway key pair's public half;
+// the secret key was never saved.
+func TestVerifyRealMinisignArtifacts(t *testing.T) {
+	pubPEM, err := os.ReadFile(filepath.Join("testdata", "minisign.pub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checksums, err := os.ReadFile(filepath.Join("testdata", "checksums.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig, err := os.ReadFile(filepath.Join("testdata", "checksums.txt.minisig"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	key, err := ParseMinisignPublicKey(pubPEM)
+	if err != nil {
+		t.Fatalf("ParseMinisignPublicKey on a real minisign key: %v", err)
+	}
+	if !key.Valid() {
+		t.Fatal("real minisign public key parsed but is not usable")
+	}
+	if err := VerifyChecksumsSignature(checksums, sig, key); err != nil {
+		t.Fatalf("verifying a real minisign signature: %v", err)
+	}
+
+	// And it must actually be checking something.
+	tampered := append([]byte("0"), checksums[1:]...)
+	if err := VerifyChecksumsSignature(tampered, sig, key); err == nil {
+		t.Fatal("tampered checksums.txt verified against a real signature")
 	}
 }

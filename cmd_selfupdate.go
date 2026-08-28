@@ -85,6 +85,60 @@ func (a *app) selfupdate(args []string) error {
 	return a.installRelease(client, rel, realPath, info.Mode(), current)
 }
 
+// signatureAssets are the names goreleaser may publish the checksums
+// signature under, in preference order.
+var signatureAssets = []string{"checksums.txt.minisig", "checksums.txt.sig"}
+
+// verifyChecksumsSignature checks the release's signature over checksums.txt,
+// and says plainly what it did.
+//
+// checksums.txt is fetched from the same place as the archive it vouches for,
+// so on its own it proves the download was not corrupted — not that it came
+// from the wyrm maintainers. The signature is what separates those two, and it
+// is the reason this is worth the noise: three nested branches here used to
+// download the signature and then skip verification whenever no key was
+// embedded, which was every shipped build.
+func (a *app) verifyChecksumsSignature(client selfupdate.HTTPDoer, rel selfupdate.Release, checksums []byte) error {
+	key := selfupdate.DefaultSigningKey
+
+	var sigURL string
+	for _, name := range signatureAssets {
+		if u, ok := rel.Assets[name]; ok {
+			sigURL = u
+			break
+		}
+	}
+
+	if sigURL == "" {
+		if key.Valid() {
+			return fmt.Errorf("release %s has no signature for checksums.txt, but this build requires one", rel.Version)
+		}
+		_, _ = fmt.Fprintf(a.stderr,
+			"wyrm: warning: release %s is not signed; verifying checksums only, "+
+				"which detects a corrupted download but not a tampered release\n", rel.Version)
+		return nil
+	}
+
+	if !key.Valid() {
+		// Refusing would strand users on a build that shipped without a key;
+		// verifying silently is what got us here. Say it instead.
+		_, _ = fmt.Fprintf(a.stderr,
+			"wyrm: warning: release %s is signed, but this build has no signing key "+
+				"compiled in and cannot check it; verifying checksums only\n", rel.Version)
+		return nil
+	}
+
+	sig, err := selfupdate.Get(client, sigURL)
+	if err != nil {
+		return fmt.Errorf("downloading signature: %w", err)
+	}
+	if err := selfupdate.VerifyChecksumsSignature(checksums, sig, key); err != nil {
+		return fmt.Errorf("verifying checksums signature: %w", err)
+	}
+	_, _ = fmt.Fprintf(a.stderr, "wyrm: verified the release signature for checksums.txt\n")
+	return nil
+}
+
 // fetchRelease looks up the release selfupdate should install: the exact
 // version when pinned, otherwise the latest.
 func fetchRelease(client selfupdate.HTTPDoer, pin string) (selfupdate.Release, error) {
@@ -117,28 +171,8 @@ func (a *app) installRelease(client selfupdate.HTTPDoer, rel selfupdate.Release,
 		return err
 	}
 
-	if sigURL, ok := rel.Assets["checksums.txt.sig"]; ok {
-		sig, err := selfupdate.Get(client, sigURL)
-		if err != nil {
-			return fmt.Errorf("downloading signature: %w", err)
-		}
-		if len(selfupdate.DefaultSigningPublicKey) > 0 {
-			if err := selfupdate.VerifyChecksumsSignature(checksums, sig, selfupdate.DefaultSigningPublicKey); err != nil {
-				return fmt.Errorf("verifying checksums signature: %w", err)
-			}
-		}
-	} else if sigURL, ok := rel.Assets["checksums.txt.minisig"]; ok {
-		sig, err := selfupdate.Get(client, sigURL)
-		if err != nil {
-			return fmt.Errorf("downloading signature: %w", err)
-		}
-		if len(selfupdate.DefaultSigningPublicKey) > 0 {
-			if err := selfupdate.VerifyChecksumsSignature(checksums, sig, selfupdate.DefaultSigningPublicKey); err != nil {
-				return fmt.Errorf("verifying checksums signature: %w", err)
-			}
-		}
-	} else if len(selfupdate.DefaultSigningPublicKey) > 0 {
-		return fmt.Errorf("release %s is missing signature for checksums.txt", rel.Version)
+	if err := a.verifyChecksumsSignature(client, rel, checksums); err != nil {
+		return err
 	}
 
 	if err := selfupdate.VerifyChecksum(checksums, assetName, archive); err != nil {
