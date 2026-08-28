@@ -1120,8 +1120,13 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // nothing at all. There is no OSC 52 fallback here on purpose: it would have to
 // be written to the terminal, which Bubble Tea owns while the TUI is up — see
 // clipboard.OSC52.
+// clipboardWrite is clipboard.Write behind a variable so a test can exercise
+// the copy keys on a machine that has no clipboard tool at all — CI runners
+// have none, and Model must stay comparable, so this cannot be a func field.
+var clipboardWrite = clipboard.Write
+
 func (m *Model) copy(text, what string) {
-	if err := clipboard.Write(text); err != nil {
+	if err := clipboardWrite(text); err != nil {
 		if errors.Is(err, clipboard.ErrNoBackend) {
 			m.info = "cannot copy: no clipboard tool found (install " + clipboard.Backends() + ")"
 			return

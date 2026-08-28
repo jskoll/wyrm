@@ -108,8 +108,6 @@ var writeSystemClipboard = func(text string) error {
 		return err
 	}
 	cmd := exec.Command(name, args...)
-	cmd.Stdin = stringsReader(text)
+	cmd.Stdin = strings.NewReader(text)
 	return cmd.Run()
 }
-
-func stringsReader(s string) io.Reader { return strings.NewReader(s) }
