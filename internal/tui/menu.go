@@ -65,8 +65,17 @@ func projectMenu(m Model) []menuEntry {
 }
 
 func sessionMenu(m Model) []menuEntry {
-	if _, ok := m.currentSession(); !ok {
+	e, ok := m.currentSessionEntry()
+	if !ok {
 		return nil
+	}
+	// A stopped row can only be started — everything below targets a session
+	// ID it doesn't have.
+	if !e.Running {
+		if !e.HasProject {
+			return nil
+		}
+		return []menuEntry{{menuStart, "Start session", "↵"}}
 	}
 	return []menuEntry{
 		{menuAttach, "Attach", "↵"},
@@ -176,7 +185,10 @@ func (m Model) runMenuEntry() (tea.Model, tea.Cmd) {
 	case menuAttach:
 		return m.attachToSelection()
 	case menuStart:
-		return m.startProject()
+		// Not startProject directly: the menu is always opened on the focused
+		// panel, and "start" means the project on Projects and the stopped row
+		// on Sessions. activateSelection is the one place that knows which.
+		return m.activateSelection()
 	case menuEdit:
 		return m.editProject()
 	case menuRename:

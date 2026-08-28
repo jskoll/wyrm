@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `a` toggle in the TUI's Sessions panel: lists known-but-stopped projects alongside the running sessions, with `Enter` starting a stopped one. Gives `wyrm pick`, which has no Projects panel, a way to start a session rather than only attach to one.
+
+### Fixed
+- A `[[wildcard]]` match no longer duplicates a project that has its own config: a pattern such as `~/code/*` covers the directory you are standing in as well as its siblings, and the specific config now wins over the template.
+
 ## [1.1.0] - 2026-08-16
 
 ### Added

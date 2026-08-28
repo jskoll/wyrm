@@ -196,6 +196,14 @@ type Model struct {
 	filter    string
 	filtering bool
 
+	// allSessions widens the Sessions panel from "what tmux is running" to
+	// "everything I could be in", folding the not-running projects in as
+	// startable rows — see sessionEntries. Off by default: the panel's job in
+	// the four-panel cascade is the live tmux world, and Projects already
+	// stands beside it. It earns its keep in `wyrm pick`, which shows no
+	// Projects panel and so otherwise cannot start a stopped session at all.
+	allSessions bool
+
 	// agents holds the last agent-pane scan: which sessions, windows, and panes
 	// hold an AI agent that's waiting on the user. Empty until the first scan.
 	agents agentStatus
@@ -417,15 +425,16 @@ func (m Model) visibleProjects() []Project {
 	return out
 }
 
-func (m Model) visibleSessions() []sessions.Session {
+func (m Model) visibleSessions() []sessionEntry {
+	entries := m.sessionEntries()
 	f := m.filterFor(panelSessions)
 	if f == "" {
-		return m.sessions
+		return entries
 	}
-	out := make([]sessions.Session, 0, len(m.sessions))
-	for _, s := range m.sessions {
-		if _, ok := sessions.FuzzyMatch(f, s.Name); ok {
-			out = append(out, s)
+	out := make([]sessionEntry, 0, len(entries))
+	for _, e := range entries {
+		if _, ok := sessions.FuzzyMatch(f, e.Name); ok {
+			out = append(out, e)
 		}
 	}
 	return out
@@ -515,10 +524,25 @@ func (m Model) currentProject() (Project, bool) {
 	return list[m.cur[panelProjects]], true
 }
 
+// currentSession is the selected *running* session. A stopped row (only
+// reachable with allSessions on) reports false, which is deliberately the same
+// answer as an empty panel: every session-targeting action — attach, rename,
+// kill, new-window, the window cascade — already guards on it, so none of them
+// needs to learn that a row without a session ID now exists.
 func (m Model) currentSession() (sessions.Session, bool) {
+	e, ok := m.currentSessionEntry()
+	if !ok || !e.Running {
+		return sessions.Session{}, false
+	}
+	return e.Session, true
+}
+
+// currentSessionEntry is the selected row whether or not it is running — what
+// the renderer, the menu, and Enter need in order to tell the two apart.
+func (m Model) currentSessionEntry() (sessionEntry, bool) {
 	list := m.visibleSessions()
 	if m.cur[panelSessions] < 0 || m.cur[panelSessions] >= len(list) {
-		return sessions.Session{}, false
+		return sessionEntry{}, false
 	}
 	return list[m.cur[panelSessions]], true
 }
@@ -968,10 +992,16 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "enter":
-		if m.focus == panelProjects {
-			return m.startProject()
+		return m.activateSelection()
+	case "a":
+		// Scoped to the panel it changes, like "e" on Projects.
+		if m.focus != panelSessions {
+			return m, nil
 		}
-		return m.attachToSelection()
+		m.allSessions = !m.allSessions
+		// The row under the cursor moves when the list grows or shrinks, so
+		// the window cascade has to follow it — clampFocused is exactly that.
+		return m.clampFocused()
 	case "x":
 		return m.startKill()
 	case "r":

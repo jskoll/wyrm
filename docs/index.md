@@ -244,19 +244,31 @@ selected pane.
 
 The four left panels form a hierarchy: **Projects** (every `.wyrm.toml` wyrm can
 discover — the local one plus the shared directory, marked `●` when a session by
-that name is running) → **Sessions** (running now) → **Windows** → **Panes**.
+that name is running) → **Sessions** (running now, or everything known with `a`) → **Windows** → **Panes**.
 Windows track the selected session and panes track the selected window. The main
 panel previews the selection: the live pane contents (via `capture-pane`) for the
 session panels, or the config file's contents on the Projects panel. Focus starts
 on **Sessions** — the usual reason to open the TUI is to get back to something
 already running.
 
+By default the **Sessions** panel lists what tmux is running. Pressing `a`
+widens it to every session you could be in: the running ones first, then each
+discovered project that isn't running, marked `stopped`. `Enter` on a stopped
+row builds its session (exactly like `Enter` on **Projects**), so `wyrm pick` —
+which shows no Projects panel — can start a session too, not only reach one.
+
+A project only appears there if wyrm can discover it: a `.wyrm.toml` in the
+current directory or the shared config directory, a `[[wildcard]]` pattern
+match, or (opt-in) a zoxide-known directory. If the panel shows only the
+project you are standing in, that is what to configure — see
+[`configuration.md`](configuration.md).
+
 | Key | Action |
 |---|---|
 | `Tab` / `Shift-Tab`, `1`–`4` | move focus between panels |
 | `↑` / `↓`, `j` / `k` | move the selection in the focused panel |
 | `f` | find a pane across every session at once |
-| `Enter` | attach — lands on the exact window/pane under the cursor (or, on Projects, starts/attaches the config's session) |
+| `Enter` | attach — lands on the exact window/pane under the cursor (or, on Projects and on a stopped **Sessions** row, starts/attaches the config's session) |
 | `x` | kill the focused session / window / pane (or, on Projects, stop the session running `on_project_exit`) — with a confirm |
 | `r` | rename the focused session or window |
 | `n` | new window in the current session |
@@ -267,6 +279,7 @@ already running.
 | `L` | cycle the focused window through tmux's standard layouts |
 | `z` | toggle zoom on the focused pane |
 | `e` | edit the selected project's config in `$EDITOR` |
+| `a` | on **Sessions**, also list known-but-stopped projects — `Enter` starts one |
 | `R` | reload the project and session lists |
 | `?` | show the full keyboard-shortcut help overlay (scrollable) |
 | `q` / `Ctrl-C` | quit |

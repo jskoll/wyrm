@@ -194,6 +194,56 @@ func TestDiscoverProjectsWildcardDedup(t *testing.T) {
 	}
 }
 
+// TestDiscoverProjectsWildcardYieldsToOwnConfig covers the other half of the
+// identity model: a pattern like "~/code/*" also matches the directory the
+// user is standing in, and that directory's own config must not be shadowed
+// by — or listed alongside — the template's synthesized entry.
+func TestDiscoverProjectsWildcardYieldsToOwnConfig(t *testing.T) {
+	base := t.TempDir()
+	template := filepath.Join(t.TempDir(), "tmpl.wyrm.toml")
+	if err := os.WriteFile(template, []byte("[[windows]]\nname = \"w\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	own := filepath.Join(base, "mine")
+	if err := os.MkdirAll(own, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(base, "other"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "[session]\nname = \"mine\"\nroot = \".\"\n[[windows]]\nname = \"w\"\n"
+	if err := os.WriteFile(filepath.Join(own, DefaultFileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(own)
+
+	settings := &Settings{Wildcard: []Wildcard{{Pattern: filepath.Join(base, "*"), Config: template}}}
+	got := DiscoverProjects(settings)
+
+	var mine []Project
+	for _, p := range got {
+		if p.Name == "mine" {
+			mine = append(mine, p)
+		}
+	}
+	if len(mine) != 1 {
+		t.Fatalf("project %q appears %d times, want once: %+v", "mine", len(mine), got)
+	}
+	if mine[0].Wildcard {
+		t.Errorf("project mine = %+v, want the local config to win over the template", mine[0])
+	}
+	// The sibling the user has no config for still comes from the template.
+	var other bool
+	for _, p := range got {
+		if p.Name == "other" && p.Wildcard {
+			other = true
+		}
+	}
+	if !other {
+		t.Errorf("sibling directory dropped: %+v", got)
+	}
+}
+
 // TestFindProjectAliasResolvesAfterExactName covers both halves of the
 // documented rule: an alias resolves a project, and an exact project name
 // always wins over an alias collision.

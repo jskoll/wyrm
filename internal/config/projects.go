@@ -113,7 +113,27 @@ func DiscoverProjects(settings *Settings) []Project {
 			}
 		}
 	}
-	projects = append(projects, DiscoverWildcardProjects(settings)...)
+	// A wildcard match whose name a real config already claims is dropped: a
+	// pattern like "~/Code/*" covers the directory you are standing in as
+	// well as its siblings, so the project with its own .wyrm.toml would
+	// otherwise be listed twice — once from its file and once from the
+	// template. The specific config wins, which is the same precedence
+	// appendZoxideProjects applies for the same reason.
+	//
+	// Names, not paths, because that is the only thing the two have in
+	// common: the file-based entry's Path is its own config and the
+	// wildcard's is the shared template.
+	byName := make(map[string]bool, len(projects))
+	for _, p := range projects {
+		byName[p.Name] = true
+	}
+	for _, w := range DiscoverWildcardProjects(settings) {
+		if byName[w.Name] {
+			continue
+		}
+		byName[w.Name] = true
+		projects = append(projects, w)
+	}
 	return projects
 }
 

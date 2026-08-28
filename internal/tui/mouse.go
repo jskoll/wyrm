@@ -120,10 +120,22 @@ func (m Model) isDoubleClick(_ tea.MouseMsg, h hit) bool {
 	return m.now().Sub(m.lastClick.at) <= doubleClickWindow
 }
 
-// activateSelection is the click equivalent of Enter.
+// activateSelection is what Enter and a double click both do: start the thing
+// under the cursor if it isn't running, otherwise attach to it. Keys and mouse
+// share it so a double click can never mean something Enter doesn't.
 func (m Model) activateSelection() (tea.Model, tea.Cmd) {
-	if m.focus == panelProjects {
+	switch m.focus {
+	case panelProjects:
 		return m.startProject()
+	case panelSessions:
+		// With allSessions on the panel holds stopped rows too, and Enter on
+		// one means "start it" — the same thing Enter means on Projects.
+		if e, ok := m.currentSessionEntry(); ok && !e.Running {
+			if !e.HasProject {
+				return m, nil
+			}
+			return m, startProjectCmd(m.runner, m.settings, e.Project)
+		}
 	}
 	return m.attachToSelection()
 }

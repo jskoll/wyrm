@@ -55,6 +55,11 @@ config  = "~/.config/wyrm/settings/_dev-template.wyrm.toml"
 | `pattern` | string | A glob (`*`, `?`, `[...]`); `~` and `$VAR` are expanded. A trailing `/**` matches every directory nested at any depth under the base, instead of one level |
 | `config` | string | Path to the template config applied to every matching directory |
 
+A directory that has its own config is never listed twice: a pattern like
+`~/code/*` matches the directory you are standing in as well as its siblings,
+and that directory's own `.wyrm.toml` (or shared config) wins over the
+template.
+
 The template is an ordinary `.wyrm.toml`. Its `session.name` is normally left
 unset, since each matched directory's basename supplies it. Its
 `session.root` is always overridden with the matched directory regardless of
