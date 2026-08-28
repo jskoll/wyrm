@@ -2,10 +2,13 @@ package config
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -210,8 +213,15 @@ type AgentNotify struct {
 	OnBlocked *bool `toml:"on_blocked"`
 	// OnIdle triggers notification when an agent transitions to idle. Defaults to false.
 	OnIdle *bool `toml:"on_idle"`
-	// Command is an optional shell command to execute for notifications.
-	// Variables {title}, {message}, {state}, {session}, {pane} are expanded.
+	// Command is an optional shell command to execute for notifications. It
+	// runs via $SHELL with the notification in the environment as
+	// WYRM_NOTIFY_TITLE, _MESSAGE, _STATE, _SESSION and _PANE — see
+	// agent.BuildCustomNotifyCommand. This comment previously promised
+	// {title}/{message}/{state}/{session}/{pane} placeholder expansion, which
+	// nothing has ever implemented.
+	//
+	// Setting this replaces the desktop notification rather than adding to it:
+	// agent.Dispatch returns once the command has run.
 	Command string `toml:"command"`
 }
 
@@ -385,7 +395,17 @@ func LoadUserDefault() (*Config, error) {
 	return Load(path)
 }
 
-func configDir() (string, error) {
+func configDir() (string, error) { return UserConfigDir() }
+
+// UserConfigDir is the base configuration directory: $XDG_CONFIG_HOME when
+// set, else ~/.config.
+//
+// Exported because it is not only wyrm's own config that lives under it.
+// `wyrm setup-tmux -a` looks for the user's tmux.conf and had this rule
+// hardcoded to ~/.config, so anyone with XDG_CONFIG_HOME pointed elsewhere had
+// the snippet written to a file tmux does not read — silently, and reporting
+// success.
+func UserConfigDir() (string, error) {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
 		return xdg, nil
 	}
@@ -454,9 +474,20 @@ func (s *Settings) ResolvedSharedDir() (string, error) {
 	return filepath.Abs(dir)
 }
 
-// SharedConfigPath returns the path to the shared config file for the
-// project rooted at dir: "<folderName>.wyrm.toml" inside the shared
-// config directory.
+// SharedConfigPath returns the path to the shared config file for the project
+// rooted at dir: "<folderName>.wyrm.toml" inside the shared config directory,
+// or "<folderName>-<hash>.wyrm.toml" when the plain name is already taken by a
+// different project.
+//
+// The plain name alone collides on basename, which monorepos make ordinary:
+// ~/work/api and ~/personal/api, or services/api and packages/api, all map to
+// api.wyrm.toml. That made the second project silently read the first one's
+// config and build the wrong session in the wrong root, because DiscoverGlobal
+// and migrate-config both ask this function where the file lives.
+//
+// Disambiguation is deliberately conditional rather than unconditional: an
+// existing single project keeps the name it already has on disk, so nothing
+// needs migrating. Only the second project to claim a basename gets a suffix.
 func (s *Settings) SharedConfigPath(dir string) (string, error) {
 	sharedDir, err := s.ResolvedSharedDir()
 	if err != nil {
@@ -466,7 +497,75 @@ func (s *Settings) SharedConfigPath(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(sharedDir, filepath.Base(abs)+DefaultFileName), nil
+	plain := filepath.Join(sharedDir, filepath.Base(abs)+DefaultFileName)
+	if owner, known := SharedConfigOwner(plain); known && !SamePath(owner, abs) {
+		return filepath.Join(sharedDir, filepath.Base(abs)+"-"+shortPathHash(canonicalPath(abs))+DefaultFileName), nil
+	}
+	return plain, nil
+}
+
+// SamePath reports whether two paths name the same directory, comparing what
+// they resolve to rather than how they are spelled.
+//
+// A plain string comparison is not enough: os.Getwd returns a symlink-resolved
+// path while a config's session.root is whatever the user typed, so on macOS
+// (/var -> /private/var) or any setup with a symlinked home, a project failed
+// to recognise its own shared config and fell through to discovery.
+//
+// Exported because every comparison against SharedConfigOwner needs it —
+// `wyrm migrate-config` used == and could therefore tell you a file belonged
+// to another project when it was your own, spelled differently.
+func SamePath(a, b string) bool {
+	return a == b || canonicalPath(a) == canonicalPath(b)
+}
+
+// canonicalPath resolves symlinks where it can, and otherwise returns the path
+// unchanged — a path that does not exist yet cannot be resolved, and is still
+// perfectly usable as an identity.
+func canonicalPath(p string) string {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	return p
+}
+
+// SharedConfigOwner reports the absolute project directory a shared config
+// belongs to, and whether that could be determined at all.
+//
+// Only an absolute session.root identifies a project. A missing root, or a
+// relative one — which resolves against the shared directory and is what
+// CheckSharedRoot warns about — is reported as unknown, and every caller
+// treats unknown as "assume it is ours". That is what keeps configs written
+// before this existed working exactly as they did.
+func SharedConfigOwner(path string) (string, bool) {
+	cfg, err := Load(path)
+	if err != nil || cfg == nil {
+		return "", false
+	}
+	root := cfg.Session.Root
+	if root == "" {
+		return "", false
+	}
+	if !filepath.IsAbs(root) && !strings.HasPrefix(root, "~") && !strings.Contains(root, "$") {
+		return "", false
+	}
+	_, resolved, err := cfg.Session.Resolve(cfg.Dir())
+	if err != nil {
+		return "", false
+	}
+	abs, err := filepath.Abs(resolved)
+	if err != nil {
+		return "", false
+	}
+	return abs, true
+}
+
+// shortPathHash is the disambiguator in a shared config filename: eight hex
+// characters of the project's absolute path. Short enough to keep the filename
+// readable, and stable, so the same project always resolves to the same file.
+func shortPathHash(abs string) string {
+	sum := sha256.Sum256([]byte(abs))
+	return hex.EncodeToString(sum[:4])
 }
 
 // EditTarget returns the path wyrm edit should open: the discovered config

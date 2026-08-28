@@ -17,6 +17,32 @@ directory's basename) inside `shared_dir` first, falling back to the normal
 local search if it's missing. Run `wyrm migrate-config` to move an existing
 local config into the shared directory under the right name.
 
+### When two projects share a folder name
+
+Basenames collide: `~/work/api` and `~/personal/api` both want
+`api.wyrm.toml`, and so do `services/api` and `packages/api` in a monorepo.
+
+A shared config belongs to the directory its absolute `session.root` names.
+The first project to claim a basename keeps the plain filename; any other
+project with that basename gets `<folder>-<hash>.wyrm.toml`, where the hash is
+eight characters of its absolute path — stable, so a project always resolves to
+the same file. `wyrm migrate-config` reports it when it applies, and names the
+owning directory if you try to migrate onto a file that is already taken.
+
+Nothing already on disk moves: a config that has no collision keeps the name it
+has. A config with no `session.root`, or a relative one, identifies no
+particular project, so it is treated as belonging to whoever is asking — which
+is how configs written before this worked, and continue to work.
+
+Since a shared config with no `[session].name` is named after its file, the
+disambiguated project starts as `wyrm api-3f2a1c`. Set a name to pick your own:
+
+```toml
+[session]
+name = "api-personal"
+root = "~/personal/api"
+```
+
 ## Creating a config (`wyrm init`)
 
 Run `wyrm init` to generate a new `.wyrm.toml` for the current project. By default it guides you through an interactive wizard (session name, root directory, window layout presets, and pane commands), or you can scaffold starter templates non-interactively:
@@ -82,6 +108,11 @@ name = "code"
 Projects panel, and `wyrm list-configs` all pick up wildcard matches the same
 way they pick up any other project — matched entries are marked `~` in the
 TUI to distinguish them from a project with its own config file.
+
+Matching a pattern means walking the filesystem, and a `/**` pattern walks the
+whole subtree. Results are cached for 10 seconds, so a long-running TUI is not
+re-walking your home directory on every refresh. A directory you create shows up
+within that window; press `R` in the TUI to see it immediately.
 
 ## `[tmux]` — which tmux wyrm talks to
 
@@ -176,6 +207,51 @@ Defining any profile replaces the built-in one entirely, so one agent's chrome
 can't decide another's state — list Claude Code yourself if you still want it.
 A profile with no `commands`, or a `busy_pattern` that doesn't compile, is an
 error reported before the TUI starts rather than a silent fallback.
+
+### `[tui.agent.notify]` — being told when an agent needs you
+
+Off by default. When enabled, the TUI notifies you as an agent changes state,
+so you can leave it running and get on with something else:
+
+```toml
+[tui.agent.notify]
+enabled = true          # nothing is delivered until this is on
+```
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `false` | Master switch — with this off, nothing below is delivered |
+| `desktop` | bool | `true` | OS notification (`osascript` on macOS, `notify-send` on Linux) |
+| `bell` | bool | `false` | Terminal bell (`\a`) |
+| `osc` | bool | `false` | OSC 9 / OSC 777 escape, for terminals that turn it into a notification |
+| `on_blocked` | bool | `true` | Notify when an agent starts waiting on an answer |
+| `on_idle` | bool | `false` | Notify when an agent finishes and goes idle |
+| `command` | string | — | Run this instead of the desktop notification (see below) |
+
+`bell` and `osc` are written to the terminal, so they only apply while
+`wyrm tui` is running. `desktop` and `command` work regardless.
+
+`command` **replaces** the desktop notification rather than adding to it — if
+you set one, `desktop` is not delivered. The command runs through your `$SHELL`
+with the notification in its environment:
+
+| Variable | Contents |
+|---|---|
+| `WYRM_NOTIFY_TITLE` | Short summary line |
+| `WYRM_NOTIFY_MESSAGE` | Body text |
+| `WYRM_NOTIFY_STATE` | `blocked` or `idle` |
+| `WYRM_NOTIFY_SESSION` | Session name the agent is in |
+| `WYRM_NOTIFY_PANE` | tmux pane ID (`%3`) |
+
+```toml
+[tui.agent.notify]
+enabled = true
+on_idle = true
+command = 'terminal-notifier -title "$WYRM_NOTIFY_TITLE" -message "$WYRM_NOTIFY_MESSAGE"'
+```
+
+`wyrm doctor` reports which channels are configured, so you can tell whether a
+silent setup is switched off or merely undeliverable.
 
 ## `[zoxide]` — frecency-based directory discovery
 
@@ -342,6 +418,8 @@ with a bigger hook.
 | `splits` | list | — | Split tree (below) — the recommended layout format |
 | `panes` | list | — | Legacy flat pane list (below); ignored when `splits` is set |
 | `layout` | string | `tiled` | tmux layout applied after legacy `panes` (`even-horizontal`, `main-vertical`, ...). Ignored when `splits` is set — a named layout would discard the tree's sizes — and wyrm warns if you set both |
+| `synchronize` | bool | `false` | Turn on tmux's `synchronize-panes` for this window, so typing goes to every pane at once. `synchronize_panes` is an accepted alias |
+| `remain_on_exit` | bool | `false` | Keep the window's panes open after their command exits, instead of closing them — so you can read what a failed command printed |
 
 `post_window` is a real subprocess — the same shape as `on_project_start`/
 `on_project_exit`, run via your `$SHELL` (falling back to `sh`) in the
@@ -372,6 +450,8 @@ A failure warns and continues, same as every other per-window failure — see
 | `root` | string | window root | This pane's working directory, relative to the window's root unless absolute |
 | `env` | table | — | Environment variables for this pane and its children, overriding window and session env |
 | `children` | list | — | Nested splits, applied inside this entry's pane |
+| `zoomed` | bool | `false` | Start with this pane focused and zoomed. `zoom` is an accepted alias. Only one pane per window can be zoomed — the last one that asks wins |
+| `remain_on_exit` | bool | `false` | Keep this pane open after its command exits (the per-pane form of the window option) |
 
 ### `command` vs `run`
 

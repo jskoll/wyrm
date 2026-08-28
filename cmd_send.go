@@ -12,8 +12,13 @@ import (
 // window, or pane.
 func (a *app) send(args []string) error {
 	fs := a.newFlagSet("send")
-	literal := fs.Bool("l", false, "send exact characters (disable special key expansion)")
-	fs.BoolVar(literal, "literal", false, "send exact characters (disable special key expansion)")
+	// -l was accepted and then never read: it is what the default path already
+	// does (tmux send-keys -l), so it changed nothing while -h advertised that
+	// it did. Kept, because scripts pass it and removing it would break them,
+	// but it now states the mode rather than implying a switch — and
+	// contradicting it with -r is an error instead of -r silently winning.
+	literal := fs.Bool("l", false, "send exact characters, the default (opposite of -r)")
+	fs.BoolVar(literal, "literal", false, "send exact characters, the default (opposite of -r)")
 	noEnter := fs.Bool("n", false, "do not append Enter keystroke")
 	fs.BoolVar(noEnter, "no-enter", false, "do not append Enter keystroke")
 	raw := fs.Bool("r", false, "send raw tmux key symbols (e.g. C-c, Escape)")
@@ -27,6 +32,10 @@ func (a *app) send(args []string) error {
 	}
 	if fs.NArg() < 2 {
 		return usageErrf("command or keys required to send to %q", fs.Arg(0))
+	}
+
+	if *literal && *raw {
+		return usageErrf("-l and -r are opposites: -l sends characters, -r sends tmux key symbols")
 	}
 
 	target := fs.Arg(0)
@@ -112,7 +121,7 @@ func resolveSendTarget(r tmux.Runner, target string) (string, error) {
 	var targetWin *tmux.WindowInfo
 	for i := range windows {
 		w := &windows[i]
-		if w.Name == winName || strings.EqualFold(w.Name, winName) || w.ID == winName {
+		if strings.EqualFold(w.Name, winName) || w.ID == winName {
 			targetWin = w
 			break
 		}

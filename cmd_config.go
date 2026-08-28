@@ -91,6 +91,13 @@ func (a *app) migrateConfig(args []string) error {
 	}
 
 	if _, err := os.Stat(dst); err == nil {
+		// Name the project that owns it. "already exists, remove it first"
+		// gave no hint that a different directory had claimed the file, which
+		// is the common case in a monorepo full of same-named leaf folders.
+		if owner, known := config.SharedConfigOwner(dst); known && !config.SamePath(owner, cwd) {
+			return fmt.Errorf("%s already exists and belongs to %s — set a distinct [session].name in %s, or migrate from there",
+				dst, owner, dst)
+		}
 		return fmt.Errorf("%s already exists, remove it first", dst)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -104,6 +111,16 @@ func (a *app) migrateConfig(args []string) error {
 	}
 
 	_, _ = fmt.Fprintf(a.stdout, "moved %s to %s\n", src, dst)
+	// A disambiguated filename becomes the project's name, since a shared
+	// config with no [session].name is named after its file. Say so, rather
+	// than leaving the user to discover it the next time they type `wyrm api`.
+	if base := filepath.Base(dst); base != filepath.Base(cwd)+config.DefaultFileName {
+		_, _ = fmt.Fprintf(a.stdout,
+			"note: %s already belonged to another project, so this one is stored as %s\n"+
+				"      it is now `wyrm %s` — set [session].name in that file to choose a different name\n",
+			filepath.Base(cwd)+config.DefaultFileName, base,
+			strings.TrimSuffix(base, config.DefaultFileName))
+	}
 	if settings.Storage != config.StorageShared {
 		if settingsPath, err := config.SettingsPath(); err == nil {
 			_, _ = fmt.Fprintf(a.stdout, "note: set storage = \"shared\" in %s for wyrm to use it\n", settingsPath)

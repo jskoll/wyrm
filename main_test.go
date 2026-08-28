@@ -1571,9 +1571,8 @@ func TestRunKillAllConfirmed(t *testing.T) {
 	r := &fakeRunner{
 		listOutput: "$1|1|0|1000|alpha",
 	}
-	appStdin = strings.NewReader("y\n")
-	defer func() { appStdin = nil }()
-	code := run([]string{"kill", "--all"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	code := runWith(runOptions{stdin: strings.NewReader("y\n")},
+		[]string{"kill", "--all"}, &stdout, &stderr, r, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -1587,9 +1586,8 @@ func TestRunKillAllAborted(t *testing.T) {
 	r := &fakeRunner{
 		listOutput: "$1|1|0|1000|alpha",
 	}
-	appStdin = strings.NewReader("n\n")
-	defer func() { appStdin = nil }()
-	code := run([]string{"kill", "--all"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	code := runWith(runOptions{stdin: strings.NewReader("n\n")},
+		[]string{"kill", "--all"}, &stdout, &stderr, r, func() bool { return false }, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}

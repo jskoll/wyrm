@@ -6,7 +6,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+
+	"github.com/jskoll/wyrm/internal/config"
 )
 
 // setupTmux generates or appends recommended tmux keybindings and popup configurations.
@@ -24,6 +27,13 @@ func (a *app) setupTmux(args []string) error {
 		return err
 	}
 	if err := requireNoArgs(fs); err != nil {
+		return err
+	}
+
+	if err := validateKeySpec("key-pick", *keyPick); err != nil {
+		return err
+	}
+	if err := validateKeySpec("key-tui", *keyTUI); err != nil {
 		return err
 	}
 
@@ -57,15 +67,42 @@ func findTmuxConfPath() string {
 	if conf := os.Getenv("TMUX_CONF"); conf != "" {
 		return conf
 	}
+	// $XDG_CONFIG_HOME, not a hardcoded ~/.config — this used to be the one
+	// path in the codebase that ignored it, so a user with XDG_CONFIG_HOME set
+	// had the snippet appended to a file tmux never reads.
+	if dir, err := config.UserConfigDir(); err == nil {
+		xdgPath := filepath.Join(dir, "tmux", "tmux.conf")
+		if _, err := os.Stat(xdgPath); err == nil {
+			return xdgPath
+		}
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ".tmux.conf"
 	}
-	xdgPath := filepath.Join(home, ".config", "tmux", "tmux.conf")
-	if _, err := os.Stat(xdgPath); err == nil {
-		return xdgPath
-	}
 	return filepath.Join(home, ".tmux.conf")
+}
+
+// tmuxKeySpec matches the key specifications tmux's bind-key accepts: any
+// number of C-/M-/S- modifiers followed by a single character or a named key
+// (F1, Up, PageDown, BSpace...).
+var tmuxKeySpec = regexp.MustCompile(`^([CMS]-)*([[:graph:]]|[A-Za-z][A-Za-z0-9]*)$`)
+
+// validateKeySpec rejects a key wyrm would otherwise write straight into the
+// user's tmux.conf. bind-key fails at config-load time, so a bad spec here does
+// not break just wyrm's two bindings — it aborts the rest of the file, and the
+// user finds out at their next tmux start with no clue which line did it.
+func validateKeySpec(flag, key string) error {
+	if key == "" {
+		return usageErrf("-%s cannot be empty", flag)
+	}
+	if strings.ContainsAny(key, " \t\"'#;") {
+		return usageErrf("-%s %q contains a character tmux.conf cannot quote safely", flag, key)
+	}
+	if !tmuxKeySpec.MatchString(key) {
+		return usageErrf("-%s %q is not a tmux key specification (want e.g. C-j, M-x, F5, Up)", flag, key)
+	}
+	return nil
 }
 
 func appendTmuxConf(path, snippet string, stdout io.Writer) error {
@@ -77,6 +114,16 @@ func appendTmuxConf(path, snippet string, stdout io.Writer) error {
 	if bytes.Contains(existing, []byte("# --- wyrm tmux integration ---")) {
 		_, _ = fmt.Fprintf(stdout, "wyrm tmux integration is already present in %s\n", path)
 		return nil
+	}
+
+	// Back up first. This is the user's own tmux.conf, not a wyrm file, and
+	// appending to it in place left no way back if the result did not load.
+	if len(existing) > 0 {
+		backup := path + ".wyrm-backup"
+		if err := os.WriteFile(backup, existing, 0o600); err != nil {
+			return fmt.Errorf("backing up %s: %w", path, err)
+		}
+		_, _ = fmt.Fprintf(stdout, "backed up %s to %s\n", path, backup)
 	}
 
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)

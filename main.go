@@ -141,13 +141,29 @@ func (a *app) report(err error) int {
 // silently-ignored or mutually-exclusive top-level flags can't arise.
 //
 // The verb implementations live in cmd_*.go, grouped by what they act on.
-var (
-	appWatchCtx context.Context
-	appStdin    io.Reader
-)
+// runOptions carries the dependencies only some callers need, so they do not
+// have to be package globals.
+//
+// run used to read appStdin and appWatchCtx from two mutable package-level
+// variables written only by tests. That contradicted run's own contract of
+// taking its dependencies as parameters, forced every test touching them to be
+// non-parallel, and left two mutable globals in the shipped binary. They are
+// options because the common case passes neither.
+type runOptions struct {
+	// stdin is what prompts read from. nil means os.Stdin.
+	stdin io.Reader
+	// watchCtx bounds the lifetime of a --watch loop. nil means run until
+	// interrupted.
+	watchCtx context.Context
+}
 
 func run(args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux func() bool, attach func(string) error) int {
-	a := &app{stdin: appStdin, stdout: stdout, stderr: stderr, runner: runner, insideTmux: insideTmux, attach: attach, watchCtx: appWatchCtx}
+	return runWith(runOptions{}, args, stdout, stderr, runner, insideTmux, attach)
+}
+
+// runWith is run with the optional dependencies supplied explicitly.
+func runWith(opts runOptions, args []string, stdout, stderr io.Writer, runner tmux.Runner, insideTmux func() bool, attach func(string) error) int {
+	a := &app{stdin: opts.stdin, stdout: stdout, stderr: stderr, runner: runner, insideTmux: insideTmux, attach: attach, watchCtx: opts.watchCtx}
 
 	if len(args) == 0 {
 		return a.report(a.up(nil))

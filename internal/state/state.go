@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -92,6 +93,13 @@ func (s *Store) Started(dir string) bool {
 // MarkStarted records dir as started and persists immediately — there is no
 // separate Save, because a start recorded but not yet on disk is exactly
 // the state a crash between the two would leave wrong.
+//
+// The write is serialised against other wyrm processes with a lockfile, and
+// re-reads the file inside the lock before merging. Without that, two
+// concurrent `wyrm up` runs in different directories both loaded the same
+// starting set, and whichever wrote second erased the other's entry — so
+// on_project_first_start fired a second time for a project that had already
+// started, which is the one thing this file exists to prevent.
 func (s *Store) MarkStarted(dir string) error {
 	if s == nil || dir == "" {
 		return nil
@@ -100,7 +108,70 @@ func (s *Store) MarkStarted(dir string) error {
 		return nil
 	}
 	s.started[dir] = true
+
+	// An unobtainable lock is not worth failing a session start over, so the
+	// merge below runs either way. It is the merge that actually preserves a
+	// concurrent writer's entries; the lock only makes it reliable. Doing a
+	// blind save here instead — the first version of this fix — reintroduced
+	// exactly the loss it was meant to prevent whenever the lock timed out.
+	if unlock, err := lockFile(s.path); err == nil {
+		defer unlock()
+	}
+
+	// Re-read inside the lock and merge whatever landed while we waited.
+	if data, rerr := os.ReadFile(s.path); rerr == nil {
+		var ff fileFormat
+		if toml.Unmarshal(data, &ff) == nil {
+			for _, d := range ff.Started {
+				s.started[d] = true
+			}
+		}
+	}
 	return s.save()
+}
+
+// How long MarkStarted waits for another wyrm process to finish its write.
+//
+// The critical section is a read, a marshal, and a synced rename — tens of
+// milliseconds, and the fsync dominates. The budget has to cover every other
+// waiter's turn, not just one: at 500ms, twelve concurrent starts left the last
+// eight timing out and falling back. Five seconds is far past plausible
+// contention for a file this small, so reaching it means a stale lock, which
+// lockStaleAfter handles separately.
+const (
+	lockTimeout    = 5 * time.Second
+	lockRetryDelay = 5 * time.Millisecond
+	lockStaleAfter = 30 * time.Second
+)
+
+// lockFile takes an exclusive lock for path via an O_EXCL sibling file, and
+// returns the function that releases it.
+func lockFile(path string) (func(), error) {
+	lock := path + ".lock"
+	if err := os.MkdirAll(filepath.Dir(lock), 0o755); err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(lockTimeout)
+	for {
+		f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			_ = f.Close()
+			return func() { _ = os.Remove(lock) }, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, err
+		}
+		// A process killed mid-write leaves the lock behind forever; break a
+		// clearly abandoned one rather than making every later run wait.
+		if info, serr := os.Stat(lock); serr == nil && time.Since(info.ModTime()) > lockStaleAfter {
+			_ = os.Remove(lock)
+			continue
+		}
+		if time.Now().After(deadline) {
+			return nil, errors.New("timed out waiting for " + lock)
+		}
+		time.Sleep(lockRetryDelay)
+	}
 }
 
 func (s *Store) save() error {
@@ -134,6 +205,15 @@ func AtomicWriteFile(path string, data []byte, mode os.FileMode) error {
 		_ = tmp.Close()
 		return fmt.Errorf("writing to %s: %w", tmpPath, err)
 	}
+	// Sync before the rename, or the rename can be durable while the bytes it
+	// points at are not: a crash then leaves a zero-length file where a valid
+	// one used to be. The rename alone only ever bought atomicity against
+	// concurrent readers, never crash safety, though this function's name and
+	// the commit that introduced it both claimed otherwise.
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("syncing %s: %w", tmpPath, err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("closing %s: %w", tmpPath, err)
 	}
@@ -142,6 +222,14 @@ func AtomicWriteFile(path string, data []byte, mode os.FileMode) error {
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("renaming %s to %s: %w", tmpPath, path, err)
+	}
+	// And sync the directory, so the rename itself survives a crash. Failure
+	// here is not worth losing the write over — the data is already on disk and
+	// the rename has happened, this only pins down when it becomes durable —
+	// and some filesystems refuse the open outright.
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
 	}
 	return nil
 }

@@ -149,11 +149,17 @@ ok    wildcard[0]      "~/code/*" → 12 directories
 warn  wildcard[1]      "~/work/**" matches no directories
                        → check the pattern; "*" matches one path segment, "/**" recurses
 ok    config           .wyrm.toml → session "api" in ~/code/api
+ok    state            ~/.config/wyrm/state.toml (14 projects recorded as started)
 err   agent            tui.agent.profiles[0]: busy_pattern "(": error parsing regexp
                        → agent markers stay off until this compiles
+note  agent notify     disabled
+ok    theme            ~/.config/wyrm/theme.toml
+ok    tui mouse        enabled
 ok    editor           nvim
 warn  clipboard        no backend found
                        → install one of wl-copy, xclip, xsel; until then "y" in the TUI cannot copy
+note  zoxide           disabled (zoxide.enabled = false)
+note  release signing  no key compiled in; `wyrm selfupdate` verifies checksums only
 
 1 error, 3 warnings
 ```
@@ -373,6 +379,90 @@ color and drops them entirely under [`NO_COLOR`](https://no-color.org).
 `wyrm tui` and `wyrm pick` are the same [Charm](https://charm.sh) stack
 program (Bubble Tea / Lipgloss); the core build/attach path stays free of it,
 so `wyrm up` never renders anything.
+
+## tmux popup integration
+
+`wyrm setup-tmux` prints the tmux configuration that binds `wyrm pick` and
+`wyrm tui` to popup windows, so the session manager is one keystroke away from
+inside tmux:
+
+```sh
+wyrm setup-tmux                        # print the snippet
+wyrm setup-tmux -a                     # append it to your tmux.conf
+wyrm setup-tmux -key-pick C-j \
+                -key-tui  C-w          # choose the bindings
+wyrm setup-tmux -status=false          # omit the status-bar line
+```
+
+`-a` writes to `$TMUX_CONF` if set, else `$XDG_CONFIG_HOME/tmux/tmux.conf`
+(`~/.config/tmux/tmux.conf` by default) if it exists, else `~/.tmux.conf`. It
+copies the file to `<path>.wyrm-backup` first, and does nothing if the snippet
+is already present, so re-running is safe.
+
+Key specifications are checked before anything is written. `bind-key` fails at
+config-load time and takes the rest of the file with it, so a bad key would
+break your whole tmux config with no indication of which line did it —
+`wyrm setup-tmux -key-pick 'C-j; kill-server'` is refused up front instead.
+
+## Agent status across sessions
+
+`wyrm status` reports what the AI agents running in your panes are doing —
+across every session, not just the one you're attached to — for a status bar or
+a script. It's the same detection the TUI's markers use — see
+[`[[tui.agent.profiles]]`](configuration.md#tuiagentprofiles--describing-another-agent)
+for teaching it about another agent — without the interactive UI:
+
+```sh
+wyrm status                             # ⏸ 2 blocked · ✓ 1 idle
+wyrm status -v                          # one line per agent pane
+wyrm status -format json | jq .
+wyrm status -session api                # only that session
+wyrm status --watch --interval 2s       # stream, for a bar that reads stdin
+```
+
+`-format` picks the consumer:
+
+| Format | For |
+|---|---|
+| `text` | a terminal, or `-v` for the per-pane list (the default) |
+| `json` | scripts — full per-pane detail plus a summary |
+| `tmux` | `status-right`, with tmux `#[fg=...]` styling |
+| `waybar` | Waybar's JSON protocol (text, alt, tooltip, class) |
+| `sketchybar` | sketchybar's `icon=`/`label=` key-value output |
+
+For tmux's own status bar, `wyrm setup-tmux` emits the wiring:
+
+```tmux
+set -g status-right '#(wyrm status --format tmux) | %H:%M '
+```
+
+Reading a pane's contents costs a `capture-pane` call each, and under `--watch`
+that repeats every interval against the server you're working in. So a scan
+looks at a bounded number of agent panes; if there are more, the extra ones are
+reported rather than quietly dropped — `+3 unscanned` in the text and tmux
+formats, `summary.skipped` in JSON.
+
+## Sending keys to a session
+
+`wyrm send` types into a session, window, or pane without attaching — for
+scripts, hooks, or driving a long-running process from another terminal:
+
+```sh
+wyrm send api "npm test"              # type it in the session's active pane, press Enter
+wyrm send api:build "make"            # target a window
+wyrm send api:build.1 "ls"            # target a pane
+wyrm send -n api "partial input"      # no trailing Enter
+wyrm send -r api C-c                  # send a raw tmux key symbol
+wyrm send api -- "-v --flag"          # text starting with a dash
+```
+
+Text is sent literally by default, so it arrives exactly as written; `-l` states
+that explicitly. `-r` is the opposite — it sends tmux key names like `C-c`,
+`Escape`, or `Up`, and combining the two is an error. A `--` between the target
+and the text lets you send anything starting with `-`.
+
+Targets are `session`, `session:window`, or `session:window.pane`; a raw tmux ID
+(`$1`, `@1`, `%3`) works too. Window names match case-insensitively, or by index.
 
 ## Initializing a new configuration
 

@@ -36,14 +36,17 @@ linters:
       # describe wyrm's entire purpose: it runs tmux and $EDITOR with arguments
       # the user supplies, and reads config files from paths the user names.
       # G702 is the same thing again: running a config's lifecycle hook through
-      # $SHELL is the feature. That is the documented trust model (see
-      # SECURITY.md) rather than a
+      # $SHELL is the feature. G703 is its write-side counterpart, reached by
+      # `wyrm setup-tmux -a`, which exists to append to the tmux.conf the user
+      # names via $TMUX_CONF or $XDG_CONFIG_HOME — writing to a user-supplied
+      # path is the command, not a traversal. That is the documented trust
+      # model (see SECURITY.md) rather than a
       # finding, and `wyrm up -n` is the mitigation. Excluded by rule rather
       # than by scattered //nolint so the reasoning lives in one place; the rest
       # of gosec stays on.
       - linters:
           - gosec
-        text: "(G204|G304|G702)"
+        text: "(G204|G304|G702|G703)"
       # G301/G306 want 0750/0600 on the config directories and files wyrm
       # creates. 0755/0644 is what every other CLI writes into ~/.config and is
       # what lets a team share a checked-in .wyrm.toml; neither path holds a

@@ -182,6 +182,23 @@ usual local search if it isn't there. `wyrm migrate-config` moves the
 current directory's local config into the shared directory under the right
 name for you.
 
+Two projects can share a folder name — `~/work/api` and `~/personal/api`, or
+`services/api` and `packages/api` in a monorepo. The first one to claim
+`api.wyrm.toml` keeps it; the next gets a distinct file with a short hash of
+its path, `api-3f2a1c.wyrm.toml`, and `migrate-config` tells you when that
+happens. A shared config belongs to whichever directory its absolute
+`session.root` points at, so wyrm never hands one project another's config.
+
+Because the filename is also the project's name when the config sets no
+`[session].name`, that second project starts as `wyrm api-3f2a1c`. Set a name
+explicitly to choose your own:
+
+```toml
+[session]
+name = "api-personal"
+root = "~/personal/api"
+```
+
 ## One config, many directories
 
 `[[wildcard]]` applies one template config to every directory matching a
@@ -525,6 +542,24 @@ enabled  = true                  # false stops the scanning (and its cost)
 commands = ["claude", "aider"]   # #{pane_current_command} values to inspect
 ```
 
+Notifications are off by default. Turn them on to be told when an agent starts
+waiting on you, without watching the TUI:
+
+```toml
+[tui.agent.notify]
+enabled    = true
+on_blocked = true    # waiting on an answer (default)
+on_idle    = false   # finished a turn
+desktop    = true    # OS notification; the default when notify is enabled
+```
+
+`bell` and `osc` add a terminal bell or an OSC 9/777 escape while the TUI is
+running. `command` runs a shell command instead of the desktop notification,
+with `WYRM_NOTIFY_TITLE`, `_MESSAGE`, `_STATE`, `_SESSION` and `_PANE` in its
+environment. See
+[`docs/configuration.md`](https://github.com/jskoll/wyrm/blob/main/docs/configuration.md#tuiagentnotify--being-told-when-an-agent-needs-you)
+for the full table.
+
 Because it reads what's on screen, an agent displaying a *screenshot* of a
 prompt — reviewing a diff of prompt-handling code, say — can be misread. The
 detector only matches the agent's own prompt chrome, never prose, which keeps
@@ -562,6 +597,88 @@ exits, since the alt screen would otherwise wipe the message on its way up.
 Colors are literal hex rather than terminal palette indices, so a theme looks
 the same wherever it runs; Lipgloss degrades them on terminals without true
 color and drops them entirely under [`NO_COLOR`](https://no-color.org).
+
+## tmux popup integration
+
+`wyrm setup-tmux` prints the tmux configuration that binds `wyrm pick` and
+`wyrm tui` to popup windows, so the session manager is one keystroke away from
+inside tmux:
+
+```sh
+wyrm setup-tmux                        # print the snippet
+wyrm setup-tmux -a                     # append it to your tmux.conf
+wyrm setup-tmux -key-pick C-j \
+                -key-tui  C-w          # choose the bindings
+wyrm setup-tmux -status=false          # omit the status-bar line
+```
+
+`-a` writes to `$TMUX_CONF` if set, else `$XDG_CONFIG_HOME/tmux/tmux.conf`
+(`~/.config/tmux/tmux.conf` by default) if it exists, else `~/.tmux.conf`. It
+copies the file to `<path>.wyrm-backup` first, and does nothing if the snippet
+is already present, so re-running is safe.
+
+Key specifications are checked before anything is written. `bind-key` fails at
+config-load time and takes the rest of the file with it, so a bad key would
+break your whole tmux config with no indication of which line did it —
+`wyrm setup-tmux -key-pick 'C-j; kill-server'` is refused up front instead.
+
+## Agent status across sessions
+
+`wyrm status` reports what the AI agents running in your panes are doing —
+across every session, not just the one you're attached to — for a status bar or
+a script. It's the same detection the TUI's markers use ([Waiting agents](#waiting-agents)), without the interactive UI:
+
+```sh
+wyrm status                             # ⏸ 2 blocked · ✓ 1 idle
+wyrm status -v                          # one line per agent pane
+wyrm status -format json | jq .
+wyrm status -session api                # only that session
+wyrm status --watch --interval 2s       # stream, for a bar that reads stdin
+```
+
+`-format` picks the consumer:
+
+| Format | For |
+|---|---|
+| `text` | a terminal, or `-v` for the per-pane list (the default) |
+| `json` | scripts — full per-pane detail plus a summary |
+| `tmux` | `status-right`, with tmux `#[fg=...]` styling |
+| `waybar` | Waybar's JSON protocol (text, alt, tooltip, class) |
+| `sketchybar` | sketchybar's `icon=`/`label=` key-value output |
+
+For tmux's own status bar, `wyrm setup-tmux` emits the wiring:
+
+```tmux
+set -g status-right '#(wyrm status --format tmux) | %H:%M '
+```
+
+Reading a pane's contents costs a `capture-pane` call each, and under `--watch`
+that repeats every interval against the server you're working in. So a scan
+looks at a bounded number of agent panes; if there are more, the extra ones are
+reported rather than quietly dropped — `+3 unscanned` in the text and tmux
+formats, `summary.skipped` in JSON.
+
+## Sending keys to a session
+
+`wyrm send` types into a session, window, or pane without attaching — for
+scripts, hooks, or driving a long-running process from another terminal:
+
+```sh
+wyrm send api "npm test"              # type it in the session's active pane, press Enter
+wyrm send api:build "make"            # target a window
+wyrm send api:build.1 "ls"            # target a pane
+wyrm send -n api "partial input"      # no trailing Enter
+wyrm send -r api C-c                  # send a raw tmux key symbol
+wyrm send api -- "-v --flag"          # text starting with a dash
+```
+
+Text is sent literally by default, so it arrives exactly as written; `-l` states
+that explicitly. `-r` is the opposite — it sends tmux key names like `C-c`,
+`Escape`, or `Up`, and combining the two is an error. A `--` between the target
+and the text lets you send anything starting with `-`.
+
+Targets are `session`, `session:window`, or `session:window.pane`; a raw tmux ID
+(`$1`, `@1`, `%3`) works too. Window names match case-insensitively, or by index.
 
 ## Initializing a new configuration
 
@@ -624,11 +741,17 @@ ok    wildcard[0]      "~/code/*" → 12 directories
 warn  wildcard[1]      "~/work/**" matches no directories
                        → check the pattern; "*" matches one path segment, "/**" recurses
 ok    config           .wyrm.toml → session "api" in ~/code/api
+ok    state            ~/.config/wyrm/state.toml (14 projects recorded as started)
 err   agent            tui.agent.profiles[0]: busy_pattern "(": error parsing regexp
                        → agent markers stay off until this compiles
+note  agent notify     disabled
+ok    theme            ~/.config/wyrm/theme.toml
+ok    tui mouse        enabled
 ok    editor           nvim
 warn  clipboard        no backend found
                        → install one of wl-copy, xclip, xsel; until then "y" in the TUI cannot copy
+note  zoxide           disabled (zoxide.enabled = false)
+note  release signing  no key compiled in; `wyrm selfupdate` verifies checksums only
 
 1 error, 3 warnings
 ```
@@ -710,6 +833,8 @@ At least one of `name` / `root` is required.
 | `splits` | list | — | Split tree (below) — the recommended layout format |
 | `panes` | list | — | Legacy flat pane list (below); ignored when `splits` is set |
 | `layout` | string | `tiled` | tmux layout applied after legacy `panes` (`even-horizontal`, `main-vertical`, ...). Ignored when `splits` is set — a named layout would discard the tree's sizes — and wyrm warns if you set both |
+| `synchronize` | bool | `false` | Turn on tmux's `synchronize-panes` for this window, so typing goes to every pane at once. `synchronize_panes` is an accepted alias |
+| `remain_on_exit` | bool | `false` | Keep the window's panes open after their command exits, instead of closing them — so you can read what a failed command printed |
 
 ### `[[windows.splits]]` — the split tree
 
@@ -719,6 +844,8 @@ At least one of `name` / `root` is required.
 | `size` | int | tmux default | Percentage of space given to the new pane (1–99) |
 | `command` | string | — | Typed into the pane; entries starting with `#` are comments and skipped |
 | `children` | list | — | Nested splits, applied inside this entry's pane |
+| `zoomed` | bool | `false` | Start with this pane focused and zoomed. `zoom` is an accepted alias. Only one pane per window can be zoomed — the last one that asks wins |
+| `remain_on_exit` | bool | `false` | Keep this pane open after its command exits (the per-pane form of the window option) |
 
 How the tree is walked: each entry with a `type` splits the pane of the
 previous entry at the same level (the window's initial pane for the first

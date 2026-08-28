@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -63,8 +62,14 @@ func cachedProjectInfo(path string, shared bool, info os.FileInfo) (name string,
 			return e.name, e.aliases
 		}
 	}
-	name = ProjectName(path, shared)
-	if cfg, err := Load(path); err == nil {
+	// One Load, not two. This used to call ProjectName (which loads) and then
+	// Load again for the aliases, parsing every config on disk twice per cache
+	// miss — and a cold cache is every first tick of the TUI.
+	cfg, err := Load(path)
+	if err != nil {
+		name = ProjectName(path, shared)
+	} else {
+		name = projectNameFrom(cfg, path, shared)
 		aliases = cfg.Session.Aliases
 	}
 	nameCache.Store(path, nameCacheEntry{size: info.Size(), mtime: info.ModTime(), name: name, aliases: aliases})
@@ -151,10 +156,9 @@ func DiscoverProjects(settings *Settings) []Project {
 // Projects always override cfg.Session.Root with it, config.Load alone
 // having no way to know which directory this particular Project stands for.
 //
-// Unlike file-based discovery, this re-globs and re-stats every pattern on
-// every call — there is no (size, mtime) identity to cache against, since a
-// wildcard project isn't a file. Fine at the scale this feature targets
-// (tens to low hundreds of directories); not optimized further here.
+// Matches are cached for wildcardCacheTTL, because this is not free: a "/**"
+// pattern is a full recursive walk, and the TUI calls this every three seconds
+// for as long as it is open. See matchWildcardDirs.
 func DiscoverWildcardProjects(settings *Settings) []Project {
 	if settings == nil {
 		return nil
@@ -196,12 +200,59 @@ func WildcardMatches(w Wildcard) ([]string, error) {
 	return matchWildcardDirs(w.Pattern)
 }
 
+// wildcardCacheTTL is how long a pattern's matches are reused before the
+// filesystem is walked again.
+//
+// There is no (size, mtime) identity to key on the way file-based discovery
+// does — a wildcard project is not a file, and for a "/**" pattern the mtime of
+// the base directory says nothing about a directory created three levels down.
+// So this is a plain time bound, chosen against the two callers: the TUI
+// refreshes every 3 seconds (internal/tui, listRefreshInterval), so a 10s TTL
+// turns a walk-per-tick into a walk every fourth tick, and a newly created
+// project appears within 10 seconds rather than 3. Bulk operations over N
+// sessions collapse from N walks to one.
+//
+// A user who wants a new directory picked up now can press the TUI's manual
+// reload, which calls InvalidateWildcardCache.
+const wildcardCacheTTL = 10 * time.Second
+
+var wildcardCache sync.Map // pattern -> wildcardCacheEntry
+
+type wildcardCacheEntry struct {
+	at   time.Time
+	dirs []string
+	err  error
+}
+
+// InvalidateWildcardCache drops every cached wildcard match, so the next
+// discovery walks the filesystem again. Called by the paths where the user has
+// explicitly asked for fresh state.
+func InvalidateWildcardCache() {
+	wildcardCache.Range(func(k, _ any) bool {
+		wildcardCache.Delete(k)
+		return true
+	})
+}
+
 // matchWildcardDirs resolves a wildcard pattern to the absolute directories
-// it matches. A trailing "/**" matches every directory nested at any depth
-// under the base path (not the base itself); anything else is a plain
+// it matches, reusing a recent result when one is available (see
+// wildcardCacheTTL). A trailing "/**" matches every directory nested at any
+// depth under the base path (not the base itself); anything else is a plain
 // filepath.Glob, matching one path segment per "*" the way DiscoverProjects'
 // own shared-directory glob does.
 func matchWildcardDirs(pattern string) ([]string, error) {
+	if v, ok := wildcardCache.Load(pattern); ok {
+		e := v.(wildcardCacheEntry)
+		if time.Since(e.at) < wildcardCacheTTL {
+			return e.dirs, e.err
+		}
+	}
+	dirs, err := walkWildcardDirs(pattern)
+	wildcardCache.Store(pattern, wildcardCacheEntry{at: time.Now(), dirs: dirs, err: err})
+	return dirs, err
+}
+
+func walkWildcardDirs(pattern string) ([]string, error) {
 	expanded, err := ExpandPath(pattern)
 	if err != nil {
 		return nil, err
@@ -267,19 +318,60 @@ func isIgnoredWildcardDir(name string) bool {
 // name always wins over an alias collision, so `wyrm <name>` stays
 // deterministic even if a project happens to alias another's name.
 func FindProject(settings *Settings, name string) (Project, bool) {
-	projects := DiscoverProjects(settings)
-	for _, p := range projects {
-		if p.Name == name {
-			return p, true
-		}
-	}
-	for _, p := range projects {
-		if slices.Contains(p.Aliases, name) {
-			return p, true
-		}
-	}
-	return Project{}, false
+	return NewProjectIndex(settings).Find(name)
 }
+
+// ProjectIndex is one discovery pass, reusable for many lookups.
+//
+// FindProject runs a full DiscoverProjects — including the recursive wildcard
+// walk — on every call, which is fine for `wyrm <name>` but not inside a loop:
+// `wyrm kill --all` across 20 sessions ran 20 complete discoveries, each one
+// re-walking every wildcard tree, to answer 20 questions about the same
+// unchanged filesystem. Bulk callers build one of these instead.
+type ProjectIndex struct {
+	projects []Project
+	byName   map[string]Project
+	byAlias  map[string]Project
+}
+
+// NewProjectIndex runs discovery once and indexes the result by name and by
+// alias, preserving FindProject's precedence: an exact project name always
+// beats an alias, so `wyrm <name>` stays deterministic when a project happens
+// to alias another's name. Among aliases the first discovered wins.
+func NewProjectIndex(settings *Settings) ProjectIndex {
+	projects := DiscoverProjects(settings)
+	ix := ProjectIndex{
+		projects: projects,
+		byName:   make(map[string]Project, len(projects)),
+		byAlias:  make(map[string]Project, len(projects)),
+	}
+	for _, p := range projects {
+		if _, taken := ix.byName[p.Name]; !taken {
+			ix.byName[p.Name] = p
+		}
+	}
+	for _, p := range projects {
+		for _, a := range p.Aliases {
+			if _, taken := ix.byAlias[a]; !taken {
+				ix.byAlias[a] = p
+			}
+		}
+	}
+	return ix
+}
+
+// Find resolves a session name to its project, by exact name first and then by
+// alias — the same order FindProject documents.
+func (ix ProjectIndex) Find(name string) (Project, bool) {
+	if p, ok := ix.byName[name]; ok {
+		return p, true
+	}
+	p, ok := ix.byAlias[name]
+	return p, ok
+}
+
+// Projects returns the discovered projects in discovery order.
+func (ix ProjectIndex) Projects() []Project { return ix.projects }
 
 // LoadConfig returns the config this project builds from, with the project's
 // own identity applied on top of what the file says.
@@ -339,7 +431,17 @@ func (p Project) LoadConfig() (*Config, error) {
 // relative to the shared directory, not to any project, so deriving a name
 // from it would name every shared project after the shared folder.
 func ProjectName(path string, shared bool) string {
-	if cfg, err := Load(path); err == nil {
+	cfg, err := Load(path)
+	if err != nil {
+		return projectNameFallback(path, shared)
+	}
+	return projectNameFrom(cfg, path, shared)
+}
+
+// projectNameFrom is ProjectName for a config the caller has already loaded,
+// so discovery does not parse the same file twice.
+func projectNameFrom(cfg *Config, path string, shared bool) string {
+	if cfg != nil {
 		if cfg.Session.Name != "" {
 			return cfg.Session.Name
 		}
@@ -349,6 +451,10 @@ func ProjectName(path string, shared bool) string {
 			}
 		}
 	}
+	return projectNameFallback(path, shared)
+}
+
+func projectNameFallback(path string, shared bool) string {
 	base := filepath.Base(path)
 	if shared {
 		return strings.TrimSuffix(base, DefaultFileName)
