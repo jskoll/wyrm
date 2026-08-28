@@ -150,19 +150,19 @@ func TestDiscoverGlobalDoesNotReturnAnotherProjectsConfig(t *testing.T) {
 // reports two spellings of one directory as two different projects.
 func TestSamePathResolvesSymlinks(t *testing.T) {
 	dir := t.TempDir()
-	real := filepath.Join(dir, "real")
-	if err := os.MkdirAll(real, 0o755); err != nil {
+	realDir := filepath.Join(dir, "real")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(dir, "link")
-	if err := os.Symlink(real, link); err != nil {
+	if err := os.Symlink(realDir, link); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	if !SamePath(real, link) {
-		t.Errorf("SamePath(%q, %q) = false; they are the same directory", real, link)
+	if !SamePath(realDir, link) {
+		t.Errorf("SamePath(%q, %q) = false; they are the same directory", realDir, link)
 	}
-	if !SamePath(real, real) {
+	if !SamePath(realDir, realDir) {
 		t.Error("a path is not the same as itself")
 	}
 
@@ -170,7 +170,7 @@ func TestSamePathResolvesSymlinks(t *testing.T) {
 	if err := os.MkdirAll(other, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if SamePath(real, other) {
+	if SamePath(realDir, other) {
 		t.Error("two genuinely different directories compared equal")
 	}
 
