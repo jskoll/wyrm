@@ -961,6 +961,10 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	case "R":
+		// An explicit reload means now, so drop the wildcard match cache the
+		// timed refreshes ride on — otherwise a directory created a moment ago
+		// stays invisible for up to wildcardCacheTTL despite the user asking.
+		config.InvalidateWildcardCache()
 		return m, tea.Batch(m.refreshLists()...)
 	case "m":
 		// Hand the mouse back to the terminal (and take it again). While it's

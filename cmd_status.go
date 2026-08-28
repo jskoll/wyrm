@@ -36,6 +36,11 @@ type agentStatusSummary struct {
 	Blocked int `json:"blocked"`
 	Idle    int `json:"idle"`
 	Busy    int `json:"busy"`
+	// Skipped counts agent panes found but not captured, because the scan is
+	// bounded at agent.MaxCaptures. Reported rather than dropped: a status
+	// line that quietly stops counting at 16 is worse than one that says it
+	// stopped, especially under --watch where it is the only thing on screen.
+	Skipped int `json:"skipped,omitempty"`
 }
 
 type agentStatusReport struct {
@@ -130,15 +135,19 @@ func collectStatus(runner tmux.Runner, sessionFilter string, profiles []agent.Pr
 		return report, err
 	}
 
-	var candidates []tmux.PaneRef
+	// Filter to the requested session first, then let agent.Candidates apply
+	// the same bound the TUI uses. Without it `wyrm status --watch` issued one
+	// capture-pane per agent pane every interval, unbounded, against the
+	// server the user is working in.
+	var scoped []tmux.PaneRef
 	for _, ref := range refs {
 		if sessionFilter != "" && ref.SessionName != sessionFilter && ref.SessionID != sessionFilter {
 			continue
 		}
-		if agent.IsAgentPane(ref.Command, profiles) {
-			candidates = append(candidates, ref)
-		}
+		scoped = append(scoped, ref)
 	}
+	candidates, skipped := agent.Candidates(scoped, profiles, "", agent.MaxCaptures)
+	report.Summary.Skipped = skipped
 
 	if len(candidates) > 0 {
 		cmds := make([][]string, len(candidates))
@@ -196,6 +205,9 @@ func formatStatus(w io.Writer, format string, verbose bool, report agentStatusRe
 		if report.Summary.Idle > 0 {
 			parts = append(parts, fmt.Sprintf("#[fg=cyan]✓ %d idle#[default]", report.Summary.Idle))
 		}
+		if report.Summary.Skipped > 0 && len(parts) > 0 {
+			parts = append(parts, fmt.Sprintf("#[fg=red]+%d unscanned#[default]", report.Summary.Skipped))
+		}
 		if len(parts) > 0 {
 			_, _ = fmt.Fprintln(w, strings.Join(parts, " · "))
 		}
@@ -225,6 +237,10 @@ func formatStatus(w io.Writer, format string, verbose bool, report agentStatusRe
 				wb.Class = "idle"
 				wb.Alt = "idle"
 			}
+		}
+		if report.Summary.Skipped > 0 {
+			tooltips = append(tooltips, fmt.Sprintf("%d further agent pane(s) not scanned (scan is capped at %d)",
+				report.Summary.Skipped, agent.MaxCaptures))
 		}
 		if len(parts) == 0 {
 			wb.Class = "none"
@@ -257,6 +273,10 @@ func formatStatus(w io.Writer, format string, verbose bool, report agentStatusRe
 				_, _ = fmt.Fprintf(w, "%s: @%d:%s %s (%s) - %s\n",
 					ag.SessionName, ag.WindowIndex, ag.WindowName, ag.PaneID, ag.Command, ag.State)
 			}
+			if report.Summary.Skipped > 0 {
+				_, _ = fmt.Fprintf(w, "%d further agent pane(s) not scanned (capped at %d)\n",
+					report.Summary.Skipped, agent.MaxCaptures)
+			}
 			return nil
 		}
 		var parts []string
@@ -265,6 +285,9 @@ func formatStatus(w io.Writer, format string, verbose bool, report agentStatusRe
 		}
 		if report.Summary.Idle > 0 {
 			parts = append(parts, fmt.Sprintf("✓ %d idle", report.Summary.Idle))
+		}
+		if report.Summary.Skipped > 0 && len(parts) > 0 {
+			parts = append(parts, fmt.Sprintf("+%d unscanned", report.Summary.Skipped))
 		}
 		if len(parts) > 0 {
 			_, _ = fmt.Fprintln(w, strings.Join(parts, " · "))

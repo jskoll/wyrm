@@ -256,8 +256,12 @@ func (a *app) restartAll(settings *config.Settings, dryRun, yes bool, vars map[s
 		opts = a.teardownDryRun()
 	}
 
+	// One discovery pass for every session below. FindProject re-runs the
+	// whole scan — wildcard tree walks included — on each call.
+	index := config.NewProjectIndex(settings)
+
 	for _, s := range active {
-		project, found := config.FindProject(settings, s.Name)
+		project, found := index.Find(s.Name)
 		if !found {
 			_, _ = fmt.Fprintf(a.stderr, "wyrm: skipping session %q: no project config found\n", s.Name)
 			continue
@@ -389,8 +393,10 @@ func (a *app) killAll(settings *config.Settings, dryRun, yes bool) error {
 		opts = a.teardownDryRun()
 	}
 
+	index := config.NewProjectIndex(settings)
+
 	for _, s := range active {
-		if project, found := config.FindProject(settings, s.Name); found {
+		if project, found := index.Find(s.Name); found {
 			if cfg, err := project.LoadConfig(); err == nil {
 				name, kerr := session.Kill(a.runner, cfg, a.stderr, opts...)
 				if kerr != nil {

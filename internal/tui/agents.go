@@ -8,13 +8,6 @@ import (
 	"github.com/jskoll/wyrm/internal/tmux"
 )
 
-// maxAgentCaptures bounds how many panes one refresh will capture. Finding the
-// candidates costs a single list-panes call, but reading each one costs a
-// capture-pane, and this runs on a timer: someone with a wall of agent panes
-// should get a slightly incomplete picture rather than a tmux call storm every
-// few seconds.
-const maxAgentCaptures = 16
-
 // agentStatus holds the detected state of every agent pane, rolled up to the
 // windows and sessions that contain them so all four panels can be marked from
 // one pass. The maps are keyed by tmux ID and are nil until the first scan
@@ -57,24 +50,9 @@ func loadAgentStatus(r tmux.Runner, profiles []agent.Profile, skipPane string) t
 		}
 		// Pick the panes worth reading first, then read them all at once. The
 		// captures are independent of one another, so on a Runner that batches
-		// this is a single tmux process instead of up to maxAgentCaptures of
+		// this is a single tmux process instead of up to agent.MaxCaptures of
 		// them, every listRefreshInterval, for as long as the TUI is open.
-		var candidates []tmux.PaneRef
-		for _, ref := range refs {
-			if !agent.IsAgentPane(ref.Command, profiles) {
-				continue
-			}
-			// The pane wyrm tui is running in is never an agent pane, but skip
-			// it explicitly anyway: capturing it is the same mirror-of-a-mirror
-			// the preview avoids.
-			if skipPane != "" && ref.PaneID == skipPane {
-				continue
-			}
-			if len(candidates) >= maxAgentCaptures {
-				break
-			}
-			candidates = append(candidates, ref)
-		}
+		candidates, _ := agent.Candidates(refs, profiles, skipPane, agent.MaxCaptures)
 		if len(candidates) == 0 {
 			return agentStatusMsg{status: status}
 		}

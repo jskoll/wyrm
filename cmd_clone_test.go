@@ -183,11 +183,11 @@ func TestCloneConfirmsBeforeRunningHooks(t *testing.T) {
 	t.Run("declining does not build the session", func(t *testing.T) {
 		installFakeGit(t)
 		writeHookedClone(t)
-		withStdin(t, "n\n")
+		opts := withStdin("n\n")
 
 		r := &fakeRunner{}
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"clone", "https://example.com/x.git", "withhooks"}, &stdout, &stderr, r,
+		code := runWith(opts, []string{"clone", "https://example.com/x.git", "withhooks"}, &stdout, &stderr, r,
 			func() bool { return false }, func(string) error { return nil })
 		if code != 0 {
 			t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
@@ -211,11 +211,11 @@ func TestCloneConfirmsBeforeRunningHooks(t *testing.T) {
 	t.Run("accepting builds the session", func(t *testing.T) {
 		installFakeGit(t)
 		writeHookedClone(t)
-		withStdin(t, "y\n")
+		opts := withStdin("y\n")
 
 		r := &fakeRunner{}
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"clone", "https://example.com/x.git", "withhooks"}, &stdout, &stderr, r,
+		code := runWith(opts, []string{"clone", "https://example.com/x.git", "withhooks"}, &stdout, &stderr, r,
 			func() bool { return false }, func(string) error { return nil })
 		if code != 0 {
 			t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
@@ -228,11 +228,11 @@ func TestCloneConfirmsBeforeRunningHooks(t *testing.T) {
 	t.Run("non-interactive declines rather than running unattended", func(t *testing.T) {
 		installFakeGit(t)
 		writeHookedClone(t)
-		withStdin(t, "")
+		opts := withStdin("")
 
 		r := &fakeRunner{}
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"clone", "https://example.com/x.git", "withhooks"}, &stdout, &stderr, r,
+		code := runWith(opts, []string{"clone", "https://example.com/x.git", "withhooks"}, &stdout, &stderr, r,
 			func() bool { return false }, func(string) error { return nil })
 		if code != 0 {
 			t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
@@ -245,11 +245,11 @@ func TestCloneConfirmsBeforeRunningHooks(t *testing.T) {
 	t.Run("-y skips the prompt", func(t *testing.T) {
 		installFakeGit(t)
 		writeHookedClone(t)
-		withStdin(t, "")
+		opts := withStdin("")
 
 		r := &fakeRunner{}
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"clone", "-y", "https://example.com/x.git", "withhooks"}, &stdout, &stderr, r,
+		code := runWith(opts, []string{"clone", "-y", "https://example.com/x.git", "withhooks"}, &stdout, &stderr, r,
 			func() bool { return false }, func(string) error { return nil })
 		if code != 0 {
 			t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
@@ -260,12 +260,10 @@ func TestCloneConfirmsBeforeRunningHooks(t *testing.T) {
 	})
 }
 
-// withStdin points the CLI's prompt reader at fixed input for one test.
-func withStdin(t *testing.T, in string) {
-	t.Helper()
-	prev := appStdin
-	appStdin = strings.NewReader(in)
-	t.Cleanup(func() { appStdin = prev })
+// withStdin returns run options whose prompt reader is fixed input, for a test
+// that has to answer a confirmation prompt.
+func withStdin(in string) runOptions {
+	return runOptions{stdin: strings.NewReader(in)}
 }
 
 func TestCloneWrongArgCount(t *testing.T) {

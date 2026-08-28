@@ -46,6 +46,7 @@ complete -c wyrm -n "not __fish_seen_subcommand_from $subcommands" -a '(wyrm lis
 
 # Subcommand flags.
 complete -c wyrm -n '__fish_seen_subcommand_from up restart kill edit validate' -o config -d 'config file path' -r -a '(wyrm list-configs 2>/dev/null)'
+complete -c wyrm -n '__fish_seen_subcommand_from up restart' -o d -d 'build the session without attaching'
 complete -c wyrm -n '__fish_seen_subcommand_from restart kill' -o all -d 'apply to all active sessions'
 complete -c wyrm -n '__fish_seen_subcommand_from restart kill' -o a -d 'apply to all active sessions'
 complete -c wyrm -n '__fish_seen_subcommand_from restart kill' -o yes -d 'skip confirmation prompt'

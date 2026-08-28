@@ -52,8 +52,30 @@ _wyrm() {
             ;;
         args)
             case "$words[1]" in
-                up|edit|validate)
+                up)
+                    _arguments '-config[config file path]:config file:->configs' \
+                        '-n[dry run]' \
+                        '-d[build the session without attaching]'
+                    ;;
+                edit|validate)
                     _arguments '-config[config file path]:config file:->configs'
+                    ;;
+                send)
+                    _arguments '-l[send exact characters (disable special key expansion)]' \
+                        '-literal[send exact characters (disable special key expansion)]' \
+                        '-n[do not append Enter keystroke]' \
+                        '-no-enter[do not append Enter keystroke]' \
+                        '-r[send raw tmux key symbols (e.g. C-c, Escape)]' \
+                        '-raw[send raw tmux key symbols (e.g. C-c, Escape)]'
+                    ;;
+                setup-tmux)
+                    _arguments '-a[append configuration directly to tmux.conf]' \
+                        '-append[append configuration directly to tmux.conf]' \
+                        '-w[append configuration directly to tmux.conf]' \
+                        '-write[append configuration directly to tmux.conf]' \
+                        '-key-pick[prefix key to open the wyrm pick popup]:key:' \
+                        '-key-tui[prefix key to open the wyrm tui popup]:key:' \
+                        '-status[include wyrm status bar integration]'
                     ;;
                 restart)
                     _arguments '-config[config file path]:config file:->configs' \

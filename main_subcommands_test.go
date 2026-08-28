@@ -28,7 +28,9 @@ func dispatchVerbs(t *testing.T) map[string]bool {
 
 	var sw *ast.SwitchStmt
 	ast.Inspect(file, func(n ast.Node) bool {
-		if fn, ok := n.(*ast.FuncDecl); ok && fn.Name.Name == "run" {
+		// runWith holds the dispatch switch; run is the thin wrapper that
+		// supplies default options.
+		if fn, ok := n.(*ast.FuncDecl); ok && fn.Name.Name == "runWith" {
 			ast.Inspect(fn.Body, func(n ast.Node) bool {
 				if s, ok := n.(*ast.SwitchStmt); ok && sw == nil {
 					sw = s
@@ -41,7 +43,7 @@ func dispatchVerbs(t *testing.T) map[string]bool {
 		return true
 	})
 	if sw == nil {
-		t.Fatal("could not find switch statement in run()")
+		t.Fatal("could not find switch statement in runWith()")
 	}
 
 	verbs := map[string]bool{}
@@ -104,7 +106,7 @@ func TestSubcommandsListedInUsage(t *testing.T) {
 }
 
 // TestSubcommandsMatchBashCompletion checks completions/wyrm.bash's static
-// subcommand list against run()'s actual dispatch set.
+// subcommand list against runWith()'s actual dispatch set.
 func TestSubcommandsMatchBashCompletion(t *testing.T) {
 	data, err := os.ReadFile("completions/wyrm.bash")
 	if err != nil {
@@ -119,7 +121,7 @@ func TestSubcommandsMatchBashCompletion(t *testing.T) {
 }
 
 // TestSubcommandsMatchFishCompletion checks completions/wyrm.fish's static
-// subcommand list against run()'s actual dispatch set.
+// subcommand list against runWith()'s actual dispatch set.
 func TestSubcommandsMatchFishCompletion(t *testing.T) {
 	data, err := os.ReadFile("completions/wyrm.fish")
 	if err != nil {
