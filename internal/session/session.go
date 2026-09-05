@@ -7,6 +7,7 @@
 package session
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,6 +19,14 @@ import (
 	"github.com/jskoll/wyrm/internal/config"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
+
+// ErrSessionNotRunning is Kill's error when the config's session isn't
+// currently running. It is the one Kill failure a caller can safely treat as
+// "nothing to stop" — every other failure (a bad session.root, a tmux
+// server/communication problem, kill-session itself failing) is a real
+// problem that must not be swallowed the same way. Use errors.Is to check
+// for it, since the returned error also names the session.
+var ErrSessionNotRunning = errors.New("session is not running")
 
 // Option configures Create and Kill.
 type Option func(*options)
@@ -107,6 +116,18 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 		return name, id, false, nil
 	}
 
+	// Every root the build will need is resolved and validated before any
+	// hook runs or lifecycle state is recorded. A malformed window or split
+	// root — an unset $VAR, say — used to be discovered only after
+	// on_project_start and on_project_first_start had already run (the
+	// latter doing real, possibly expensive setup work) and first-start had
+	// already been marked in history: fixing the config and retrying then
+	// fired on_project_restart instead, even though nothing had actually
+	// been built the first time.
+	if err := ValidateRoots(cfg); err != nil {
+		return "", "", false, err
+	}
+
 	if err := runHook(o, cfg.Session.OnProjectStart, root, "on_project_start", cfg.Session.Env, stderr); err != nil {
 		warnf(stderr, "on_project_start failed: %v", err)
 	}
@@ -141,7 +162,13 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 	initRoots := make([]string, len(cfg.Windows))
 	for i, w := range cfg.Windows {
 		initRoot := roots[i]
-		if w.Root == "" && len(w.Splits) > 0 && w.Splits[0].Type == "" && w.Splits[0].Root != "" {
+		// A first split's own root always overrides the window's — Split.Root
+		// is documented to override the window directory for its pane
+		// regardless of whether the window set one itself. Gating this on
+		// w.Root being empty silently ignored splits[0].root whenever the
+		// window also had a root, and started the initial pane in the wrong
+		// directory.
+		if len(w.Splits) > 0 && w.Splits[0].Type == "" && w.Splits[0].Root != "" {
 			if ir, err := config.ResolveRoot(roots[i], w.Splits[0].Root); err == nil {
 				initRoot = ir
 			}
@@ -149,7 +176,7 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 		initRoots[i] = initRoot
 	}
 
-	first, err := newSession(r, name, cfg.Windows[0], initRoots[0], envArgs(initEnvs[0]))
+	first, err := newSession(r, name, cfg.Windows[0], initRoots[0], envArgs(initEnvs[0]), stderr)
 	if err != nil {
 		return "", "", false, err
 	}
@@ -210,6 +237,46 @@ func Create(r tmux.Runner, cfg *config.Config, stdout, stderr io.Writer, opts ..
 		}
 	}
 	return name, id, true, nil
+}
+
+// ValidateRoots resolves every root a Create build would need — the
+// session's own name and root, plus every window and (nested) split root —
+// without touching tmux. `wyrm validate` uses it to catch a failure Create
+// would otherwise be the first to hit, such as session.root or a window's
+// root referencing an environment variable that isn't set: Config.validate
+// only checks the decoded structure, not what these paths actually resolve
+// to once interpolation has run.
+func ValidateRoots(cfg *config.Config) error {
+	_, root, err := cfg.Session.Resolve(cfg.Dir())
+	if err != nil {
+		return err
+	}
+	for _, w := range cfg.Windows {
+		wr, err := config.ResolveRoot(root, w.Root)
+		if err != nil {
+			return fmt.Errorf("window %q: %w", w.Name, err)
+		}
+		if err := validateSplitRoots(wr, w.Splits); err != nil {
+			return fmt.Errorf("window %q: %w", w.Name, err)
+		}
+	}
+	return nil
+}
+
+// validateSplitRoots mirrors applySplits' own root resolution: each split's
+// root resolves against its parent's (the window's, for a top-level split),
+// and children inherit their own parent split's resolved root in turn.
+func validateSplitRoots(base string, splits []config.Split) error {
+	for i, s := range splits {
+		root, err := config.ResolveRoot(base, s.Root)
+		if err != nil {
+			return fmt.Errorf("split %d: %w", i, err)
+		}
+		if err := validateSplitRoots(root, s.Children); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // detachHookCommand renders on_project_detach as the tmux command stored
@@ -277,9 +344,9 @@ type newIDs struct {
 // -c is that *first window's* root, not necessarily the session's: new-session
 // sets both at once, and the pane's directory is the one a user can see. They
 // differ only when window 0 sets its own root.
-func newSession(r tmux.Runner, name string, w config.Window, root string, env []string) (newIDs, error) {
+func newSession(r tmux.Runner, name string, w config.Window, root string, env []string, stderr io.Writer) (newIDs, error) {
 	args := []string{"new-session", "-d", "-P", "-F",
-		"#{session_id}|#{session_name}|#{window_id}|#{pane_id}",
+		"#{session_id}|#{window_id}|#{pane_id}",
 		"-s", name, "-n", w.Name, "-c", root}
 	args = append(args, env...)
 	args = append(args, paneProcess(w)...)
@@ -288,14 +355,27 @@ func newSession(r tmux.Runner, name string, w config.Window, root string, env []
 	if err != nil {
 		return newIDs{}, fmt.Errorf("creating session: %w", tmux.CmdErr(err, out))
 	}
-	parts := strings.SplitN(out, "|", 4)
-	if len(parts) != 4 {
+	// Only IDs share this delimited response — never the session name: tmux
+	// accepts "|" in a session name, and a name field sitting between two more
+	// fields could not be told apart from them. See tmux.SessionName.
+	parts := strings.Split(out, "|")
+	if len(parts) != 3 {
 		return newIDs{}, fmt.Errorf("unexpected tmux output %q", out)
 	}
-	ids := newIDs{sessionID: parts[0], name: parts[1], windowID: parts[2], paneID: parts[3]}
+	ids := newIDs{sessionID: parts[0], windowID: parts[1], paneID: parts[2]}
 	if err := tmux.CheckIDs(ids.sessionID, ids.windowID, ids.paneID); err != nil {
 		return newIDs{}, fmt.Errorf("creating session: %w", err)
 	}
+	// tmux does not always name a session what was asked for (see Create's
+	// rename warning), so the real name has to be queried separately. A
+	// session now genuinely exists, so a failure here is rolled back like any
+	// later build failure rather than left running with no ID ever reported
+	// to the caller.
+	actualName, nerr := tmux.SessionName(r, ids.sessionID)
+	if nerr != nil {
+		return newIDs{}, rollback(r, ids.sessionID, stderr, fmt.Errorf("creating session: %w", nerr))
+	}
+	ids.name = actualName
 	return ids, nil
 }
 
@@ -355,7 +435,7 @@ func Kill(r tmux.Runner, cfg *config.Config, stderr io.Writer, opts ...Option) (
 		return "", err
 	}
 	if !ok {
-		return "", fmt.Errorf("session %q is not running", name)
+		return "", fmt.Errorf("session %q is not running: %w", name, ErrSessionNotRunning)
 	}
 	if err := runHook(o, cfg.Session.OnProjectExit, root, "on_project_exit", cfg.Session.Env, stderr); err != nil {
 		warnf(stderr, "on_project_exit failed: %v", err)
@@ -522,21 +602,29 @@ func applySplits(r tmux.Runner, basePane string, splits []config.Split, ctx spli
 	// *new* pane, so the loop below never touches basePane — but it is still a
 	// pane of this window, so pre_window still applies to it. At nested levels
 	// basePane is the parent's pane, already in done, so this is a no-op there.
-	sendPreWindow(ctx.keys, basePane, ctx.preWindow, ctx.done)
+	// The one exception is a first entry with no type but its own `run`: that
+	// entry's process *is* basePane (see paneProcess), which has no shell to
+	// type pre_window into — typing it would land as literal input to that
+	// process instead of shell setup.
+	baseIsDirectRun := len(splits) > 0 && splits[0].Type == "" && splits[0].Run != ""
+	if !baseIsDirectRun {
+		sendPreWindow(ctx.keys, basePane, ctx.preWindow, ctx.done)
+	}
 
 	for i, s := range splits {
 		pane := panes[i]
 		if pane == "" {
 			continue
 		}
-		sendPreWindow(ctx.keys, pane, ctx.preWindow, ctx.done)
 		// A pane created with `run` has no shell to type into: the process is
 		// already what the pane is. splitPane (or paneProcess, for the window's
-		// initial pane) has started it.
+		// initial pane) has started it, so neither pre_window nor Command can
+		// be typed into it — both would land as literal input to that process.
 		if s.Run == "" {
+			sendPreWindow(ctx.keys, pane, ctx.preWindow, ctx.done)
 			ctx.keys.add(pane, s.Command)
 		} else {
-			// Its own pane has no shell, but it can still parent children.
+			// No shell, but it can still parent children.
 			ctx.done[pane] = true
 		}
 		child := ctx
@@ -853,6 +941,15 @@ func runHook(o options, hook, dir, label string, env map[string]string, stderr i
 // one built in memory), since there is no meaningful "has this project
 // started before" for either.
 //
+// History is keyed by root — the resolved, absolute session directory —
+// rather than cfg.Dir(), the directory the config *file* lives in. The two
+// differ for a wildcard project: every directory a [[wildcard]] pattern
+// matches shares one template file (and so one cfg.Dir()), but each has its
+// own root. Keying by cfg.Dir() collapsed them into a single lifecycle
+// identity, so only the first directory ever matched by a given template
+// saw on_project_first_start; every other one was told it had already
+// started.
+//
 // The MarkStarted write is skipped under dry-run: describing what would
 // happen must not itself change what "first start" means for the real run
 // that follows.
@@ -860,7 +957,7 @@ func runFirstStartOrRestartHook(o options, cfg *config.Config, root string, stde
 	if o.history == nil || cfg.Dir() == "" {
 		return
 	}
-	if o.history.Started(cfg.Dir()) {
+	if o.history.Started(root) {
 		if err := runHook(o, cfg.Session.OnProjectRestart, root, "on_project_restart", cfg.Session.Env, stderr); err != nil {
 			warnf(stderr, "on_project_restart failed: %v", err)
 		}
@@ -872,7 +969,7 @@ func runFirstStartOrRestartHook(o options, cfg *config.Config, root string, stde
 	if o.dryRun {
 		return
 	}
-	if err := o.history.MarkStarted(cfg.Dir()); err != nil {
+	if err := o.history.MarkStarted(root); err != nil {
 		warnf(stderr, "failed to record project start: %v", err)
 	}
 }

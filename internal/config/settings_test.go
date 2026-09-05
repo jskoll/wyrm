@@ -389,6 +389,45 @@ func TestLoadUserDefaultPresent(t *testing.T) {
 	}
 }
 
+// TestLoadUserDefaultResolvesRootAgainstInvocationDir is the regression test
+// for the user default template resolving a relative root against
+// ~/.config/wyrm — where the override file itself lives — instead of
+// wherever `wyrm up` was actually run. root = "." is the whole point of this
+// file (a template meant to apply everywhere), so it must resolve against the
+// invocation directory, not the file's own directory.
+func TestLoadUserDefaultResolvesRootAgainstInvocationDir(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	dir := filepath.Join(xdg, "wyrm")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "[session]\nroot = \".\"\n\n[[windows]]\nname = \"main\"\n"
+	if err := os.WriteFile(filepath.Join(dir, UserDefaultFileName), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	invocationDir := t.TempDir()
+	chdir(t, invocationDir)
+
+	cfg, err := LoadUserDefault()
+	if err != nil {
+		t.Fatalf("LoadUserDefault: %v", err)
+	}
+	_, root, err := cfg.Session.Resolve(cfg.Dir())
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	wantRoot, err := filepath.EvalSymlinks(invocationDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotRoot, err := filepath.EvalSymlinks(root); err != nil || gotRoot != wantRoot {
+		t.Errorf("resolved root = %q, want the invocation directory %q", root, wantRoot)
+	}
+}
+
 func TestLoadUserDefaultInvalid(t *testing.T) {
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)

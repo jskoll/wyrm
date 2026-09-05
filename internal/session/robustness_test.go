@@ -3,6 +3,7 @@ package session
 import (
 	"bytes"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -24,7 +25,7 @@ func (n *noisyRunner) Run(args ...string) (string, error) {
 	n.calls = append(n.calls, args)
 	switch args[0] {
 	case "new-session":
-		return n.notice + "\n$1|proj|@1|%1", nil
+		return n.notice + "\n$1|@1|%1", nil
 	case "split-window":
 		return n.notice + "\n%2", nil
 	case "list-sessions":
@@ -233,6 +234,56 @@ func TestCreateRollsBackHalfBuiltSession(t *testing.T) {
 	}
 	if _, _, _, err := Create(r, cfg, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
 		t.Fatal("Create = nil error, want the new-window failure")
+	}
+	if !strings.Contains(strings.Join(r.joined(), "\n"), "kill-session -t $1") {
+		t.Errorf("half-built session was not cleaned up:\n%s", strings.Join(r.joined(), "\n"))
+	}
+}
+
+// TestCreateSessionNameWithPipe is the regression test for a session name
+// containing "|": newSession used to request "session_id|session_name|
+// window_id|pane_id" from tmux and split it on "|", so a name like
+// "review|pipe" — which tmux accepts — was misparsed as extra fields, and
+// Create returned an error after tmux had already created the session, with
+// no ID left to roll it back. The real name is now queried separately from
+// the IDs (see tmux.SessionName), so it can contain "|" freely.
+func TestCreateSessionNameWithPipe(t *testing.T) {
+	r := &fakeRunner{}
+	cfg := &config.Config{
+		Session: config.Session{Name: "review|pipe", Root: "/tmp/proj"},
+		Windows: []config.Window{{Name: "w"}},
+	}
+	name, sessionID, created, err := Create(r, cfg, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if name != "review|pipe" {
+		t.Errorf("name = %q, want review|pipe", name)
+	}
+	if sessionID != "$1" {
+		t.Errorf("sessionID = %q, want $1", sessionID)
+	}
+	if !created {
+		t.Error("created = false, want true")
+	}
+	if strings.Contains(strings.Join(r.joined(), "\n"), "kill-session") {
+		t.Error("a successful build was rolled back")
+	}
+}
+
+// TestCreateRollsBackWhenSessionNameLookupFails covers the other half of the
+// same fix: newSession's follow-up display-message call can itself fail, and
+// by that point new-session has already created a real session. It must be
+// rolled back rather than left running with no ID ever reported to the
+// caller.
+func TestCreateRollsBackWhenSessionNameLookupFails(t *testing.T) {
+	r := &fakeRunner{fail: map[string]bool{"display-message": true}}
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{{Name: "w"}},
+	}
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err == nil {
+		t.Fatal("Create = nil error, want the display-message failure")
 	}
 	if !strings.Contains(strings.Join(r.joined(), "\n"), "kill-session -t $1") {
 		t.Errorf("half-built session was not cleaned up:\n%s", strings.Join(r.joined(), "\n"))

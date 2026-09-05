@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -37,6 +38,24 @@ func installFakeZoxide(t *testing.T, queryOutput string) {
 func enabledZoxideSettings() *config.Settings {
 	on := true
 	return &config.Settings{Zoxide: config.Zoxide{Enabled: &on}}
+}
+
+// TestListProjectsPropagatesSessionListFailure is the regression test for a
+// tmux list-sessions failure being silently discarded: listProjects used to
+// treat any error the same as "nothing is running" (an empty running map),
+// so every discovered project displayed as stopped instead of surfacing that
+// discovery itself was based on incomplete data.
+func TestListProjectsPropagatesSessionListFailure(t *testing.T) {
+	r := funcRunner{fn: func(args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "list-sessions" {
+			return "permission denied", errors.New("exit status 1")
+		}
+		return "", nil
+	}}
+
+	if _, err := listProjects(r, nil); err == nil {
+		t.Fatal("listProjects = nil error, want the list-sessions failure propagated")
+	}
 }
 
 // TestListProjectsZoxideDisabledByDefault: without settings.zoxide.enabled,
@@ -123,7 +142,9 @@ func TestStartProjectCmdZoxideUsesDefaultConfig(t *testing.T) {
 		case "list-sessions":
 			return "", nil
 		case "new-session":
-			return "$1|" + filepath.Base(dest) + "|@1|%1", nil
+			return "$1|@1|%1", nil
+		case "display-message":
+			return filepath.Base(dest), nil
 		}
 		return "", nil
 	}}
@@ -164,7 +185,9 @@ func TestStartProjectCmdZoxideTrackAddsPath(t *testing.T) {
 		case "list-sessions":
 			return "", nil
 		case "new-session":
-			return "$1|" + filepath.Base(dest) + "|@1|%1", nil
+			return "$1|@1|%1", nil
+		case "display-message":
+			return filepath.Base(dest), nil
 		}
 		return "", nil
 	}}
@@ -196,7 +219,9 @@ func TestStartProjectCmdNoTrackDoesNotAddPath(t *testing.T) {
 		case "list-sessions":
 			return "", nil
 		case "new-session":
-			return "$1|" + filepath.Base(dest) + "|@1|%1", nil
+			return "$1|@1|%1", nil
+		case "display-message":
+			return filepath.Base(dest), nil
 		}
 		return "", nil
 	}}

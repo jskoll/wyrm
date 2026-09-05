@@ -20,6 +20,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -564,6 +565,99 @@ func (m Model) currentPane() (tmux.PaneInfo, bool) {
 	return list[m.cur[panelPanes]], true
 }
 
+// --- selection identity ---
+//
+// m.cur holds a plain index into each panel's *current* visible list, not an
+// item identity. That index silently starts meaning something else — a
+// different session, window, or pane than the one actually selected — the
+// moment the list it indexes changes shape without the user moving the
+// cursor: a periodic refresh reorders or resizes the underlying slice, or
+// focus leaves a filtered panel and filterFor stops narrowing it (see
+// filterFor). The helpers below re-anchor the index to the same item's new
+// position whenever a caller replaces a list or moves focus, so a still-
+// present item stays selected and a stale one falls back to the ordinary
+// clamp/activeOrClamp behavior.
+
+func indexOfSession(entries []sessionEntry, name string) int {
+	for i, e := range entries {
+		if e.Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+func indexOfWindow(windows []tmux.WindowInfo, id string) int {
+	for i, w := range windows {
+		if w.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func indexOfPane(panes []tmux.PaneInfo, id string) int {
+	for i, p := range panes {
+		if p.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// rebaseFilteredCursor translates the focused panel's cursor from an index
+// into its filtered view to the same item's index in its unfiltered one. Call
+// it before moving focus away from the panel: filterFor only narrows the
+// *focused* panel, so the instant focus leaves, the same integer index is
+// reinterpreted against the full list — selecting whatever row happens to
+// sit there rather than the item the user actually filtered down to and
+// picked, while any already-loaded child data (e.g. Windows for a Sessions
+// selection) still describes the item that really was selected.
+func (m Model) rebaseFilteredCursor() Model {
+	if m.filterFor(m.focus) == "" {
+		return m
+	}
+	switch m.focus {
+	case panelProjects:
+		if p, ok := m.currentProject(); ok {
+			for i, q := range m.projects {
+				if q.Path == p.Path && q.Root == p.Root {
+					m.cur[panelProjects] = i
+					break
+				}
+			}
+		}
+	case panelSessions:
+		if e, ok := m.currentSessionEntry(); ok {
+			if i := indexOfSession(m.sessionEntries(), e.Name); i >= 0 {
+				m.cur[panelSessions] = i
+			}
+		}
+	case panelWindows:
+		if w, ok := m.currentWindow(); ok {
+			if i := indexOfWindow(m.windows, w.ID); i >= 0 {
+				m.cur[panelWindows] = i
+			}
+		}
+	case panelPanes:
+		if p, ok := m.currentPane(); ok {
+			if i := indexOfPane(m.panes, p.ID); i >= 0 {
+				m.cur[panelPanes] = i
+			}
+		}
+	}
+	return m
+}
+
+// setFocus moves focus to p, first rebasing the outgoing panel's cursor so
+// the item selected while it was filtered stays selected once it no longer
+// is — see rebaseFilteredCursor.
+func (m Model) setFocus(p panel) Model {
+	m = m.rebaseFilteredCursor()
+	m.focus = p
+	return m
+}
+
 // --- update ---
 
 // Update is the pure reducer. It never touches tmux or stdio directly; it only
@@ -656,10 +750,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pagerQuery = ""
 		m.pagerMatches = nil
 		m.pagerMatchIdx = 0
-		pageH := m.height - 4
-		if pageH < 1 {
-			pageH = 1
-		}
+		pageH := m.pagerBodyHeight()
 		m.pagerScroll = len(m.pagerLines) - pageH
 		if m.pagerScroll < 0 {
 			m.pagerScroll = 0
@@ -708,6 +799,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.projects = msg.projects
 		m.cur[panelProjects] = clamp(m.cur[panelProjects], m.panelLen(panelProjects))
+		if msg.warnings != "" {
+			// A non-fatal hook warning from whatever triggered this reload
+			// (e.g. killProjectCmd's on_project_exit) — visible, but must not
+			// block the list refresh above the way a real err does.
+			m.err = errors.New(msg.warnings)
+		}
 		if m.focus == panelProjects {
 			return m, m.updatePreview()
 		}
@@ -733,6 +830,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.pendingAttach = msg.sessionID
+		if msg.warnings != "" {
+			// A non-fatal build/attach-hook warning — visible via
+			// runProgram's post-quit report, but must not block the attach
+			// this message is already committed to.
+			m.err = errors.New(msg.warnings)
+		}
 		return m, tea.Quit
 
 	case sessionsMsg:
@@ -741,8 +844,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.err = nil
+		// Capture the selected session's identity before the list underneath
+		// it is replaced outright: a periodic refresh can add, remove, or
+		// reorder sessions with no input from the user, and a bare index
+		// would then silently select whichever session ends up in that slot
+		// instead of the one actually selected — see rebaseFilteredCursor.
+		prevName := ""
+		if e, ok := m.currentSessionEntry(); ok {
+			prevName = e.Name
+		}
 		m.sessions = msg.sessions
 		m.cur[panelSessions] = clamp(m.cur[panelSessions], m.panelLen(panelSessions))
+		if prevName != "" {
+			if i := indexOfSession(m.visibleSessions(), prevName); i >= 0 {
+				m.cur[panelSessions] = i
+			}
+		}
 		return m, m.reloadWindows()
 
 	case windowsMsg:
@@ -754,8 +871,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
+		prevID := ""
+		if w, ok := m.currentWindow(); ok {
+			prevID = w.ID
+		}
 		m.windows = msg.windows
 		m.cur[panelWindows] = activeOrClamp(m.cur[panelWindows], m.visibleWindows())
+		if prevID != "" {
+			if i := indexOfWindow(m.visibleWindows(), prevID); i >= 0 {
+				m.cur[panelWindows] = i
+			}
+		}
 		return m, m.reloadPanes()
 
 	case panesMsg:
@@ -766,8 +892,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
+		prevID := ""
+		if p, ok := m.currentPane(); ok {
+			prevID = p.ID
+		}
 		m.panes = msg.panes
 		m.cur[panelPanes] = activePaneOrClamp(m.cur[panelPanes], m.visiblePanes())
+		if prevID != "" {
+			if i := indexOfPane(m.visiblePanes(), prevID); i >= 0 {
+				m.cur[panelPanes] = i
+			}
+		}
 		return m, m.reloadPreview()
 
 	case allPanesMsg:
@@ -853,9 +988,7 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeNormal
 		return m.clampFocused()
 	case tea.KeyBackspace:
-		if m.filter != "" {
-			m.filter = m.filter[:len(m.filter)-1]
-		}
+		m.filter = trimLastRune(m.filter)
 		return m.clampFocused()
 	case tea.KeyRunes, tea.KeySpace:
 		m.filter += string(msg.Runes)
@@ -894,9 +1027,7 @@ func (m Model) handleFindPaneKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.findPaneCur = clampTo(m.findPaneCur+1, len(m.visibleAllPanes()))
 		return m, nil
 	case tea.KeyBackspace:
-		if m.findPaneQuery != "" {
-			m.findPaneQuery = m.findPaneQuery[:len(m.findPaneQuery)-1]
-		}
+		m.findPaneQuery = trimLastRune(m.findPaneQuery)
 		m.findPaneCur = clamp(m.findPaneCur, len(m.visibleAllPanes()))
 		return m, nil
 	case tea.KeyRunes, tea.KeySpace:
@@ -1156,9 +1287,7 @@ func (m Model) handlePagerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pagerMatchIdx = 0
 			return m, nil
 		case tea.KeyBackspace:
-			if m.pagerQuery != "" {
-				m.pagerQuery = m.pagerQuery[:len(m.pagerQuery)-1]
-			}
+			m.pagerQuery = trimLastRune(m.pagerQuery)
 			m.updatePagerMatches()
 			return m, nil
 		case tea.KeyRunes, tea.KeySpace:
@@ -1172,10 +1301,7 @@ func (m Model) handlePagerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	pageH := m.height - 4
-	if pageH < 1 {
-		pageH = 1
-	}
+	pageH := m.pagerBodyHeight()
 	maxScroll := len(m.pagerLines) - pageH
 	if maxScroll < 0 {
 		maxScroll = 0
@@ -1244,10 +1370,7 @@ func (m *Model) updatePagerMatches() {
 	}
 	if len(m.pagerMatches) > 0 {
 		m.pagerScroll = m.pagerMatches[0]
-		pageH := m.height - 4
-		if pageH < 1 {
-			pageH = 1
-		}
+		pageH := m.pagerBodyHeight()
 		maxScroll := len(m.pagerLines) - pageH
 		if maxScroll < 0 {
 			maxScroll = 0
@@ -1265,7 +1388,7 @@ func (m Model) cycleFocus(delta int) (tea.Model, tea.Cmd) {
 	if i < 0 {
 		i = 0
 	}
-	m.focus = list[((i+delta)%len(list)+len(list))%len(list)]
+	m = m.setFocus(list[((i+delta)%len(list)+len(list))%len(list)])
 	return m, m.updatePreview()
 }
 
@@ -1276,7 +1399,7 @@ func (m Model) focusPanelAt(i int) (tea.Model, tea.Cmd) {
 	if i < 0 || i >= len(list) {
 		return m, nil
 	}
-	m.focus = list[i]
+	m = m.setFocus(list[i])
 	return m, m.updatePreview()
 }
 
@@ -1744,6 +1867,18 @@ func runProgram(m Model, settings *config.Settings, stderr io.Writer) (pendingAt
 }
 
 // --- small helpers ---
+
+// trimLastRune drops the last rune of s, not the last byte. A text-entry
+// backspace handler that trims one byte leaves an invalid UTF-8 tail behind
+// for any multi-byte character (e.g. "é"), which corrupts every comparison
+// against that field afterward.
+func trimLastRune(s string) string {
+	if s == "" {
+		return s
+	}
+	_, size := utf8.DecodeLastRuneInString(s)
+	return s[:len(s)-size]
+}
 
 // clamp keeps cur within [0, n); returns 0 when the list is empty.
 func clamp(cur, n int) int {

@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jskoll/wyrm/internal/config"
 	"github.com/jskoll/wyrm/internal/editor"
 )
 
@@ -90,7 +91,9 @@ func TestStartProjectAttaches(t *testing.T) {
 		case "list-sessions":
 			return "", nil // nothing running yet
 		case "new-session":
-			return "$9|proj|@1|%1", nil
+			return "$9|@1|%1", nil
+		case "display-message":
+			return "proj", nil
 		}
 		return "", nil
 	}}
@@ -108,6 +111,89 @@ func TestStartProjectAttaches(t *testing.T) {
 	}
 	if _, ok := run(quit).(tea.QuitMsg); !ok {
 		t.Error("starting a project should quit to hand off the attach")
+	}
+}
+
+// TestStartProjectSurfacesHookWarningWithoutBlockingAttach is the regression
+// test for startProjectCmd passing io.Discard to session.Create and
+// RunAttachHook: a failed hook (a warning, not a build failure — see
+// session.Create's error policy) used to vanish entirely, the TUI being the
+// only place a project could start with something silently having gone
+// wrong. The warning must be visible without blocking the attach the message
+// already commits to.
+func TestStartProjectSurfacesHookWarningWithoutBlockingAttach(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".wyrm.toml")
+	cfg := "[session]\nname = \"proj\"\nroot = \"" + dir + "\"\non_project_start = \"exit 1\"\n\n[[windows]]\nname = \"main\"\n"
+	if err := os.WriteFile(path, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := &funcRunner{fn: func(args ...string) (string, error) {
+		switch args[0] {
+		case "list-sessions":
+			return "", nil
+		case "new-session":
+			return "$9|@1|%1", nil
+		case "display-message":
+			return "proj", nil
+		}
+		return "", nil
+	}}
+	m := projectModel(r, path)
+
+	m, cmd := update(m, key("enter"))
+	msg := run(cmd)
+	ps, ok := msg.(projectStartedMsg)
+	if !ok {
+		t.Fatalf("enter on project produced %T, want projectStartedMsg", msg)
+	}
+	if ps.err != nil {
+		t.Fatalf("projectStartedMsg.err = %v, want nil (a hook failure is a warning, not a build failure)", ps.err)
+	}
+	if ps.warnings == "" {
+		t.Fatal("projectStartedMsg.warnings is empty, want the on_project_start failure captured")
+	}
+
+	m, quit := update(m, ps)
+	if m.pendingAttach != "$9" {
+		t.Errorf("pendingAttach = %q, want $9 — a warning must not block the attach", m.pendingAttach)
+	}
+	if m.err == nil {
+		t.Error("m.err is nil, want the warning surfaced for runProgram to report after quitting")
+	}
+	if _, ok := run(quit).(tea.QuitMsg); !ok {
+		t.Error("a warning must not prevent quitting into the attach")
+	}
+}
+
+// TestKillProjectSurfacesHookWarning is the regression test for
+// killProjectCmd passing io.Discard to session.Kill: a failed
+// on_project_exit (a warning, not a kill failure) used to vanish entirely
+// instead of being visible the way it is from the CLI.
+func TestKillProjectSurfacesHookWarning(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".wyrm.toml")
+	cfg := "[session]\nname = \"proj\"\nroot = \"" + dir + "\"\non_project_exit = \"exit 1\"\n\n[[windows]]\nname = \"main\"\n"
+	if err := os.WriteFile(path, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := &funcRunner{fn: func(args ...string) (string, error) {
+		if args[0] == "list-sessions" {
+			return "$1|proj", nil
+		}
+		return "", nil
+	}}
+
+	msg := run(killProjectCmd(r, nil, config.Project{Path: path}))
+	pm, ok := msg.(projectsMsg)
+	if !ok {
+		t.Fatalf("killProjectCmd produced %T, want projectsMsg", msg)
+	}
+	if pm.err != nil {
+		t.Fatalf("projectsMsg.err = %v, want nil (a hook failure is a warning, not a kill failure)", pm.err)
+	}
+	if pm.warnings == "" {
+		t.Fatal("projectsMsg.warnings is empty, want the on_project_exit failure captured")
 	}
 }
 
