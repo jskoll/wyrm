@@ -104,15 +104,19 @@ func (a *app) migrateConfig(args []string) error {
 		return err
 	}
 
-	// A relative session.root (bare "." above all) currently resolves against
-	// src's own directory — cwd. Moving the file changes what it resolves
-	// against to the shared directory instead, silently rerooting the
-	// session it builds. Canonicalize it to the project's absolute path
-	// before the move, so the file keeps meaning what it always meant.
+	// A relative session.root (bare "." above all, but also e.g. "backend")
+	// currently resolves against src's own directory — cwd. Moving the file
+	// changes what it resolves against to the shared directory instead,
+	// silently rerooting the session it builds. Canonicalize it to the same
+	// absolute directory it already meant — cwd joined with the original
+	// relative root, not cwd alone, which would collapse "backend" into the
+	// project root itself — before the move.
 	var rewrittenRoot string
 	if data, rerr := os.ReadFile(src); rerr == nil {
 		if cfg, _, derr := config.Decode(data); derr == nil && config.RootNeedsAbsolute(cfg.Session.Root) {
-			rewrittenRoot = cwd
+			if abs, aerr := config.ResolveRoot(cwd, cfg.Session.Root); aerr == nil {
+				rewrittenRoot = abs
+			}
 		}
 	}
 

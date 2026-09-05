@@ -1496,6 +1496,47 @@ func TestRunMigrateConfig(t *testing.T) {
 		}
 	})
 
+	// TestRunMigrateConfig/a_relative_root_other_than_.__preserves_its_subpath
+	// is the regression test for canonicalizing every relative root to cwd
+	// unconditionally: root = "backend" names a subdirectory of the project,
+	// not the project root itself, so the rewritten absolute value has to be
+	// cwd joined with "backend" — collapsing it to bare cwd silently
+	// rerooted the session at the wrong directory.
+	t.Run("a relative root other than . preserves its subpath", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("XDG_CONFIG_HOME", "")
+
+		projectDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(projectDir, "backend"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		chdir(t, projectDir)
+		content := "[session]\nname = \"proj\"\nroot = \"backend\"\n\n[[windows]]\nname = \"w\"\n"
+		if err := os.WriteFile(".wyrm.toml", []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"migrate-config"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+		if code != 0 {
+			t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+		}
+
+		want := filepath.Join(home, ".config", "wyrm", "settings", filepath.Base(projectDir)+".wyrm.toml")
+		cfg, err := config.Load(want)
+		if err != nil {
+			t.Fatalf("Load(%s): %v", want, err)
+		}
+		wantRoot, err := filepath.EvalSymlinks(filepath.Join(projectDir, "backend"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gotRoot, err := filepath.EvalSymlinks(cfg.Session.Root); err != nil || gotRoot != wantRoot {
+			t.Errorf("session.root = %q, want the backend subdirectory %q (not just the project root)", cfg.Session.Root, wantRoot)
+		}
+	})
+
 	t.Run("no local config", func(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("HOME", home)
