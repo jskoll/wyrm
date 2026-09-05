@@ -98,30 +98,58 @@ func (a *app) status(args []string) error {
 		defer cancel()
 	}
 
+	// Collect and format once up front, outside the loop, so a bad -format
+	// (or any other collection failure) fails the way it does without
+	// -watch — the loop below used to swallow every iteration's error
+	// silently, so a typo'd -format looped forever printing nothing at all,
+	// with a zero exit code, until interrupted.
+	report, err := collectStatus(a.runner, *sessionFilter, profiles)
+	if err != nil {
+		return err
+	}
+	var buf bytes.Buffer
+	if err := formatStatus(&buf, *format, *verbose, report); err != nil {
+		return err
+	}
+	lastOut := buf.String()
+	_, _ = fmt.Fprint(a.stdout, lastOut)
+
 	ticker := time.NewTicker(*interval)
 	defer ticker.Stop()
 
-	var lastOut string
-	first := true
+	// lastErr dedupes a repeating failure so a downed tmux server doesn't
+	// spam a warning every tick — only a *new* error (or recovery) is worth
+	// telling the user about.
+	lastErr := ""
+	warnOnce := func(context string, err error) {
+		if msg := err.Error(); msg != lastErr {
+			lastErr = msg
+			_, _ = fmt.Fprintf(a.stderr, "wyrm: warning: %s: %v\n", context, err)
+		}
+	}
 
 	for {
-		report, err := collectStatus(a.runner, *sessionFilter, profiles)
-		if err == nil {
-			var buf bytes.Buffer
-			if err := formatStatus(&buf, *format, *verbose, report); err == nil {
-				out := buf.String()
-				if first || out != lastOut {
-					first = false
-					lastOut = out
-					_, _ = fmt.Fprint(a.stdout, out)
-				}
-			}
-		}
-
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
+		}
+
+		report, err := collectStatus(a.runner, *sessionFilter, profiles)
+		if err != nil {
+			warnOnce("status collection failed", err)
+			continue
+		}
+		buf.Reset()
+		if err := formatStatus(&buf, *format, *verbose, report); err != nil {
+			warnOnce("formatting status failed", err)
+			continue
+		}
+		lastErr = ""
+		out := buf.String()
+		if out != lastOut {
+			lastOut = out
+			_, _ = fmt.Fprint(a.stdout, out)
 		}
 	}
 }

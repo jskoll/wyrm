@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jskoll/wyrm/internal/config"
@@ -170,13 +172,22 @@ func zoomPaneCmd(r tmux.Runner, paneID string) tea.Cmd {
 	}
 }
 
-// selectTargetCmd pre-selects the window (and pane) an attach should land on,
-// then resolves to nil so it can be sequenced before tea.Quit.
+// selectTargetCmd pre-selects the window (and pane) an attach should land on.
+// Sequenced before tea.Quit, so a failure here — a stale target killed
+// elsewhere between listing and attaching, say — has to surface as an
+// actionErrMsg rather than being discarded: by the time Quit runs there is no
+// later chance to tell the user the client landed somewhere other than the
+// row they actually picked. runProgram prints m.err to stderr after the
+// program exits for exactly this kind of failure.
 func selectTargetCmd(r tmux.Runner, windowID, paneID string) tea.Cmd {
 	return func() tea.Msg {
-		_ = tmux.SelectWindow(r, windowID)
+		if err := tmux.SelectWindow(r, windowID); err != nil {
+			return actionErrMsg{fmt.Errorf("selecting window %s: %w", windowID, err)}
+		}
 		if paneID != "" {
-			_ = tmux.SelectPane(r, paneID)
+			if err := tmux.SelectPane(r, paneID); err != nil {
+				return actionErrMsg{fmt.Errorf("selecting pane %s: %w", paneID, err)}
+			}
 		}
 		return nil
 	}

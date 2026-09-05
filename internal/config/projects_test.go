@@ -92,6 +92,48 @@ func TestProjectNameCacheInvalidatesOnEdit(t *testing.T) {
 	}
 }
 
+// TestProjectNameSharedConfigWithAbsoluteRootMatchesBuiltSessionName is the
+// regression test for a shared config's disambiguated filename becoming its
+// display name even when session.root is absolute: Session.Resolve derives
+// the actual tmux session name from the resolved root, not from the file. A
+// shared "disambiguated-hash.wyrm.toml" rooted at an absolute directory used
+// to display and be discoverable as "disambiguated-hash" while the session
+// it actually built was named after the root — the two never agreeing
+// anywhere.
+func TestProjectNameSharedConfigWithAbsoluteRootMatchesBuiltSessionName(t *testing.T) {
+	shared := t.TempDir()
+	projectRoot := t.TempDir()
+
+	path := filepath.Join(shared, "disambiguated-hash"+DefaultFileName)
+	content := "[session]\nroot = \"" + projectRoot + "\"\n\n[[windows]]\nname = \"w\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	want := filepath.Base(projectRoot)
+	if got := ProjectName(path, true); got != want {
+		t.Errorf("ProjectName = %q, want %q (the resolved root's basename, matching what Session.Resolve builds)", got, want)
+	}
+}
+
+// TestProjectNameSharedConfigWithRelativeRootUsesFilename preserves the
+// behavior the shared-config guard exists to protect: a relative (or empty)
+// root resolves against the shared directory itself, so deriving a name from
+// it would name every such project after the shared folder instead of its
+// own file.
+func TestProjectNameSharedConfigWithRelativeRootUsesFilename(t *testing.T) {
+	shared := t.TempDir()
+	path := filepath.Join(shared, "proj"+DefaultFileName)
+	content := "[session]\nroot = \".\"\n\n[[windows]]\nname = \"w\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := ProjectName(path, true); got != "proj" {
+		t.Errorf("ProjectName = %q, want the filename-derived \"proj\"", got)
+	}
+}
+
 // TestDiscoverWildcardProjectsExpandsPattern covers the plain (single-level)
 // glob form, and that each match gets its own Project rooted at the matched
 // directory, all sharing the one template config.

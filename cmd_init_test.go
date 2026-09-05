@@ -335,6 +335,50 @@ func TestInitExplicitConfigPath(t *testing.T) {
 	}
 }
 
+// TestInitSharedStorageCanonicalizesRoot is the regression test for a
+// generated config's root = "." breaking the moment it's written into the
+// shared config directory instead of the project itself: session.root then
+// resolves against the shared directory, not the project init was run in.
+func TestInitSharedStorageCanonicalizesRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	projectDir := t.TempDir()
+	t.Chdir(projectDir)
+
+	sharedDir := t.TempDir()
+	settingsDir := filepath.Join(home, ".config", "wyrm")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settingsContent := "storage = \"shared\"\nshared_dir = \"" + sharedDir + "\"\n"
+	if err := os.WriteFile(filepath.Join(settingsDir, config.SettingsFileName), []byte(settingsContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	app := &app{stdout: &stdout, stderr: &stderr}
+	if err := app.init([]string{"-template", "minimal"}); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	wantPath := filepath.Join(sharedDir, filepath.Base(projectDir)+config.DefaultFileName)
+	cfg, err := config.Load(wantPath)
+	if err != nil {
+		t.Fatalf("Load(%s): %v", wantPath, err)
+	}
+	if cfg.Session.Root == "." || cfg.Session.Root == "" {
+		t.Fatalf("session.root = %q, want it canonicalized to the project's absolute path", cfg.Session.Root)
+	}
+	wantRoot, err := filepath.EvalSymlinks(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotRoot, err := filepath.EvalSymlinks(cfg.Session.Root); err != nil || gotRoot != wantRoot {
+		t.Errorf("session.root = %q, want the project directory %q", cfg.Session.Root, wantRoot)
+	}
+}
+
 func TestInitExtraArgsRejected(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := &app{

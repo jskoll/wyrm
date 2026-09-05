@@ -44,9 +44,13 @@ type fakeRunner struct {
 	// format) — whichever a given test actually exercises. Empty means "no
 	// matching/running sessions", matching real tmux's "no server running".
 	listOutput string
-	// displayMessageOutput backs "display-message" (tmux.CurrentSession),
-	// as "$id|name".
+	// displayMessageOutput backs a target-less "display-message" call
+	// (tmux.CurrentSession), as "$id|name".
 	displayMessageOutput string
+	// lastSessionName is what the most recent new-session call resolved to,
+	// echoed back by newSession's targeted display-message lookup of the
+	// session's real name — see tmux.SessionName.
+	lastSessionName string
 	// listWindowsOutput backs any "list-windows" call, regardless of target.
 	listWindowsOutput string
 	// listPanesOutput backs "list-panes", keyed by the -t target (a window
@@ -74,7 +78,8 @@ func (f *fakeRunner) Run(args ...string) (string, error) {
 				name = args[i+1]
 			}
 		}
-		return fmt.Sprintf("$%d|%s|@%d|%%%d", f.seq, name, f.seq, f.seq), nil
+		f.lastSessionName = name
+		return fmt.Sprintf("$%d|@%d|%%%d", f.seq, f.seq, f.seq), nil
 	case "new-window":
 		f.seq++
 		return fmt.Sprintf("@%d|%%%d", f.seq, f.seq), nil
@@ -107,6 +112,14 @@ func (f *fakeRunner) Run(args ...string) (string, error) {
 		}
 		return strings.Join(lines, "\n"), nil
 	case "display-message":
+		for _, a := range args {
+			if a == "-t" {
+				// newSession's targeted lookup of the session's real name —
+				// see tmux.SessionName — not the target-less current-session
+				// query tmux.CurrentSession makes.
+				return f.lastSessionName, nil
+			}
+		}
 		return f.displayMessageOutput, nil
 	case "list-windows":
 		return f.listWindowsOutput, nil
@@ -403,6 +416,26 @@ func TestRunValidateInvalid(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "wyrm:") {
 		t.Errorf("stderr = %q, want a wyrm: prefixed error", stderr.String())
+	}
+}
+
+// TestRunValidateCatchesUnresolvedRoot is the regression test for validate
+// checking only decoded structure, not what session.root/a window's root
+// actually resolve to: an unset environment variable there used to report
+// "config valid" and then fail in `wyrm up`.
+func TestRunValidateCatchesUnresolvedRoot(t *testing.T) {
+	t.Setenv("WYRM_TEST_UNDEFINED_VAR_ABC123", "")
+	os.Unsetenv("WYRM_TEST_UNDEFINED_VAR_ABC123")
+	content := "[session]\nname = \"proj\"\nroot = \"$WYRM_TEST_UNDEFINED_VAR_ABC123/api\"\n\n[[windows]]\nname = \"w\"\n"
+	path := writeConfig(t, content)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"validate", "-config", path}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+	if code == 0 {
+		t.Fatalf("exit code = 0, want a nonzero exit for an unresolved root; stdout=%q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "config valid") {
+		t.Errorf("stdout = %q, falsely reported the config valid", stdout.String())
 	}
 }
 
@@ -1420,6 +1453,90 @@ func TestRunMigrateConfig(t *testing.T) {
 		}
 	})
 
+	// TestRunMigrateConfig/relative_root_is_canonicalized is the regression
+	// test for a config storage location becoming project-root provenance:
+	// root = "." resolves against the directory the config file lives in, so
+	// moving it into the shared directory used to silently reroot the
+	// session it builds at the shared directory instead of the project.
+	t.Run("relative root is canonicalized", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("XDG_CONFIG_HOME", "")
+
+		projectDir := t.TempDir()
+		chdir(t, projectDir)
+		content := "[session]\nname = \"proj\"\nroot = \".\"\n\n[[windows]]\nname = \"w\"\n"
+		if err := os.WriteFile(".wyrm.toml", []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"migrate-config"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+		if code != 0 {
+			t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "rewritten to") {
+			t.Errorf("stdout = %q, want a note about the rewritten root", stdout.String())
+		}
+
+		want := filepath.Join(home, ".config", "wyrm", "settings", filepath.Base(projectDir)+".wyrm.toml")
+		cfg, err := config.Load(want)
+		if err != nil {
+			t.Fatalf("Load(%s): %v", want, err)
+		}
+		if cfg.Session.Root == "." || cfg.Session.Root == "" {
+			t.Fatalf("session.root = %q, want it canonicalized to the project's absolute path", cfg.Session.Root)
+		}
+		wantRoot, err := filepath.EvalSymlinks(projectDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gotRoot, err := filepath.EvalSymlinks(cfg.Session.Root); err != nil || gotRoot != wantRoot {
+			t.Errorf("session.root = %q, want the project directory %q", cfg.Session.Root, wantRoot)
+		}
+	})
+
+	// TestRunMigrateConfig/a_relative_root_other_than_.__preserves_its_subpath
+	// is the regression test for canonicalizing every relative root to cwd
+	// unconditionally: root = "backend" names a subdirectory of the project,
+	// not the project root itself, so the rewritten absolute value has to be
+	// cwd joined with "backend" — collapsing it to bare cwd silently
+	// rerooted the session at the wrong directory.
+	t.Run("a relative root other than . preserves its subpath", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("XDG_CONFIG_HOME", "")
+
+		projectDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(projectDir, "backend"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		chdir(t, projectDir)
+		content := "[session]\nname = \"proj\"\nroot = \"backend\"\n\n[[windows]]\nname = \"w\"\n"
+		if err := os.WriteFile(".wyrm.toml", []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"migrate-config"}, &stdout, &stderr, &fakeRunner{}, func() bool { return false }, nil)
+		if code != 0 {
+			t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+		}
+
+		want := filepath.Join(home, ".config", "wyrm", "settings", filepath.Base(projectDir)+".wyrm.toml")
+		cfg, err := config.Load(want)
+		if err != nil {
+			t.Fatalf("Load(%s): %v", want, err)
+		}
+		wantRoot, err := filepath.EvalSymlinks(filepath.Join(projectDir, "backend"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gotRoot, err := filepath.EvalSymlinks(cfg.Session.Root); err != nil || gotRoot != wantRoot {
+			t.Errorf("session.root = %q, want the backend subdirectory %q (not just the project root)", cfg.Session.Root, wantRoot)
+		}
+	})
+
 	t.Run("no local config", func(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("HOME", home)
@@ -1493,6 +1610,45 @@ func TestRunKill(t *testing.T) {
 			t.Errorf("stderr = %q, want a wyrm: prefixed error", stderr.String())
 		}
 	})
+}
+
+// TestRunKillByNamePrefersExactRunningSession is the regression test for
+// alias precedence: killByName used to resolve a configured project or alias
+// before checking for an exact live tmux session, so a project's alias
+// colliding with an unrelated running session's exact name made `wyrm kill
+// <name>` destroy the wrong session. attachByName already resolved in the
+// safe order (exact session first); killByName now matches it.
+func TestRunKillByNamePrefersExactRunningSession(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	// Project "alpha" aliases "beta" — but there's also a real, unrelated
+	// running session actually named "beta".
+	content := "[session]\nname = \"alpha\"\nroot = \".\"\naliases = [\"beta\"]\n\n[[windows]]\nname = \"w\"\n"
+	if err := os.WriteFile(filepath.Join(dir, config.DefaultFileName), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &fakeRunner{listOutput: "$1|beta"}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"kill", "beta"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "killed session beta") {
+		t.Errorf("stdout = %q, want the exact-named session killed", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "alpha") || strings.Contains(stderr.String(), "alpha") {
+		t.Errorf("output = %q / %q, resolved the alias instead of the exact running session", stdout.String(), stderr.String())
+	}
+	killed := false
+	for _, c := range r.calls {
+		if len(c) >= 3 && c[0] == "kill-session" && c[2] == "$1" {
+			killed = true
+		}
+	}
+	if !killed {
+		t.Errorf("no kill-session for $1; calls = %v", r.calls)
+	}
 }
 
 func TestRunUpWithVarFlag(t *testing.T) {

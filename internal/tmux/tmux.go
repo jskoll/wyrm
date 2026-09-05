@@ -176,6 +176,22 @@ func CurrentSession(r Runner) (id, name string, err error) {
 	return id, name, nil
 }
 
+// SessionName returns the current name of the session identified by id,
+// targeted by ID rather than name for the same reason FindSessionID is —
+// see its doc. Used right after creating a session: tmux does not always
+// name a session what was asked for (see the rename warning in
+// session.Create), and the actual name can't safely share a delimited
+// multi-field response with the IDs new-session also reports, because tmux
+// accepts "|" in a session name and there is no way to tell where such a
+// name ends and the next field begins.
+func SessionName(r Runner, id string) (string, error) {
+	out, err := r.Run("display-message", "-p", "-t", id, "-F", "#{session_name}")
+	if err != nil {
+		return "", fmt.Errorf("querying session name: %w", CmdErr(err, out))
+	}
+	return out, nil
+}
+
 // FindSessionID returns the tmux session ID for the exact session name, and
 // whether a matching session exists. It lists every session and compares
 // names in Go rather than passing the name through tmux's -t target syntax:

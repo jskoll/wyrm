@@ -55,10 +55,16 @@ _wyrm() {
                 up)
                     _arguments '-config[config file path]:config file:->configs' \
                         '-n[dry run]' \
-                        '-d[build the session without attaching]'
+                        '-d[build the session without attaching]' \
+                        '-var[set template variable (KEY=VALUE, can be repeated)]:variable:'
                     ;;
-                edit|validate)
+                edit)
                     _arguments '-config[config file path]:config file:->configs'
+                    ;;
+                validate)
+                    _arguments '-config[config file path]:config file:->configs' \
+                        '-strict[exit non-zero if the config has warnings]' \
+                        '-var[set template variable (KEY=VALUE, can be repeated)]:variable:'
                     ;;
                 send)
                     _arguments '-l[send exact characters (disable special key expansion)]' \
@@ -84,7 +90,8 @@ _wyrm() {
                         '-yes[skip confirmation prompt]' \
                         '-y[skip confirmation prompt]' \
                         '-n[dry run]' \
-                        '-d[skip attaching]'
+                        '-d[skip attaching]' \
+                        '-var[set template variable (KEY=VALUE, can be repeated)]:variable:'
                     ;;
                 kill)
                     _arguments '-config[config file path]:config file:->configs' \

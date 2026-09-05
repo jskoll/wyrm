@@ -220,6 +220,31 @@ func TestRunRestartWithNothingRunningStillBuilds(t *testing.T) {
 	}
 }
 
+// TestRunRestartPropagatesRealKillFailure is the regression test for restart
+// treating every Kill failure as "nothing to stop": a genuine tmux failure
+// (kill-session itself erroring, not just "not running") means the existing
+// session probably still exists, so restart must not proceed to build a new
+// one and falsely report "created" over it.
+func TestRunRestartPropagatesRealKillFailure(t *testing.T) {
+	writeLocalConfig(t, localConfig)
+
+	r := &fakeRunner{listOutput: "$1|proj", fail: map[string]bool{"kill-session": true}}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"restart"}, &stdout, &stderr, r, func() bool { return false }, func(string) error { return nil })
+	if code == 0 {
+		t.Fatalf("exit code = 0, want a nonzero exit for a real kill failure; stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	if strings.Contains(joinCalls(r), "new-session") {
+		t.Errorf("restart built a new session despite the existing one failing to stop:\n%s", joinCalls(r))
+	}
+	if strings.Contains(stdout.String(), "created session") {
+		t.Errorf("stdout = %q, falsely reported a session created", stdout.String())
+	}
+	if strings.Contains(stderr.String(), "nothing to stop") {
+		t.Errorf("stderr = %q, a real kill failure must not be reported as benign", stderr.String())
+	}
+}
+
 // TestRunRestartDetachSkipsAttach guards `wyrm restart -d`: the session
 // still gets torn down and rebuilt for real, but attach must never be called.
 func TestRunRestartDetachSkipsAttach(t *testing.T) {

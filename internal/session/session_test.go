@@ -29,6 +29,10 @@ type fakeRunner struct {
 	// means "whatever was asked for", i.e. the -s argument — the normal case.
 	// Setting it simulates the tmux builds that rewrite "." and ":" to "_".
 	sessionName string
+	// lastSessionName is what the most recent new-session call resolved to,
+	// echoed back by the display-message lookup newSession follows up with —
+	// see tmux.SessionName.
+	lastSessionName string
 
 	// fail forces the named command (args[0]) to return an error.
 	fail map[string]bool
@@ -65,7 +69,8 @@ func (f *fakeRunner) Run(args ...string) (string, error) {
 				}
 			}
 		}
-		return fmt.Sprintf("$1|%s|@%d|%%%d", name, f.winSeq, f.paneSeq), nil
+		f.lastSessionName = name
+		return fmt.Sprintf("$1|@%d|%%%d", f.winSeq, f.paneSeq), nil
 	case "new-window":
 		f.winSeq++
 		f.paneSeq++
@@ -76,6 +81,10 @@ func (f *fakeRunner) Run(args ...string) (string, error) {
 	case "split-window":
 		f.paneSeq++
 		return fmt.Sprintf("%%%d", f.paneSeq), nil
+	case "display-message":
+		// newSession's follow-up lookup of the session's real name — see
+		// tmux.SessionName.
+		return f.lastSessionName, nil
 	case "list-sessions":
 		return f.listOutput, nil
 	case "list-windows":
@@ -142,7 +151,10 @@ func TestCreateSplitTree(t *testing.T) {
 	// key name is still typed.
 	want := []string{
 		"list-sessions -F #{session_id}|#{session_name}",
-		"new-session -d -P -F #{session_id}|#{session_name}|#{window_id}|#{pane_id} -s proj -n editor -c /tmp/proj",
+		"new-session -d -P -F #{session_id}|#{window_id}|#{pane_id} -s proj -n editor -c /tmp/proj",
+		// tmux doesn't always name a session what was asked for, so the real
+		// name is queried separately from the IDs above — see tmux.SessionName.
+		"display-message -p -t $1 -F #{session_name}",
 		// second entry splits the initial pane %1 -> %2 (breadth first)
 		"split-window -d -t %1 -h -P -F #{pane_id} -c /tmp/proj -l 30%",
 		// child splits its parent %2 -> %3
@@ -234,7 +246,7 @@ func TestCreateMultipleWindowsAndStartup(t *testing.T) {
 
 	got := strings.Join(r.joined(), "\n")
 	for _, want := range []string{
-		"new-session -d -P -F #{session_id}|#{session_name}|#{window_id}|#{pane_id} -s proj -n first -c /tmp/proj",
+		"new-session -d -P -F #{session_id}|#{window_id}|#{pane_id} -s proj -n first -c /tmp/proj",
 		"new-window -d -P -F #{window_id}|#{pane_id} -t " + sessionID + " -n second -c /tmp/proj",
 		"select-window -t @2",
 		"select-pane -t %2",
@@ -585,6 +597,92 @@ func TestCreateFirstStartFiresOnceThenRestart(t *testing.T) {
 	}
 	if len(hist.marked) != 1 {
 		t.Errorf("marked = %v, want MarkStarted not called again", hist.marked)
+	}
+}
+
+// TestCreateWildcardProjectsHaveIndependentLifecycleHistory is the
+// regression test for keying lifecycle history off cfg.Dir(): every
+// directory a [[wildcard]] pattern matches shares one template file (and so
+// one cfg.Dir()), but Project.LoadConfig overrides each one's session.root
+// to its own matched directory. History has to follow root, or only the
+// first matched directory ever sees on_project_first_start — every other one
+// is told (wrongly) that it has already started.
+func TestCreateWildcardProjectsHaveIndependentLifecycleHistory(t *testing.T) {
+	body := "[session]\nroot = \".\"\n" +
+		"on_project_first_start = \"echo first\"\non_project_restart = \"echo restart\"\n" +
+		"[[windows]]\nname = \"w\"\n"
+	templatePath := t.TempDir() + "/.wyrm.toml"
+	if err := os.WriteFile(templatePath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Load the same template twice — like two directories matched by one
+	// [[wildcard]] pattern — and override each one's root to its own matched
+	// directory, exactly as Project.LoadConfig does. Both configs therefore
+	// share cfg.Dir() (the template's own directory).
+	cfgA, err := config.Load(templatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgA.Session.Root = t.TempDir()
+
+	cfgB, err := config.Load(templatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgB.Session.Root = t.TempDir()
+
+	if cfgA.Dir() != cfgB.Dir() {
+		t.Fatalf("test setup: cfgA.Dir()=%q != cfgB.Dir()=%q, want them to collide like a wildcard template", cfgA.Dir(), cfgB.Dir())
+	}
+
+	hist := &fakeHistory{}
+
+	var stderrA bytes.Buffer
+	if _, _, _, err := Create(&fakeRunner{}, cfgA, io.Discard, &stderrA, WithHistory(hist)); err != nil {
+		t.Fatalf("Create A: %v", err)
+	}
+	if !strings.Contains(stderrA.String(), "running on_project_first_start") {
+		t.Errorf("project A: stderr = %q, want on_project_first_start", stderrA.String())
+	}
+
+	var stderrB bytes.Buffer
+	if _, _, _, err := Create(&fakeRunner{}, cfgB, io.Discard, &stderrB, WithHistory(hist)); err != nil {
+		t.Fatalf("Create B: %v", err)
+	}
+	if !strings.Contains(stderrB.String(), "running on_project_first_start") {
+		t.Errorf("project B: stderr = %q, want its own on_project_first_start rather than being told it already started", stderrB.String())
+	}
+	if strings.Contains(stderrB.String(), "on_project_restart") {
+		t.Errorf("project B: stderr = %q, must not run on_project_restart on its own genuine first start", stderrB.String())
+	}
+}
+
+// TestCreateValidatesBeforeRunningHooks is the regression test for a
+// malformed window root being discovered only after on_project_first_start
+// had already run (possibly doing real, expensive setup work) and been
+// recorded in history: fixing the config and retrying then fired
+// on_project_restart instead, even though nothing had actually been built
+// the first time.
+func TestCreateValidatesBeforeRunningHooks(t *testing.T) {
+	t.Setenv("WYRM_TEST_UNDEFINED_VAR_XYZ", "")
+	os.Unsetenv("WYRM_TEST_UNDEFINED_VAR_XYZ")
+	body := "[session]\nname = \"proj\"\nroot = \".\"\n" +
+		"on_project_first_start = \"echo first\"\n" +
+		"[[windows]]\nname = \"w\"\nroot = \"$WYRM_TEST_UNDEFINED_VAR_XYZ\"\n"
+	cfg := loadConfig(t, body)
+	hist := &fakeHistory{}
+
+	r := &fakeRunner{}
+	var stderr bytes.Buffer
+	if _, _, _, err := Create(r, cfg, io.Discard, &stderr, WithHistory(hist)); err == nil {
+		t.Fatal("Create = nil error, want the malformed window root to fail")
+	}
+	if strings.Contains(stderr.String(), "on_project_first_start") {
+		t.Errorf("stderr = %q, on_project_first_start ran despite the config being invalid", stderr.String())
+	}
+	if len(hist.marked) != 0 {
+		t.Errorf("marked = %v, want first-start not recorded for a build that never actually happened", hist.marked)
 	}
 }
 
@@ -993,7 +1091,7 @@ func TestCreateWindowAndSplitRoots(t *testing.T) {
 	}
 	joined := strings.Join(r.joined(), "\n")
 	for _, want := range []string{
-		"new-session -d -P -F #{session_id}|#{session_name}|#{window_id}|#{pane_id} -s proj -n api -c /tmp/proj/api",
+		"new-session -d -P -F #{session_id}|#{window_id}|#{pane_id} -s proj -n api -c /tmp/proj/api",
 		"split-window -d -t %1 -h -P -F #{pane_id} -c /tmp/proj/api/deep",
 		"split-window -d -t %2 -v -P -F #{pane_id} -c /elsewhere",
 		"new-window -d -P -F #{window_id}|#{pane_id} -t $1 -n plain -c /tmp/proj",
@@ -1037,6 +1135,65 @@ func TestCreateRunStartsProcessAndSkipsSendKeys(t *testing.T) {
 	}
 	if !strings.Contains(joined, "send-keys -t %3 -l -- typed") {
 		t.Errorf("the command entry was not typed:\n%s", joined)
+	}
+}
+
+// TestCreatePreWindowSkipsDirectRunPanes is the regression test for
+// pre_window being typed into a pane with no shell: a split's `run` starts
+// its own process directly (see paneProcess/splitPane), so pre_window landing
+// there is literal input to that process rather than shell setup. This
+// covers both the window's initial pane (splits[0] with no type) and a
+// later, nested one.
+func TestCreatePreWindowSkipsDirectRunPanes(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{{
+			Name:      "w",
+			PreWindow: "nvm use 18",
+			Splits: []config.Split{
+				{Run: "cat"},
+				{Type: "h", Run: "less"},
+				{Type: "v", Command: "typed"},
+			},
+		}},
+	}
+	r := &fakeRunner{}
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	joined := strings.Join(r.joined(), "\n")
+	if strings.Contains(joined, "send-keys -t %1") || strings.Contains(joined, "send-keys -t %2") {
+		t.Errorf("pre_window was typed into a direct-run pane's process:\n%s", joined)
+	}
+	// The one shell pane (the "typed" split) still gets it.
+	if !strings.Contains(joined, "send-keys -t %3 -l -- nvm use 18") {
+		t.Errorf("pre_window was not sent to the one pane with a shell:\n%s", joined)
+	}
+}
+
+// TestCreateWindowRootDoesNotOverrideSplitRoot is the regression test for the
+// initial split's own root being ignored whenever the window also set one:
+// Split.Root is documented to override the window's directory for its pane
+// regardless, but the precedence check used to require window.root to be
+// empty first.
+func TestCreateWindowRootDoesNotOverrideSplitRoot(t *testing.T) {
+	cfg := &config.Config{
+		Session: config.Session{Name: "proj", Root: "/tmp/proj"},
+		Windows: []config.Window{{
+			Name: "w",
+			Root: "backend",
+			Splits: []config.Split{
+				{Root: "deep", Command: "typed"},
+			},
+		}},
+	}
+	r := &fakeRunner{}
+	if _, _, _, err := Create(r, cfg, io.Discard, io.Discard); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	joined := strings.Join(r.joined(), "\n")
+	if !strings.Contains(joined, "-c /tmp/proj/backend/deep") {
+		t.Errorf("initial pane did not honor the split's own root over the window's:\n%s", joined)
 	}
 }
 
