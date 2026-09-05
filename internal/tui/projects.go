@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -44,11 +46,19 @@ type Project struct {
 // zoxide-known directories that don't already have a project of their own
 // (opt-in — see appendZoxideProjects).
 func listProjects(r tmux.Runner, settings *config.Settings) ([]Project, error) {
+	// sessions.List already treats "no server running" as an empty list, not
+	// an error — so any error it does return is a real one (permission,
+	// a broken tmux config, ...). Ignoring it here used to mean every
+	// project displayed as stopped whenever the list call failed, silently
+	// misrepresenting what was actually running rather than surfacing the
+	// failure.
+	sessionList, err := sessions.List(r)
+	if err != nil {
+		return nil, err
+	}
 	running := map[string]string{}
-	if sessions, err := sessions.List(r); err == nil {
-		for _, s := range sessions {
-			running[s.Name] = s.ID
-		}
+	for _, s := range sessionList {
+		running[s.Name] = s.ID
 	}
 
 	discovered := config.DiscoverProjects(settings)
@@ -101,6 +111,11 @@ func appendZoxideProjects(projects []Project, names map[string]bool, running map
 type projectsMsg struct {
 	projects []Project
 	err      error
+	// warnings carries non-fatal stderr output from the command that
+	// triggered this reload (e.g. killProjectCmd's on_project_exit), when
+	// the operation itself otherwise succeeded. See projectStartedMsg for
+	// why this can't just reuse err.
+	warnings string
 }
 
 type configPreviewMsg struct {
@@ -112,6 +127,13 @@ type configPreviewMsg struct {
 type projectStartedMsg struct {
 	sessionID string
 	err       error
+	// warnings carries non-fatal stderr output from building the session or
+	// running on_project_attach (a failed pane split, a hook that exited
+	// non-zero, ...). Kept apart from err — which, on this message, aborts
+	// the attach Update is about to make (see its handler) — so a warning is
+	// still visible without blocking the attach the user is already
+	// quitting into.
+	warnings string
 }
 
 // --- commands ---
@@ -143,11 +165,17 @@ func startProjectCmd(r tmux.Runner, settings *config.Settings, p Project) tea.Cm
 		if err != nil {
 			return projectStartedMsg{err: err}
 		}
-		_, id, _, err := session.Create(r, cfg, io.Discard, io.Discard, session.WithHistory(hist))
+		// Captured rather than discarded: Create's own per-pane warnings (a
+		// failed split, a hook that exited non-zero, ...) reach the CLI's
+		// stderr directly, but discarding them here left the TUI the only
+		// place a project could be started with something silently having
+		// gone wrong.
+		var warnings bytes.Buffer
+		_, id, _, err := session.Create(r, cfg, io.Discard, &warnings, session.WithHistory(hist))
 		if err == nil {
 			// projectStartedMsg always quits into an attach (see Update), so
 			// this is an attach — session.Create no longer runs the hook.
-			_ = session.RunAttachHook(cfg, io.Discard)
+			_ = session.RunAttachHook(cfg, &warnings)
 		}
 		if err == nil && p.Root != "" && settings.ZoxideTrack() && zoxide.Available() {
 			// Best-effort: teaching zoxide about a directory wyrm just
@@ -155,7 +183,11 @@ func startProjectCmd(r tmux.Runner, settings *config.Settings, p Project) tea.Cm
 			// the session build over.
 			_ = zoxide.Add(p.Root)
 		}
-		return projectStartedMsg{sessionID: id, err: err}
+		msg := projectStartedMsg{sessionID: id, err: err}
+		if err == nil && warnings.Len() > 0 {
+			msg.warnings = strings.TrimSpace(warnings.String())
+		}
+		return msg
 	}
 }
 
@@ -194,11 +226,20 @@ func killProjectCmd(r tmux.Runner, settings *config.Settings, p config.Project) 
 		if err != nil {
 			return actionErrMsg{err}
 		}
-		if _, err := session.Kill(r, cfg, io.Discard); err != nil {
+		// Captured rather than discarded: a failed on_project_exit reaches
+		// the CLI's stderr directly, but discarding it here left the TUI the
+		// only place a project could be stopped with its exit hook silently
+		// having failed.
+		var warnings bytes.Buffer
+		if _, err := session.Kill(r, cfg, &warnings); err != nil {
 			return actionErrMsg{err}
 		}
 		ps, lerr := listProjects(r, settings)
-		return projectsMsg{projects: ps, err: lerr}
+		msg := projectsMsg{projects: ps, err: lerr}
+		if lerr == nil && warnings.Len() > 0 {
+			msg.warnings = strings.TrimSpace(warnings.String())
+		}
+		return msg
 	}
 }
 

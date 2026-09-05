@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jskoll/wyrm/internal/sessions"
 )
 
@@ -79,6 +80,42 @@ func TestEscClearsFilter(t *testing.T) {
 	}
 	if got := len(m.visibleSessions()); got != 3 {
 		t.Errorf("visible sessions = %d, want all 3 after clearing", got)
+	}
+}
+
+// TestFilterSelectionSurvivesFocusChange is the regression test for a
+// filtered selection silently retargeting a different session once focus
+// moves away: filterFor only narrows the *focused* panel, so the same
+// integer cursor used to be reinterpreted against the full, unfiltered list
+// the instant focus left Sessions — selecting whatever session happened to
+// sit at that index instead of the one actually chosen while filtered.
+func TestFilterSelectionSurvivesFocusChange(t *testing.T) {
+	m := filterModel()
+	m, _ = update(m, key("/"))
+	for _, r := range "web" {
+		m, _ = update(m, key(string(r)))
+	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyEnter}) // commits the filter, keeps it narrowing Sessions
+
+	if e, ok := m.currentSessionEntry(); !ok || e.Name != "web-frontend" {
+		t.Fatalf("currentSessionEntry before focus change = %+v, %v, want web-frontend", e, ok)
+	}
+
+	// Move focus away without touching the cursor — Tab is cycleFocus, which
+	// now rebases it through setFocus.
+	next, _ := m.cycleFocus(1)
+	m = next.(Model)
+	if m.focus == panelSessions {
+		t.Fatal("cycleFocus did not move focus off Sessions")
+	}
+
+	// Sessions is unfiltered again now that it isn't focused; the same
+	// session must still be the one selected.
+	if len(m.visibleSessions()) != 3 {
+		t.Fatalf("visible sessions = %d, want all 3 once Sessions lost focus", len(m.visibleSessions()))
+	}
+	if e, ok := m.currentSessionEntry(); !ok || e.Name != "web-frontend" {
+		t.Errorf("currentSessionEntry after focus change = %+v, %v, want it still to be web-frontend", e, ok)
 	}
 }
 

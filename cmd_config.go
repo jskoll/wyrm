@@ -16,6 +16,7 @@ import (
 	"github.com/jskoll/wyrm/internal/config"
 	"github.com/jskoll/wyrm/internal/editor"
 	"github.com/jskoll/wyrm/internal/freeze"
+	"github.com/jskoll/wyrm/internal/session"
 	"github.com/jskoll/wyrm/internal/state"
 	"github.com/jskoll/wyrm/internal/tmux"
 	"github.com/pelletier/go-toml/v2"
@@ -103,14 +104,40 @@ func (a *app) migrateConfig(args []string) error {
 		return err
 	}
 
+	// A relative session.root (bare "." above all) currently resolves against
+	// src's own directory — cwd. Moving the file changes what it resolves
+	// against to the shared directory instead, silently rerooting the
+	// session it builds. Canonicalize it to the project's absolute path
+	// before the move, so the file keeps meaning what it always meant.
+	var rewrittenRoot string
+	if data, rerr := os.ReadFile(src); rerr == nil {
+		if cfg, _, derr := config.Decode(data); derr == nil && config.RootNeedsAbsolute(cfg.Session.Root) {
+			rewrittenRoot = cwd
+		}
+	}
+
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	if err := os.Rename(src, dst); err != nil {
+	if rewrittenRoot != "" {
+		data, err := os.ReadFile(src)
+		if err != nil {
+			return err
+		}
+		if err := state.AtomicWriteFile(dst, config.RewriteSessionRoot(data, rewrittenRoot), 0o644); err != nil {
+			return err
+		}
+		if err := os.Remove(src); err != nil {
+			return err
+		}
+	} else if err := os.Rename(src, dst); err != nil {
 		return err
 	}
 
 	_, _ = fmt.Fprintf(a.stdout, "moved %s to %s\n", src, dst)
+	if rewrittenRoot != "" {
+		_, _ = fmt.Fprintf(a.stdout, "note: session.root was relative, rewritten to %s so the session still builds here\n", rewrittenRoot)
+	}
 	// A disambiguated filename becomes the project's name, since a shared
 	// config with no [session].name is named after its file. Say so, rather
 	// than leaving the user to discover it the next time they type `wyrm api`.
@@ -155,6 +182,13 @@ func (a *app) validate(args []string) error {
 		cfg.Interpolate(vars)
 	}
 	a.printWarnings(cfg)
+	// Decoding only checks structure, not what session.root, a window's
+	// root, or a split's root actually resolve to once interpolation has
+	// run — an unset $VAR there passed validate and then failed in `wyrm
+	// up`. Run the same non-mutating resolution Create performs.
+	if err := session.ValidateRoots(cfg); err != nil {
+		return fmt.Errorf("%s: %w", source, err)
+	}
 	// Warnings are not failures by default — a deprecated `panes` list still
 	// builds the session its author wanted. -strict is for CI, where "this
 	// config has a typo in it" should stop the build.
@@ -448,14 +482,28 @@ func (a *app) init(args []string) error {
 		defaultName = "myproject"
 	}
 
+	// A generated config normally names its own directory with root = ".":
+	// the file and the project it describes live in the same place. That
+	// breaks the moment the file is written into the shared config
+	// directory instead — "." would then resolve against the shared
+	// directory, not this project. Anchor it to the current directory
+	// explicitly whenever that's where this config is headed.
+	defaultRoot := "."
+	if sharedDir, serr := settings.ResolvedSharedDir(); serr == nil {
+		if destDir, derr := filepath.Abs(filepath.Dir(dest)); derr == nil &&
+			filepath.Clean(destDir) == filepath.Clean(sharedDir) {
+			defaultRoot = cwd
+		}
+	}
+
 	var content string
 	if templateName != "" {
-		content, err = config.GetTemplate(templateName, defaultName, ".")
+		content, err = config.GetTemplate(templateName, defaultName, defaultRoot)
 		if err != nil {
 			return usageErrf("%v", err)
 		}
 	} else {
-		content, err = a.runInitWizard(reader, defaultName)
+		content, err = a.runInitWizard(reader, defaultName, defaultRoot)
 		if err != nil {
 			return err
 		}
@@ -503,7 +551,7 @@ func (a *app) initDestination(settings *config.Settings, explicit string) (strin
 	return dest, exists, nil
 }
 
-func (a *app) runInitWizard(reader *bufio.Reader, defaultSessionName string) (string, error) {
+func (a *app) runInitWizard(reader *bufio.Reader, defaultSessionName, defaultRoot string) (string, error) {
 	sessionName, err := promptLine(reader, a.stdout, "Session name", defaultSessionName)
 	if err != nil {
 		return "", err
@@ -512,12 +560,12 @@ func (a *app) runInitWizard(reader *bufio.Reader, defaultSessionName string) (st
 		sessionName = defaultSessionName
 	}
 
-	sessionRoot, err := promptLine(reader, a.stdout, "Root directory", ".")
+	sessionRoot, err := promptLine(reader, a.stdout, "Root directory", defaultRoot)
 	if err != nil {
 		return "", err
 	}
 	if sessionRoot == "" {
-		sessionRoot = "."
+		sessionRoot = defaultRoot
 	}
 
 	_, _ = fmt.Fprintln(a.stdout, "\nChoose configuration method:")

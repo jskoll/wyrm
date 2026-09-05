@@ -769,6 +769,26 @@ func padRight(s string, w int) string {
 	return s + strings.Repeat(" ", gap)
 }
 
+// pagerBodyHeight is how many buffer lines the pager box actually renders,
+// mirroring renderPagerOverlay's own boxH/innerH/bodyH chain exactly.
+// Scrolling, paging, "G"/"end", and search-match navigation all have to
+// agree with this number — they used to independently assume m.height-4,
+// one row taller than the box the renderer really drew, so the last line
+// was unreachable and jumping to a search match could scroll past what was
+// actually shown.
+func (m Model) pagerBodyHeight() int {
+	boxH := m.height - 2
+	if boxH < 6 {
+		boxH = 6
+	}
+	innerH := boxH - borderSize
+	bodyH := innerH - titleRows
+	if bodyH < 1 {
+		bodyH = 1
+	}
+	return bodyH
+}
+
 func (m Model) renderPagerOverlay() string {
 	boxW := m.width - 4
 	boxH := m.height - 2
@@ -780,10 +800,7 @@ func (m Model) renderPagerOverlay() string {
 	}
 	innerW := boxW - borderSize
 	innerH := boxH - borderSize
-	bodyH := innerH - titleRows
-	if bodyH < 1 {
-		bodyH = 1
-	}
+	bodyH := m.pagerBodyHeight()
 
 	title := fmt.Sprintf(" Pager: %s ", m.pagerPaneTitle)
 	if len(m.pagerLines) > 0 {
@@ -832,29 +849,44 @@ func (m Model) renderPagerOverlay() string {
 	return lipgloss.JoinVertical(lipgloss.Left, frame, footer)
 }
 
+// highlightMatch wraps every case-insensitive occurrence of query in line
+// with searchMatchStyle. It works in rune spans rather than byte offsets:
+// strings.ToLower can change a character's byte length (the Kelvin sign
+// lowercases from 3 bytes to ASCII "k"'s 1), so an index found in a lowered
+// copy does not reliably locate that match in the original byte string —
+// slicing line with it can panic or split a multi-byte rune. unicode.ToLower
+// maps exactly one rune to one rune, so lowered and original rune slices
+// always stay the same length and index-aligned, which byte slices don't.
 func highlightMatch(line, query string) string {
 	if query == "" {
 		return line
 	}
-	lowerLine := strings.ToLower(line)
-	lowerQ := strings.ToLower(query)
-	idx := strings.Index(lowerLine, lowerQ)
-	if idx < 0 {
+	runes := []rune(line)
+	lowerRunes := []rune(strings.ToLower(line))
+	queryRunes := []rune(strings.ToLower(query))
+	n, m := len(lowerRunes), len(queryRunes)
+	if m == 0 || m > n {
 		return line
 	}
+
 	var b strings.Builder
 	last := 0
-	for idx >= 0 {
-		b.WriteString(line[last:idx])
-		matchText := line[idx : idx+len(query)]
-		b.WriteString(searchMatchStyle.Render(matchText))
-		last = idx + len(query)
-		next := strings.Index(lowerLine[last:], lowerQ)
-		if next < 0 {
-			break
+	for i := 0; i+m <= n; i++ {
+		match := true
+		for j := 0; j < m; j++ {
+			if lowerRunes[i+j] != queryRunes[j] {
+				match = false
+				break
+			}
 		}
-		idx = last + next
+		if !match {
+			continue
+		}
+		b.WriteString(string(runes[last:i]))
+		b.WriteString(searchMatchStyle.Render(string(runes[i : i+m])))
+		last = i + m
+		i = last - 1 // loop's i++ resumes the scan right after the match
 	}
-	b.WriteString(line[last:])
+	b.WriteString(string(runes[last:]))
 	return b.String()
 }

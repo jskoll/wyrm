@@ -5,7 +5,7 @@ are welcome.
 
 ## Development setup
 
-Requirements: the Go version in `go.mod` (currently 1.24) or newer, tmux 3.1+
+Requirements: the Go version in `go.mod` (currently 1.25) or newer, tmux 3.1+
 (for integration tests; 3.1 is the floor for `split-window -l N%`), and
 optionally [golangci-lint](https://golangci-lint.run/).
 
@@ -47,7 +47,7 @@ mistake in how the command was typed (exit 2) and a plain error for a failure
 Everything that talks to tmux goes through `tmux.Runner`, so it can be driven
 by a recording mock in tests. A Runner may additionally implement
 `tmux.BatchRunner` to issue several commands in one process; callers reach that
-through `tmux.RunEach` / `tmux.RunOutputsTolerant`, which fall back to one call
+through `tmux.RunEach` / `tmux.RunOutputs`, which fall back to one call
 each, so a mock only ever needs `Run`. Note that *embedding* `tmux.Exec` in a
 test double promotes its `RunBatch` — hold it in a named field if the double is
 meant not to batch.

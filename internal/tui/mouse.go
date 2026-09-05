@@ -62,7 +62,7 @@ func (m Model) wheel(msg tea.MouseMsg, delta int) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	if m.focus != h.panel {
-		m.focus = h.panel
+		m = m.setFocus(h.panel)
 		cmd = m.updatePreview()
 	}
 	next, moveCmd := m.setCursor(h.panel, m.cur[h.panel]+delta)
@@ -84,7 +84,7 @@ func (m Model) leftClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	var cmds []tea.Cmd
 	if m.focus != h.panel {
-		m.focus = h.panel
+		m = m.setFocus(h.panel)
 		cmds = append(cmds, m.updatePreview())
 	}
 	if h.row < 0 {
@@ -153,7 +153,7 @@ func (m Model) rightClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	var cmds []tea.Cmd
 	if m.focus != h.panel {
-		m.focus = h.panel
+		m = m.setFocus(h.panel)
 		cmds = append(cmds, m.updatePreview())
 	}
 	if h.row >= 0 {
