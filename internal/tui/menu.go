@@ -144,7 +144,14 @@ func (m Model) openMenuAtSelection() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	g := m.geometry()
-	top, bottom := g.boxes[m.focus].listRows()
+	i := m.panelIndex(m.focus)
+	if i < 0 {
+		// The focused panel isn't shown in this layout (e.g. the compact
+		// picker's two-panel form) — geometry.boxes is indexed by position in
+		// g.panels, not by panel value, and has no entry for it.
+		return m, nil
+	}
+	top, bottom := g.boxes[i].listRows()
 
 	cur := m.cur[m.focus]
 	start, _ := viewport(cur, m.panelLen(m.focus), bottom-top)

@@ -4,6 +4,7 @@ package main
 // bare-name form that resolves to either a running session or a known project.
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -14,6 +15,27 @@ import (
 	"github.com/jskoll/wyrm/internal/state"
 	"github.com/jskoll/wyrm/internal/tmux"
 )
+
+// killForRestart runs Kill as a restart's teardown half, printing a "killed"
+// line on success. A session that isn't running is fine — restart means "end
+// up with a freshly built session", satisfiable either way — but any other
+// failure (a bad session.root, a tmux server/communication problem,
+// kill-session itself failing) is real: the existing session most likely
+// still exists, so building over it anyway and reporting "created" would
+// misrepresent what actually happened. proceed reports whether it's safe to
+// go on to Create.
+func (a *app) killForRestart(cfg *config.Config) (proceed bool, err error) {
+	name, kerr := session.Kill(a.runner, cfg, a.stderr)
+	if kerr == nil {
+		_, _ = fmt.Fprintf(a.stdout, "killed session %s\n", name)
+		return true, nil
+	}
+	if errors.Is(kerr, session.ErrSessionNotRunning) {
+		_, _ = fmt.Fprintf(a.stderr, "wyrm: nothing to stop (%v)\n", kerr)
+		return true, nil
+	}
+	return false, kerr
+}
 
 // varMapFlag collects repeated --var KEY=VALUE flags into a map for template interpolation.
 type varMapFlag map[string]string
@@ -209,19 +231,15 @@ func (a *app) restart(args []string) error {
 		return err
 	}
 
-	// A session that isn't running is not an error here: restart means "end up
-	// with a freshly built session", and that's satisfiable either way.
-	if name, kerr := session.Kill(a.runner, cfg, a.stderr); kerr != nil {
-		_, _ = fmt.Fprintf(a.stderr, "wyrm: nothing to stop (%v)\n", kerr)
-	} else {
-		_, _ = fmt.Fprintf(a.stdout, "killed session %s\n", name)
+	if proceed, kerr := a.killForRestart(cfg); !proceed {
+		return fmt.Errorf("stopping the existing session: %w", kerr)
 	}
 
-	name, sessionID, _, err := session.Create(a.runner, cfg, a.stdout, a.stderr, session.WithHistory(hist))
+	name, sessionID, created, err := session.Create(a.runner, cfg, a.stdout, a.stderr, session.WithHistory(hist))
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(a.stdout, "created session %s\n", name)
+	a.reportCreated(name, created)
 	if *detach {
 		_, _ = fmt.Fprintf(a.stdout, "run `wyrm %s` to attach\n", name)
 		return nil
@@ -288,18 +306,17 @@ func (a *app) restartAll(settings *config.Settings, dryRun, yes bool, vars map[s
 			continue
 		}
 
-		if name, kerr := session.Kill(a.runner, cfg, a.stderr); kerr != nil {
-			_, _ = fmt.Fprintf(a.stderr, "wyrm: nothing to stop (%v)\n", kerr)
-		} else {
-			_, _ = fmt.Fprintf(a.stdout, "killed session %s\n", name)
+		if proceed, kerr := a.killForRestart(cfg); !proceed {
+			_, _ = fmt.Fprintf(a.stderr, "wyrm: warning: skipping session %q: could not stop it: %v\n", s.Name, kerr)
+			continue
 		}
 
-		name, _, _, err := session.Create(a.runner, cfg, a.stdout, a.stderr, session.WithHistory(hist))
+		name, _, created, err := session.Create(a.runner, cfg, a.stdout, a.stderr, session.WithHistory(hist))
 		if err != nil {
 			_, _ = fmt.Fprintf(a.stderr, "wyrm: warning: failed to restart session %s: %v\n", s.Name, err)
 			continue
 		}
-		_, _ = fmt.Fprintf(a.stdout, "created session %s\n", name)
+		a.reportCreated(name, created)
 	}
 	return nil
 }
@@ -427,6 +444,46 @@ func (a *app) killByName(settings *config.Settings, target string, dryRun bool) 
 		opts = a.teardownDryRun()
 	}
 
+	// An exact running session takes precedence over a configured project or
+	// alias — attachByName resolves in the same order. Without this, a
+	// project's alias colliding with an unrelated live session's exact name
+	// made `wyrm kill <name>` destroy the wrong session.
+	id, ok, err := tmux.FindSessionID(a.runner, target)
+	if err != nil {
+		return err
+	}
+	if ok {
+		if project, found := config.FindProject(settings, target); found {
+			if cfg, cerr := project.LoadConfig(); cerr == nil {
+				if name, _, rerr := cfg.Session.Resolve(cfg.Dir()); rerr == nil && name == target {
+					name, kerr := session.Kill(a.runner, cfg, a.stderr, opts...)
+					if kerr != nil {
+						return kerr
+					}
+					if !dryRun {
+						_, _ = fmt.Fprintf(a.stdout, "killed session %s\n", name)
+					}
+					return nil
+				}
+			}
+		}
+		// No config resolves to this exact session — either there is none, or
+		// the match above was only through another project's alias — so
+		// there's no hook to run, just the kill itself.
+		if dryRun {
+			_, _ = fmt.Fprintf(a.stdout, "tmux kill-session -t %s\n", id)
+			return nil
+		}
+		if err := sessions.Kill(a.runner, id); err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(a.stdout, "killed session %s\n", target)
+		return nil
+	}
+
+	// Nothing running by that exact name: fall back to a configured project
+	// or alias, mirroring attachByName/startProject. There is no live session
+	// to misidentify here, so trusting the config match is safe.
 	if project, found := config.FindProject(settings, target); found {
 		if cfg, err := project.LoadConfig(); err == nil {
 			name, kerr := session.Kill(a.runner, cfg, a.stderr, opts...)
@@ -440,23 +497,7 @@ func (a *app) killByName(settings *config.Settings, target string, dryRun bool) 
 		}
 	}
 
-	id, ok, err := tmux.FindSessionID(a.runner, target)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("no running session named %q", target)
-	}
-	// No config, so no hook to run or describe — just the kill itself.
-	if dryRun {
-		_, _ = fmt.Fprintf(a.stdout, "tmux kill-session -t %s\n", id)
-		return nil
-	}
-	if err := sessions.Kill(a.runner, id); err != nil {
-		return err
-	}
-	_, _ = fmt.Fprintf(a.stdout, "killed session %s\n", target)
-	return nil
+	return fmt.Errorf("no running session named %q", target)
 }
 
 // attachByName attaches or switches directly to the exact-named running

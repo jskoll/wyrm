@@ -326,6 +326,23 @@ func TestMenuKeyFollowsFocus(t *testing.T) {
 	}
 }
 
+// TestMenuKeyInCompactModeDoesNotPanic is the regression test for
+// openMenuAtSelection indexing geometry.boxes with the panel enum value
+// instead of its position in the shown panel list. Compact mode (wyrm pick)
+// shows two panels, but panelWindows == 2, so opening the menu with Windows
+// focused indexed past a two-element boxes slice.
+func TestMenuKeyInCompactModeDoesNotPanic(t *testing.T) {
+	m := compactModel()
+	m.focus = panelWindows
+
+	next, _ := m.Update(key("M"))
+	m = next.(Model)
+
+	if m.mode != modeMenu {
+		t.Fatalf("mode = %d, want modeMenu after 'M' with Windows focused in compact mode", m.mode)
+	}
+}
+
 // 'M' opens the menu whether or not the mouse is captured — that is the point.
 func TestMenuKeyWorksWithMouseOff(t *testing.T) {
 	m := mouseModel(t)

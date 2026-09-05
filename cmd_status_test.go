@@ -84,6 +84,29 @@ func TestRunStatusWatchMode(t *testing.T) {
 	}
 }
 
+// TestRunStatusWatchInvalidFormatFails is the regression test for --watch
+// silently discarding every iteration's collection/format error: a typo'd
+// -format used to loop forever printing nothing, with a zero exit code,
+// until interrupted, instead of failing the way it does without -watch.
+func TestRunStatusWatchInvalidFormatFails(t *testing.T) {
+	r := &statusFakeRunner{
+		panes: "$1\x01myproj\x01@1\x011\x01win1\x01%1\x011\x01claude",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	var stdout, stderr bytes.Buffer
+	code := runWith(runOptions{watchCtx: ctx},
+		[]string{"status", "-format", "not-a-real-format", "--watch", "--interval", "10ms"}, &stdout, &stderr, r, func() bool { return false }, nil)
+	if code == 0 {
+		t.Fatalf("exit code = 0, want a nonzero exit for an invalid -format; stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "unknown format") {
+		t.Errorf("stderr = %q, want an unknown-format error", stderr.String())
+	}
+}
+
 // countingStatusRunner records how many capture-pane calls it served, so the
 // scan bound can be asserted on behaviour rather than on a constant.
 type countingStatusRunner struct {

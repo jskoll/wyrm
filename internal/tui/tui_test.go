@@ -113,6 +113,34 @@ func TestSessionsMsgLoadsWindows(t *testing.T) {
 	}
 }
 
+// TestSessionsMsgPreservesSelectionAcrossReorder is the regression test for a
+// periodic refresh silently retargeting the selection: m.cur[panelSessions]
+// is a plain index, so replacing m.sessions outright with a differently
+// ordered list (a new session appearing ahead of the selected one, tmux
+// reordering by activity, etc.) used to leave the same index number pointing
+// at whichever session ended up in that slot, with no input from the user.
+func TestSessionsMsgPreservesSelectionAcrossReorder(t *testing.T) {
+	m := New(nopRunner(), nil)
+	m.sessions = []sessions.Session{
+		{ID: "$1", Name: "alpha"},
+		{ID: "$2", Name: "beta"},
+	}
+	m.cur[panelSessions] = 1 // beta selected
+
+	// A refresh reports a new session ahead of beta, shifting its index from
+	// 1 to 2 with no action from the user.
+	m, _ = update(m, sessionsMsg{sessions: []sessions.Session{
+		{ID: "$3", Name: "new-session"},
+		{ID: "$1", Name: "alpha"},
+		{ID: "$2", Name: "beta"},
+	}})
+
+	e, ok := m.currentSessionEntry()
+	if !ok || e.Name != "beta" {
+		t.Errorf("currentSessionEntry after reorder = %+v, %v, want it still to be beta", e, ok)
+	}
+}
+
 func TestWindowsMsgPicksActiveWindow(t *testing.T) {
 	m := New(nopRunner(), nil)
 	m.sessions = []sessions.Session{{ID: "$1", Name: "alpha"}}

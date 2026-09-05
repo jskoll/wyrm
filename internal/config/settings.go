@@ -392,7 +392,20 @@ func LoadUserDefault() (*Config, error) {
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
-	return Load(path)
+	cfg, err := Load(path)
+	if err != nil {
+		return nil, err
+	}
+	// This override is a template meant to apply wherever `wyrm up` happens to
+	// run, not a project config of its own — so a relative session.root
+	// (".", above all) has to resolve against the invocation directory, not
+	// against ~/.config/wyrm where the file itself lives. Load set cfg.dir to
+	// the latter; this is the one place that knows the two differ for this
+	// particular config.
+	if cwd, err := os.Getwd(); err == nil {
+		cfg.dir = cwd
+	}
+	return cfg, nil
 }
 
 func configDir() (string, error) { return UserConfigDir() }

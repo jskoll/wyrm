@@ -195,6 +195,28 @@ func TestAttachPreSelectsWindowAndPane(t *testing.T) {
 	}
 }
 
+// TestSelectTargetCmdReportsFailure is the regression test for
+// selectTargetCmd discarding the error from selecting a stale window/pane
+// (e.g. killed elsewhere between listing and attaching). It is sequenced
+// directly before tea.Quit, so an error has to reach the model as a message
+// — runProgram prints m.err to stderr after the program exits — rather than
+// being silently swallowed, which used to attach the client without ever
+// telling the user it landed somewhere other than the row they picked.
+func TestSelectTargetCmdReportsFailure(t *testing.T) {
+	r := funcRunner{fn: func(args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "select-window" {
+			return "can't find window", errors.New("exit status 1")
+		}
+		return "", nil
+	}}
+
+	msg := run(selectTargetCmd(r, "@1", "%1"))
+	ae, ok := msg.(actionErrMsg)
+	if !ok || ae.err == nil {
+		t.Fatalf("selectTargetCmd result = %T (%+v), want a non-nil actionErrMsg", msg, msg)
+	}
+}
+
 func TestCycleLayoutAdvances(t *testing.T) {
 	var calls []string
 	r := funcRunner{fn: func(args ...string) (string, error) {

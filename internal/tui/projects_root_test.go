@@ -37,7 +37,9 @@ func TestStartProjectUsesConfigDirNotCwd(t *testing.T) {
 		case "list-sessions":
 			return "", nil
 		case "new-session":
-			return "$1|proj|@1|%1", nil
+			return "$1|@1|%1", nil
+		case "display-message":
+			return "proj", nil
 		}
 		return "", nil
 	}}

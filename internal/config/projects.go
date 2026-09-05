@@ -445,13 +445,33 @@ func projectNameFrom(cfg *Config, path string, shared bool) string {
 		if cfg.Session.Name != "" {
 			return cfg.Session.Name
 		}
-		if !shared {
+		// A shared config's root is safe to derive a display name from only
+		// when it doesn't depend on cfg.Dir() — the shared directory, not any
+		// project. An empty or plain-relative root resolves against it (see
+		// Session.Resolve's "." default), which would name every shared
+		// project sharing that convention after the shared folder — but an
+		// absolute (or ~/$-expanded) root names the project it actually
+		// points at, exactly what Session.Resolve derives when the session
+		// is actually built. Falling back to the shared filename in that
+		// case (as this used to do unconditionally) let a disambiguated
+		// filename like "api-123.wyrm.toml" display and discover a project
+		// as "api-123" while the session it built and searched for was
+		// named "api" — the two never agreeing anywhere.
+		if !shared || rootIndependentOfConfigDir(cfg.Session.Root) {
 			if name, _, err := cfg.Session.Resolve(cfg.Dir()); err == nil {
 				return name
 			}
 		}
 	}
 	return projectNameFallback(path, shared)
+}
+
+// rootIndependentOfConfigDir reports whether root resolves to the same place
+// regardless of the directory it's resolved against — true for an absolute
+// path or one starting with "~" or containing a "$" expansion, false for ""
+// (which defaults to ".") or a bare relative path.
+func rootIndependentOfConfigDir(root string) bool {
+	return root != "" && (filepath.IsAbs(root) || strings.HasPrefix(root, "~") || strings.Contains(root, "$"))
 }
 
 func projectNameFallback(path string, shared bool) string {
