@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-09-05
+
 ### Fixed
 - `wyrm kill <name>` no longer destroys the wrong session when the name is also a configured alias. `killByName` resolved a project or alias before checking for an exact running session, so a project's `aliases` entry colliding with an unrelated live session's exact name killed the aliased project instead of that session — `attachByName` already resolved exact session first, and `kill` now matches it.
 - Creating a session whose name contains `|` (which tmux allows) no longer fails after already creating the session, with no ID left to clean it up: `new-session`'s `-F` format put the name between two IDs in a single `|`-delimited response, so a name containing `|` was misparsed as extra fields. The real name is now queried separately from the IDs.
@@ -789,7 +791,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `wyrm -kill` no longer runs `on_project_exit` when the session isn't
   running.
 
-[Unreleased]: https://github.com/jskoll/wyrm/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/jskoll/wyrm/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/jskoll/wyrm/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/jskoll/wyrm/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/jskoll/wyrm/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/jskoll/wyrm/compare/v1.0.0...v1.1.0
